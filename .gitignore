@@ -1,0 +1,23 @@
+node_modules
+dist
+web/dist
+*.log
+.cache
+.DS_Store
+# The real env config lives at $CORRAL_HOME/environments.json; ignore a stray copy in repo root.
+# environments.example.json IS committed.
+/environments.json
+
+# Working docs (brainstorm outputs, implementation plans, discovery notes) are
+# local-only scaffolding — they are not part of the published tree. Durable
+# decisions are distilled into docs/adr/ instead.
+/docs/plans/
+/docs/discovery/
+/docs/superpowers/
+/docs/backlog.md
+/docs/specs/*
+!/docs/specs/design-spec.md
+
+# Operator-local agent config. worktrees/ can hold full pre-cleanup checkouts and
+# settings.local.json holds machine paths — must never be stageable (git add -A).
+/.claude/

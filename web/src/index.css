@@ -1,0 +1,134 @@
+@import "tailwindcss";
+
+/* Enables `light:` utilities that apply only inside the .light theme scope. */
+@custom-variant light (&:where(.light, .light *));
+
+/* Bridge semantic CSS vars → Tailwind color utilities. `inline` inlines the var
+   reference so overriding --background et al. under .light cascades to utilities. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+}
+
+:root {
+  color-scheme: dark;
+  /* DARK (base) — Plannotator plannotator.css:1-32 */
+  --background: oklch(0.15 0.02 260);
+  --foreground: oklch(0.90 0.01 260);
+  --card: oklch(0.22 0.02 260);
+  --card-foreground: oklch(0.90 0.01 260);
+  --popover: oklch(0.28 0.025 260);
+  --popover-foreground: oklch(0.90 0.01 260);
+  --primary: oklch(0.75 0.18 280);
+  --primary-foreground: oklch(0.15 0.02 260);
+  --muted: oklch(0.26 0.02 260);
+  --muted-foreground: oklch(0.72 0.02 260);
+  --border: oklch(0.35 0.02 260);
+  --input: oklch(0.26 0.02 260);
+  --ring: oklch(0.75 0.18 280);
+  --destructive: oklch(0.65 0.20 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --success: oklch(0.72 0.17 150);
+  --success-foreground: oklch(0.15 0.02 260);
+  --warning: oklch(0.75 0.15 85);
+  --warning-foreground: oklch(0.20 0.02 260);
+}
+
+.light {
+  color-scheme: light;
+  /* LIGHT — Plannotator plannotator.css:34-60 */
+  --background: oklch(0.97 0.005 260);
+  --foreground: oklch(0.18 0.02 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.02 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.02 260);
+  --primary: oklch(0.50 0.25 280);
+  --primary-foreground: oklch(1 0 0);
+  --muted: oklch(0.92 0.01 260);
+  --muted-foreground: oklch(0.40 0.02 260);
+  --border: oklch(0.88 0.01 260);
+  --input: oklch(0.92 0.01 260);
+  --ring: oklch(0.50 0.25 280);
+  --destructive: oklch(0.50 0.25 25);
+  --destructive-foreground: oklch(1 0 0);
+  --success: oklch(0.45 0.20 150);
+  --success-foreground: oklch(1 0 0);
+  --warning: oklch(0.55 0.18 85);
+  --warning-foreground: oklch(0.18 0.02 260);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+/* Native <button> defaults to cursor:default; every button here is interactive (without this override,
+   the mini-buttons read as non-clickable). Disabled buttons keep the default arrow. */
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+body {
+  margin: 0;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "ss01", "ss02", "cv01";
+}
+
+/* 24px grid backdrop for the board canvas — Plannotator theme.css:102-114. */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, oklch(0.32 0.02 260 / 0.5) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(0.32 0.02 260 / 0.5) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.light .bg-grid {
+  background-image:
+    linear-gradient(to right, oklch(0.90 0.01 260 / 0.6) 1px, transparent 1px),
+    linear-gradient(to bottom, oklch(0.90 0.01 260 / 0.6) 1px, transparent 1px);
+}
+
+/* Theme-token scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 9999px;
+}
+
+/* 150ms color transition, enabled only after first paint (.transitions-ready added
+   post-mount) so theme switches animate but the initial load does not flash. */
+.transitions-ready * {
+  transition:
+    color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}

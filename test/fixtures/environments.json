@@ -1,0 +1,8 @@
+{
+  "environments": [
+    { "id": "work-local", "label": "Work (local)", "kind": "local" },
+    { "id": "personal-local", "label": "Personal (local)", "kind": "local", "socket": "~/.config/herdr/sessions/personal/herdr.sock" },
+    { "id": "work-remote", "label": "Work (work-box)", "kind": "remote", "sshHost": "work-box", "socket": "~/.config/herdr/sessions/work/herdr.sock", "herdrBin": "~/.local/bin/herdr" },
+    { "id": "personal-remote", "label": "Personal (personal-box)", "kind": "remote", "sshHost": "personal-box", "socket": "~/.config/herdr/sessions/personal/herdr.sock", "herdrBin": "~/.local/bin/herdr" }
+  ]
+}

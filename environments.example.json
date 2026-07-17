@@ -1,0 +1,9 @@
+{
+  "environments": [
+    { "id": "local", "label": "Local", "kind": "local", "repos": { "corral": "~/code/corral" } },
+    { "id": "work", "label": "Work", "kind": "local", "socket": "~/.config/herdr/sessions/work/herdr.sock", "spawnCommand": "claude-work", "claudeConfigDirs": ["~/.claude-work"], "repos": { "my-app": "~/code/my-app" } },
+    { "id": "personal", "label": "Personal", "kind": "local", "socket": "~/.config/herdr/sessions/personal/herdr.sock", "spawnCommand": "claude-personal", "claudeConfigDirs": ["~/.claude-personal"] },
+    { "id": "local-alt", "label": "Local (other socket)", "kind": "local", "socket": "~/.config/herdr/sessions/alt/herdr.sock" },
+    { "id": "remote", "label": "Remote", "kind": "remote", "sshHost": "my-ssh-host", "socket": "~/.config/herdr/sessions/remote/herdr.sock", "herdrBin": "~/.local/bin/herdr", "repos": { "svc": "/home/me/svc" } }
+  ]
+}

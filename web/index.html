@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      (function () {
+        var m = null;
+        try { m = localStorage.getItem("corral-theme"); } catch (e) { /* storage blocked */ }
+        var dark = true;
+        try { dark = window.matchMedia("(prefers-color-scheme: dark)").matches; } catch (e) { /* matchMedia unavailable */ }
+        if (m === "light" || (m !== "dark" && !dark)) {
+          document.documentElement.classList.add("light");
+        }
+      })();
+    </script>
+    <title>herdr dashboard</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

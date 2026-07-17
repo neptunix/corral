@@ -1,0 +1,10 @@
+{
+  "name": "Corral",
+  "base": "dark",
+  "overrides": {
+    "claude": "#8257e5",
+    "planMode": "#8257e5",
+    "permission": "#8257e5",
+    "promptBorder": "#8257e5"
+  }
+}
