@@ -45,6 +45,11 @@ npm run dev          # Vite (http://127.0.0.1:5173) + API (http://127.0.0.1:8787
 npm run build && npm start   # serves API + built UI on http://127.0.0.1:8787
 ```
 
+That gets you the board, attention feed, and live terminal. **Live Claude metrics
+(model / context % / cost / rate-limit windows) and the optional TUI theme need one more
+per-config-dir step** — see [Claude statusline](#claude-statusline-live-metrics) and
+[Installing the Claude helper files](#installing-the-claude-helper-files-per-config-dir) below.
+
 The server binds `127.0.0.1` only and refuses other hosts. There is no auth — corral trusts
 whoever can reach the loopback interface. On a single-user machine that's just you; on a shared
 or multi-user box, any other local user or process that can reach `127.0.0.1` has the same
@@ -58,13 +63,42 @@ home `~/.corral` is `$CORRAL_HOME`). Loaded and Zod-validated once at startup; t
 server fails fast with a clear message if missing. **Environments are never editable via the
 API** — a runtime-set `sshHost` would turn the server into an SSH relay.
 
+Each entry describes one place corral can see and spawn sessions into:
+
+- `id` / `label` — `id` is the stable, URL-safe key corral routes on (letters, digits, `.`,
+  `_`, `-`); `label` is the human name shown in the UI. Both required.
 - `kind: "local"` — talks to a herdr socket on this machine. With no `socket` it inherits
   the ambient `HERDR_SOCKET_PATH` (launch corral from the right herdr context or set it).
 - `kind: "remote"` — talks to a box over SSH (`sshHost`, `socket`, `herdrBin` required).
   Unreachable environments show "offline" and keep their last-good snapshot.
 - `spawnCommand` — what corral runs to start a new agent session in this environment.
   Defaults to `claude`.
-- `repos` — a name → path map used by spawn to pick the working directory.
+- `claudeConfigDirs` — which `~/.claude*` dirs corral scans on this box for recap and the
+  statusline metrics (local defaults to `~/.claude`; set it for profile-split or remote — see
+  the statusline section).
+- `repos` — the repositories you can spawn sessions into on this environment (details below).
+
+### Repositories & spawning sessions
+
+`repos` maps a short **name → directory**, and the UI's **Spawn** button offers those names.
+It's **per environment** — list a repo under the env you want to launch it in, pointing the name
+at the directory the session should start in:
+
+```json
+{
+  "id": "local", "label": "Local", "kind": "local",
+  "repos": { "corral": "~/code/corral", "api": "~/code/my-api" }
+}
+```
+
+When you spawn, corral opens a fresh herdr workspace/tab **in that directory** and runs the
+environment's `spawnCommand` there — so each path must be a real directory on that
+environment's machine. Path rules follow the shell that `cd`s into them: **local** paths may
+use `~` (`~/code/corral`); **remote** paths must be **absolute** (`/home/me/svc`) — `~` is not
+expanded on the remote shell. A repo you didn't list can't be spawned into by name (corral
+errors *"no path configured for repo … — add it to environments.json `repos`"*); you can still
+spawn into an already-open herdr workspace instead. See `environments.example.json` for
+complete local and remote entries.
 
 ## Multiple Claude accounts
 
@@ -91,44 +125,99 @@ scan. Recap, model, context %, cost, and the account-wide 5h/7d rate-limit windo
 surfaced **per account** — you can see one account approaching its window while the other is
 fresh. The `work` / `personal` entries in `environments.example.json` show the full pattern.
 
-## Claude statusline capture (live metrics)
+## Claude statusline (live metrics)
 
-Recap needs only the herdr integration above. The live metrics (model/ctx/cost/5h/7d) come
-from a small capture script invoked by your Claude statusline.
+Recap needs only the herdr integration above. The live metrics on each card — model,
+context %, cost, and the account-wide 5h/7d rate-limit windows — come from your Claude
+**statusline**.
 
-**Per Claude config dir you want surfaced** (each `~/.claude*` dir, local and remote):
+**How it works.** Claude Code runs a statusline command on every refresh (debounced ~300 ms)
+and pipes it a JSON blob — model, cost, context window, session id — on **stdin**; whatever
+the command prints becomes your statusline. You register that command per config dir in
+`settings.json`:
 
-1. Copy the script and make it executable:
-   ```bash
-   cp scripts/corral-status-capture.sh ~/.claude/corral-status-capture.sh
-   chmod +x ~/.claude/corral-status-capture.sh
-   ```
-2. Add one non-blocking line to that dir's `statusline-command.sh`, after `CONFIG_DIR` is resolved:
-   ```bash
-   printf '%s' "$input" | "$CONFIG_DIR/corral-status-capture.sh" "$CONFIG_DIR" >/dev/null 2>&1 &
-   ```
-3. If the config dir is version-controlled, ignore the output:
-   ```bash
-   echo "corral-status/" >> ~/.claude/.gitignore
-   ```
+```json
+{ "statusLine": { "type": "command", "command": "~/.claude/statusline-command.sh" } }
+```
 
-Notes: requires `jq`; writes `<configDir>/corral-status/<session_id>.json` (read-through,
-never persisted by corral); best-effort and never disturbs the statusline; 5h/7d windows
-appear only for Pro/Max accounts after the first API response.
+corral's `scripts/corral-status-capture.sh` reads that **same** stdin JSON, maps it to corral's
+schema, and writes `<configDir>/corral-status/<session_id>.json` — which corral reads (locally
+or over SSH) and never persists. It hooks in via one non-blocking line that tees stdin to the
+capture script:
 
-## Claude theme sync (optional)
+```bash
+printf '%s' "$input" | "$CONFIG_DIR/corral-status-capture.sh" "$CONFIG_DIR" >/dev/null 2>&1 &
+```
+
+**Which script do you point `command` at?**
+
+- **You already run your own statusline script** — keep it. Add just the inject line above,
+  after your script has read stdin into `$input` and resolved `$CONFIG_DIR` (the config dir,
+  e.g. `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`). Do **not** also install corral's
+  `statusline-command.sh`.
+- **You don't have one** — use corral's ready-made `scripts/statusline-command.sh`. It reads
+  stdin, resolves the config dir, renders a compact `model · dir · ctx% · cost` line, and runs
+  the inject for you — a working statusline *and* corral metrics in a single file.
+
+Requires `jq`. Best-effort: the inject is backgrounded, so it never delays or breaks the
+statusline (Claude cancels a slow statusline mid-run). The 5h/7d windows appear only for
+Pro/Max accounts, after the first API response.
+
+## Claude theme (optional)
 
 corral can live-flip the light/dark **base** of a Claude custom theme from the web theme
-toggle (it writes only the `base` field of `<configDir>/themes/corral.json`; Claude Code
-hot-reloads it, so the TUI follows). It never creates that file — per config dir you want
-synced:
+toggle — it rewrites only the `base` field of `<configDir>/themes/corral.json`, and Claude Code
+hot-reloads it so the TUI follows. It never creates that file, and the toggle syncs **local**
+config dirs only (a remote box keeps whatever base is in its own copy). Once the file is in
+place, set `"theme": "custom:corral"` in that dir's `settings.json` (or run `/theme` and pick
+`corral`). Edit `overrides` in the preset to taste; only `base` is machine-managed.
 
-1. `mkdir -p ~/.claude/themes && cp themes/corral.json ~/.claude/themes/corral.json`
-2. Set `"theme": "custom:corral"` in that dir's `settings.json` (or run `/theme` and pick
-   `corral`).
+## Installing the Claude helper files (per config dir)
 
-Edit `overrides` in the preset to taste; only `base` is machine-managed. The toggle syncs
-local config dirs only.
+The statusline and theme pieces live **per Claude config dir** — every `~/.claude*` dir you
+want surfaced, on every machine. Local and remote are the *same files in the same place*; only
+the copy command differs (`cp` vs `scp` + `ssh`). Into each config dir:
+
+| File | Source in this repo | When you need it |
+|------|---------------------|------------------|
+| `corral-status-capture.sh` | `scripts/corral-status-capture.sh` | always (it writes the metrics file) |
+| `statusline-command.sh` | `scripts/statusline-command.sh` | only if you have **no** statusline script of your own |
+| `themes/corral.json` | `themes/corral.json` | only for the optional theme |
+
+**Local** (default `~/.claude`; repeat for each extra dir such as `~/.claude-work`):
+
+```bash
+D=~/.claude
+cp scripts/corral-status-capture.sh "$D/corral-status-capture.sh"
+cp scripts/statusline-command.sh    "$D/statusline-command.sh"    # skip if you have your own
+chmod +x "$D/corral-status-capture.sh" "$D/statusline-command.sh"
+mkdir -p "$D/themes" && cp themes/corral.json "$D/themes/corral.json"   # optional theme
+echo "corral-status/" >> "$D/.gitignore"    # if the config dir is version-controlled
+```
+
+**Remote** (over SSH — `H` is the environment's `sshHost`, `D` its config dir, e.g.
+`/home/me/.claude`):
+
+```bash
+H=my-ssh-host; D=/home/me/.claude
+scp scripts/corral-status-capture.sh "$H:$D/corral-status-capture.sh"
+scp scripts/statusline-command.sh    "$H:$D/statusline-command.sh"     # skip if it has its own
+ssh "$H" "chmod +x $D/corral-status-capture.sh $D/statusline-command.sh && mkdir -p $D/themes"
+scp themes/corral.json "$H:$D/themes/corral.json"                      # optional theme
+```
+
+Then, in **each** config dir's `settings.json` (edit it on the box where the dir lives), point
+the statusline at the script and — if you copied the theme — select it:
+
+```json
+{
+  "statusLine": { "type": "command", "command": "/absolute/path/to/statusline-command.sh" },
+  "theme": "custom:corral"
+}
+```
+
+The dirs you install into must match each environment's `claudeConfigDirs` in
+`environments.json` — that's exactly where corral looks for the metrics file.
 
 ## Security model
 
