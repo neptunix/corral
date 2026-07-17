@@ -63,13 +63,43 @@ home `~/.corral` is `$CORRAL_HOME`). Loaded and Zod-validated once at startup; t
 server fails fast with a clear message if missing. **Environments are never editable via the
 API** — a runtime-set `sshHost` would turn the server into an SSH relay.
 
+Each entry describes one place corral can see and spawn sessions into:
+
+- `id` / `label` — `id` is the stable, URL-safe key corral routes on (letters, digits, `.`,
+  `_`, `-`); `label` is the human name shown in the UI. Both required.
 - `kind: "local"` — talks to a herdr socket on this machine. With no `socket` it inherits
   the ambient `HERDR_SOCKET_PATH` (launch corral from the right herdr context or set it).
 - `kind: "remote"` — talks to a box over SSH (`sshHost`, `socket`, `herdrBin` required).
   Unreachable environments show "offline" and keep their last-good snapshot.
 - `spawnCommand` — what corral runs to start a new agent session in this environment.
   Defaults to `claude`.
-- `repos` — a name → path map used by spawn to pick the working directory.
+- `claudeConfigDirs` — which `~/.claude*` dirs corral scans on this box for recap and the
+  statusline metrics (local defaults to `~/.claude`; set it for profile-split or remote — see
+  the statusline section).
+- `repos` — the **repositories you can spawn sessions into** on this environment, as a
+  **name → directory** map (details below).
+
+### Repositories & spawning sessions
+
+`repos` is what the UI's **Spawn** button offers. It is **per environment** — list a repo under
+the environment you want to launch it in, mapping a short name to the directory the session
+should start in:
+
+```json
+{
+  "id": "local", "label": "Local", "kind": "local",
+  "repos": { "corral": "~/code/corral", "api": "~/code/my-api" }
+}
+```
+
+When you spawn, corral opens a fresh herdr workspace/tab **in that directory** and runs the
+environment's `spawnCommand` there — so each path must be a real directory on that
+environment's machine. Path rules follow the shell that `cd`s into them: **local** paths may
+use `~` (`~/code/corral`); **remote** paths must be **absolute** (`/home/me/svc`) — `~` is not
+expanded on the remote shell. A repo you didn't list can't be spawned into by name (corral
+errors *"no path configured for repo … — add it to environments.json `repos`"*); you can still
+spawn into an already-open herdr workspace instead. See `environments.example.json` for
+complete local and remote entries.
 
 ## Multiple Claude accounts
 
