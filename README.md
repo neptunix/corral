@@ -76,14 +76,13 @@ Each entry describes one place corral can see and spawn sessions into:
 - `claudeConfigDirs` — which `~/.claude*` dirs corral scans on this box for recap and the
   statusline metrics (local defaults to `~/.claude`; set it for profile-split or remote — see
   the statusline section).
-- `repos` — the **repositories you can spawn sessions into** on this environment, as a
-  **name → directory** map (details below).
+- `repos` — the repositories you can spawn sessions into on this environment (details below).
 
 ### Repositories & spawning sessions
 
-`repos` is what the UI's **Spawn** button offers. It is **per environment** — list a repo under
-the environment you want to launch it in, mapping a short name to the directory the session
-should start in:
+`repos` maps a short **name → directory**, and the UI's **Spawn** button offers those names.
+It's **per environment** — list a repo under the env you want to launch it in, pointing the name
+at the directory the session should start in:
 
 ```json
 {
@@ -176,9 +175,8 @@ place, set `"theme": "custom:corral"` in that dir's `settings.json` (or run `/th
 ## Installing the Claude helper files (per config dir)
 
 The statusline and theme pieces live **per Claude config dir** — every `~/.claude*` dir you
-want surfaced, on every machine (each `local` and `remote` environment's `claudeConfigDirs`).
-Local and remote are the *same files in the same place*; only the copy command differs (`cp`
-vs `scp` + `ssh`). Into each config dir:
+want surfaced, on every machine. Local and remote are the *same files in the same place*; only
+the copy command differs (`cp` vs `scp` + `ssh`). Into each config dir:
 
 | File | Source in this repo | When you need it |
 |------|---------------------|------------------|
