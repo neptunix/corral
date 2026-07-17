@@ -86,7 +86,7 @@ export function createPoller(opts: {
       const prev = perEnv.get(env.id) ?? [];
       const curr = await list(env);
       perEnv.set(env.id, curr);
-      envStates[env.id] = { reachable: true, kind: env.kind };
+      envStates[env.id] = { reachable: true, kind: env.kind, label: env.label };
       if (attention !== undefined) {
         const now = Date.now();
         const { events, working: nextWorking, clearedKeys } = detectTransitions(prev, curr, working, now, minWorkMs);
@@ -98,7 +98,7 @@ export function createPoller(opts: {
         }
       }
     } catch (err) {
-      envStates[env.id] = { reachable: false, error: err instanceof Error ? err.message : String(err), kind: env.kind };
+      envStates[env.id] = { reachable: false, error: err instanceof Error ? err.message : String(err), kind: env.kind, label: env.label };
     }
     rebuild();
     for (const cb of subs) cb(snapshot);

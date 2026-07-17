@@ -12,6 +12,7 @@ import { UnassignedView } from "./components/UnassignedView";
 import { UsageFooter } from "./components/UsageFooter";
 import { api } from "./lib/api";
 import { attentionCountsByBoard, unassignedAttentionCount } from "./lib/attention";
+import { envLabel } from "./lib/env";
 import { applyOptimisticState, type OptimisticState } from "./lib/optimistic";
 import { useEventSource } from "./useEventSource";
 
@@ -213,6 +214,7 @@ export function App(): JSX.Element {
             <UnassignedView
               sessions={globalState?.unassigned ?? []}
               boards={boards}
+              envs={globalState?.envs ?? {}}
               onOpen={openSession}
               onCreateTask={(bid, title, session, name) => { void handleCreateTask(bid, title, session, name); }}
               onAssignTask={(bid, tid, session) => { void handleAssignTask(bid, tid, session); }}
@@ -261,6 +263,7 @@ export function App(): JSX.Element {
           <AttentionFeed
             attention={attention}
             boards={boards}
+            envs={globalState?.envs ?? {}}
             activeBoardId={activeBoardId}
             onOpen={openSession}
           />
@@ -281,6 +284,7 @@ export function App(): JSX.Element {
         <SessionModal
           key={`${session.env}:${session.paneId}`}
           env={session.env}
+          envLabel={envLabel(globalState?.envs ?? {}, session.env)}
           paneId={session.paneId}
           awaitAgent={session.awaitAgent}
           title={session.title}
