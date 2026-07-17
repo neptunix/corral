@@ -8,7 +8,7 @@ import prettier from "eslint-config-prettier";
 import globals from "globals";
 
 export default tseslint.config(
-  { ignores: ["dist", "web/dist", "node_modules", "**/*.config.js", "**/*.config.ts", ".claude/"] },
+  { ignores: ["dist", "web/dist", "node_modules", "scripts", "**/*.config.js", "**/*.config.ts", ".claude/"] },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,

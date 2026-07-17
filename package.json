@@ -18,7 +18,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "postinstall": "node scripts/fix-node-pty-exec-bit.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
