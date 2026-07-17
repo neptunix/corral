@@ -1,5 +1,5 @@
 import type { Board } from "@shared/board-schema";
-import type { SessionRow } from "@shared/schema";
+import type { EnvState, SessionRow } from "@shared/schema";
 import type { JSX } from "react";
 import { useEffect, useState } from "react";
 
@@ -7,6 +7,7 @@ import { AssignToTaskModal } from "./AssignToTaskModal";
 import { CreateTaskModal } from "./CreateTaskModal";
 import { SessionCard } from "./SessionCard";
 import { api } from "../lib/api";
+import { envLabel } from "../lib/env";
 import { toSnapshotPreview } from "../lib/preview";
 
 const STATUS_COLOR: Record<string, string> = {
@@ -20,12 +21,13 @@ const PREVIEW_REFRESH_MS = 5000;
 
 interface CardProps {
   readonly session: SessionRow;
+  readonly envLabelText: string;
   readonly onOpen: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly onCreate: (session: SessionRow) => void;
   readonly onAssign: (session: SessionRow) => void;
 }
 
-function UnassignedCard({ session, onOpen, onCreate, onAssign }: CardProps): JSX.Element {
+function UnassignedCard({ session, envLabelText, onOpen, onCreate, onAssign }: CardProps): JSX.Element {
   const { env, paneId } = session;
   // The card's display name (herdr tab label); "" when unnamed so the modal header falls back to paneId.
   const label = session.tab !== "?" ? session.tab : "";
@@ -65,7 +67,7 @@ function UnassignedCard({ session, onOpen, onCreate, onAssign }: CardProps): JSX
       onOpen={() => { onOpen(env, paneId, false, label); }}
       indicator={<span className={STATUS_COLOR[session.status] ?? "text-slate-400 light:text-slate-500"} aria-hidden>●</span>}
       title={displayTitle}
-      subtitle={`${session.workspace} / ${session.tab} · ${env}`}
+      subtitle={`${session.workspace} / ${session.tab} · ${envLabelText}`}
       meta={((): string => {
         const sl = session.statusline;
         if (sl === null) return "";
@@ -84,6 +86,7 @@ function UnassignedCard({ session, onOpen, onCreate, onAssign }: CardProps): JSX
 interface Props {
   readonly sessions: readonly SessionRow[];
   readonly boards: readonly Board[];
+  readonly envs: Readonly<Record<string, EnvState>>;
   readonly onOpen: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly onCreateTask: (boardId: string, title: string, session: SessionRow, sessionName: string | null) => void;
   readonly onAssignTask: (boardId: string, taskId: string, session: SessionRow) => void;
@@ -92,7 +95,7 @@ interface Props {
 // Global list of every session bound to no task. Same SessionCard as the attention panel (shared look),
 // with a live mini-terminal snapshot: each card opens the live terminal on click, previews the pane's
 // last lines, and offers "＋ Create task" (fires to the chosen board).
-export function UnassignedView({ sessions, boards, onOpen, onCreateTask, onAssignTask }: Props): JSX.Element {
+export function UnassignedView({ sessions, boards, envs, onOpen, onCreateTask, onAssignTask }: Props): JSX.Element {
   const [creating, setCreating] = useState<SessionRow | null>(null);
   const [assigning, setAssigning] = useState<SessionRow | null>(null);
   return (
@@ -104,6 +107,7 @@ export function UnassignedView({ sessions, boards, onOpen, onCreateTask, onAssig
           <UnassignedCard
             key={`${s.env}:${s.paneId}`}
             session={s}
+            envLabelText={envLabel(envs, s.env)}
             onOpen={onOpen}
             onCreate={(session) => { setCreating(session); }}
             onAssign={(session) => { setAssigning(session); }}
@@ -122,6 +126,7 @@ export function UnassignedView({ sessions, boards, onOpen, onCreateTask, onAssig
         <AssignToTaskModal
           boards={boards}
           session={assigning}
+          envs={envs}
           onConfirm={(bid, tid) => { onAssignTask(bid, tid, assigning); setAssigning(null); }}
           onClose={() => { setAssigning(null); }}
         />

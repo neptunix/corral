@@ -25,6 +25,8 @@ const TERM_THEME = {
 
 interface Props {
   readonly env: string;
+  // Operator-facing display name for `env`; routing still uses `env`. Falls back to the id upstream.
+  readonly envLabel: string;
   readonly paneId: string;
   readonly awaitAgent?: boolean;
   // Bound task's title, shown as the header's primary label; "" (unassigned opens) falls back to paneId.
@@ -69,7 +71,7 @@ function MetricChips({ sl }: { readonly sl: StatuslineData }): JSX.Element {
 }
 
 export function SessionModal({
-  env, paneId, awaitAgent = false, title = "", recap = null, statusline = null,
+  env, envLabel, paneId, awaitAgent = false, title = "", recap = null, statusline = null,
   canAttachFiles = false, onClose,
 }: Props): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -336,7 +338,7 @@ export function SessionModal({
       >
         <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
           <span className="text-foreground text-sm font-semibold">{title !== "" ? title : paneId}</span>
-          <span className="text-xs text-muted-foreground/70">{title !== "" ? `${paneId} · ${env}` : env}</span>
+          <span className="text-xs text-muted-foreground/70">{title !== "" ? `${paneId} · ${envLabel}` : envLabel}</span>
           {starting && (
             <span className="text-xs text-warning">· starting session…</span>
           )}
@@ -354,15 +356,17 @@ export function SessionModal({
           >✕</button>
         </div>
         {(recap !== null && recap !== "") || statusline !== null ? (
-          <div className="flex items-start gap-2 px-4 py-1.5 border-b border-border shrink-0 text-[11px]">
+          <div className="flex flex-col gap-0.5 px-4 py-1.5 border-b border-border shrink-0 text-[11px]">
             {statusline !== null && (
-              <span className={`shrink-0 font-mono tabular-nums text-muted-foreground ${isStale(statusline.captured_at) ? "opacity-50" : ""}`}>
+              <span className={`font-mono tabular-nums text-muted-foreground ${isStale(statusline.captured_at) ? "opacity-50" : ""}`}>
                 <MetricChips sl={statusline} />
               </span>
             )}
             {recap !== null && recap !== "" && (
-              <span className="min-w-0 flex-1 truncate text-muted-foreground/80" title={recap}>
-                {statusline !== null ? "· " : ""}{recap}
+              // Own line, always below the metric chips (never inline with the model) — a long recap
+              // then gets the full width to truncate against instead of competing for the model's row.
+              <span className="truncate text-muted-foreground/80" title={recap}>
+                {recap}
               </span>
             )}
           </div>

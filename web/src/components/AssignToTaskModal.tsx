@@ -1,12 +1,15 @@
 import type { Board } from "@shared/board-schema";
 import { closedColumnIds } from "@shared/board-schema";
-import type { SessionRow } from "@shared/schema";
+import type { EnvState, SessionRow } from "@shared/schema";
 import type { JSX } from "react";
 import { useState } from "react";
+
+import { envLabel } from "../lib/env";
 
 interface Props {
   readonly boards: readonly Board[];
   readonly session: SessionRow;
+  readonly envs: Readonly<Record<string, EnvState>>;
   readonly onConfirm: (boardId: string, taskId: string) => void;
   readonly onClose: () => void;
 }
@@ -14,7 +17,7 @@ interface Props {
 // Bind an existing (live, unassigned) session to an existing task — the "assign to task" affordance on
 // an Unassigned card. Board list carries its tasks (from api.boards.list), so the task picker needs no
 // extra fetch. A card can already hold sessions; attach is idempotent and appends, giving 0..n per card.
-export function AssignToTaskModal({ boards, session, onConfirm, onClose }: Props): JSX.Element {
+export function AssignToTaskModal({ boards, session, envs, onConfirm, onClose }: Props): JSX.Element {
   const [boardId, setBoardId] = useState(boards[0]?.id ?? "");
   const board = boards.find((b) => b.id === boardId) ?? boards[0];
   const closedIds = closedColumnIds(board?.columns ?? []);
@@ -36,7 +39,7 @@ export function AssignToTaskModal({ boards, session, onConfirm, onClose }: Props
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-card border border-border rounded-lg p-6 w-96" onClick={(e) => { e.stopPropagation(); }}>
         <h2 className="text-foreground font-semibold mb-1">Assign session to task</h2>
-        <p className="text-xs text-muted-foreground mb-4 truncate">{label} · {session.env}</p>
+        <p className="text-xs text-muted-foreground mb-4 truncate">{label} · {envLabel(envs, session.env)}</p>
         <label className="block text-xs text-muted-foreground mb-1">Board</label>
         <select
           className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-3"

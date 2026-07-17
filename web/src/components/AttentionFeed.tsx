@@ -1,9 +1,10 @@
 import type { Board } from "@shared/board-schema";
-import type { AttentionMap } from "@shared/schema";
+import type { AttentionMap, EnvState } from "@shared/schema";
 import { useState, type JSX } from "react";
 
 import { SessionCard } from "./SessionCard";
 import { boardAttention } from "../lib/attention";
+import { envLabel } from "../lib/env";
 import { parseKey } from "../lib/protocol";
 
 function formatAge(epochMs: number): string {
@@ -17,6 +18,7 @@ function formatAge(epochMs: number): string {
 interface Props {
   readonly attention: AttentionMap;
   readonly boards: readonly Board[];
+  readonly envs: Readonly<Record<string, EnvState>>;
   readonly activeBoardId: string | null;
   readonly onOpen: (env: string, paneId: string) => void;
 }
@@ -24,7 +26,7 @@ interface Props {
 // Attention feed, scoped to the active board (design 2026-07-10): only sessions bound to a task on
 // this board. Unassigned-attention items (bound to no board) surface via the "Unassigned sessions"
 // switcher badge + the Unassigned view instead — they never appear here.
-export function AttentionFeed({ attention, boards, activeBoardId, onOpen }: Props): JSX.Element {
+export function AttentionFeed({ attention, boards, envs, activeBoardId, onOpen }: Props): JSX.Element {
   const [collapsed, setCollapsed] = useState(false);
   const entries = activeBoardId !== null ? boardAttention(attention, boards, activeBoardId) : [];
   const count = entries.length;
@@ -76,7 +78,7 @@ export function AttentionFeed({ attention, boards, activeBoardId, onOpen }: Prop
                 onOpen={() => { onOpen(env, paneId); }}
                 indicator={<span className={blocked ? "text-destructive" : "text-success"} aria-hidden>{blocked ? "⊘" : "✓"}</span>}
                 title={record.sessionName ?? paneId}
-                subtitle={`${blocked ? "blocked" : "finished"} · ${env}`}
+                subtitle={`${blocked ? "blocked" : "finished"} · ${envLabel(envs, env)}`}
                 age={formatAge(record.since)}
                 preview={{ text: record.lastLines, captured: record.captured }}
               />

@@ -6,6 +6,10 @@ export const EnvStateSchema = z.object({
   // Static env kind (from trusted config). Optional on the wire so legacy/partial payloads and existing
   // fixtures stay valid; the poller always populates it. The web uses it to offer file-drop on local only.
   kind: z.enum(["local", "remote"]).optional(),
+  // Operator-facing display name from the trusted env config (environments.ts `label`). Optional on the
+  // wire like `kind` so legacy/partial payloads and fixtures stay valid; the poller always populates it.
+  // The web shows it in place of the raw env id (routing still keys on the id).
+  label: z.string().optional(),
 });
 
 export const RecapStatusSchema = z.enum(["ok", "no-session-ref", "not-found", "no-summary", "read-error"]);

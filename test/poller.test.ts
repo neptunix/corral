@@ -19,7 +19,7 @@ describe("createPoller", () => {
     await p.pollOnce();
     const snap = p.getSnapshot();
     expect(snap.sessions.map((s) => s.paneId).sort()).toEqual(["a-1", "b-1"]);
-    expect(snap.envs.a).toEqual({ reachable: true, kind: "local" });
+    expect(snap.envs.a).toEqual({ reachable: true, kind: "local", label: "A" });
   });
 
   it("reports env kind in the snapshot (local and remote)", async () => {
