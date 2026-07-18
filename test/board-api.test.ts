@@ -795,6 +795,60 @@ describe("POST resume", () => {
     expect(storage.getBoard("t")?.tasks[0]?.sessions[0]?.paneId).toBe("w1:p9");
   });
 
+  it("resumes in the transcript's cwd, not the stored cwdSnapshot", async () => {
+    // `claude --resume` is cwd-scoped: it must launch where the session actually ran (per its
+    // transcript), not where the herdr pane happened to sit at bind time. seedTaskWithLink stores
+    // cwdSnapshot "/c"; the transcript resolver reports the real dir, which must win.
+    let seen: unknown;
+    const storage = createStorage(tmpDir);
+    const app = createApi({
+      poller, envs: ENVIRONMENTS, storage,
+      sessionCwd: () => Promise.resolve("/real/project/dir"),
+      spawn: (o) => {
+        seen = o;
+        return Promise.resolve({ paneId: "w1:p9", tabId: "w1:t9", workspaceId: "w1", workspaceLabel: "c", tabLabel: "x-a", cwdSnapshot: "/real/project/dir", idempotent: false });
+      },
+    });
+    await seedTaskWithLink(app, storage);
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/resume", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect((seen as { cwd?: string }).cwd).toBe("/real/project/dir");
+  });
+
+  it("calls sessionCwd with the link's sessionId and the resolved env", async () => {
+    // Pins the upstream half of the resume→transcript wiring: readSessionCwd needs the session's
+    // UUID (not the paneId) and the right env to locate the transcript. A stub that ignored its args
+    // would leave a wrong-identifier refactor green.
+    let seen: { envId: string; sid: string } | null = null;
+    const storage = createStorage(tmpDir);
+    const app = createApi({
+      poller, envs: ENVIRONMENTS, storage,
+      sessionCwd: (env, sid) => { seen = { envId: env.id, sid }; return Promise.resolve("/real/dir"); },
+      spawn: () => Promise.resolve({ paneId: "w1:p9", tabId: "w1:t9", workspaceId: "w1", workspaceLabel: "c", tabLabel: "x-a", cwdSnapshot: "/real/dir", idempotent: false }),
+    });
+    await seedTaskWithLink(app, storage);
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/resume", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(seen).toEqual({ envId: "work-local", sid: uuid });
+  });
+
+  it("falls back to the stored cwdSnapshot when the transcript cwd is unavailable", async () => {
+    let seen: unknown;
+    const storage = createStorage(tmpDir);
+    const app = createApi({
+      poller, envs: ENVIRONMENTS, storage,
+      sessionCwd: () => Promise.resolve(null),
+      spawn: (o) => {
+        seen = o;
+        return Promise.resolve({ paneId: "w1:p9", tabId: "w1:t9", workspaceId: "w1", workspaceLabel: "c", tabLabel: "x-a", cwdSnapshot: "/c", idempotent: false });
+      },
+    });
+    await seedTaskWithLink(app, storage);
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/resume", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect((seen as { cwd?: string }).cwd).toBe("/c");
+  });
+
   it("400s when the link has no sessionId", async () => {
     const storage = createStorage(tmpDir);
     const app = createApi({

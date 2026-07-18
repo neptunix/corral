@@ -7,7 +7,7 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { RECAP_CONTENT_MAX, RECAP_TAIL_BYTES } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import type { ExecFn } from "../server/herdr.ts";
-import { findTranscript, lastRecord, readLastActivity, readRecap, readTail } from "../server/transcript.ts";
+import { findTranscript, lastRecord, readLastActivity, readRecap, readSessionCwd, readTail } from "../server/transcript.ts";
 
 const VALID_UUID = "a13ad559-8e59-4b98-b420-2746ef0b94d8";
 
@@ -318,5 +318,54 @@ describe("readLastActivity", () => {
   it("returns null when no transcript exists", async () => {
     const { env } = writeTranscriptFixture([]);
     expect(await readLastActivity(env, "00000000-0000-0000-0000-000000000000")).toBeNull();
+  });
+});
+
+// ---- readSessionCwd ----
+// The authoritative cwd for `claude --resume <uuid>` is the one recorded in the session's own
+// transcript — NOT the herdr pane cwd corral snapshotted at bind time (they diverge when the pane
+// shell and the launched `claude` sat in different directories). See the resume-cwd regression.
+
+describe("readSessionCwd", () => {
+  it("returns the cwd recorded in the transcript", async () => {
+    const { env, sessionId } = writeTranscriptFixture([
+      { type: "user", cwd: "/Users/x/Developer/proj", timestamp: "2026-07-11T09:00:00.000Z" },
+      { type: "assistant", cwd: "/Users/x/Developer/proj", timestamp: "2026-07-11T10:00:00.000Z" },
+    ]);
+    expect(await readSessionCwd(env, sessionId)).toBe("/Users/x/Developer/proj");
+  });
+
+  it("returns null when no transcript exists", async () => {
+    const { env } = writeTranscriptFixture([]);
+    expect(await readSessionCwd(env, "00000000-0000-0000-0000-000000000000")).toBeNull();
+  });
+
+  it("returns null when transcript records carry no cwd", async () => {
+    const { env, sessionId } = writeTranscriptFixture([{ type: "system", subtype: "init" }]);
+    expect(await readSessionCwd(env, sessionId)).toBeNull();
+  });
+
+  it("returns null when the transcript read fails (remote read rejects)", async () => {
+    // findTranscript succeeds (the `ls` resolves) but the tail read throws. readSessionCwd must
+    // swallow it and return null — the resume endpoint awaits this OUTSIDE its try/catch, so a throw
+    // here would 500 instead of falling back to cwdSnapshot.
+    const found = `/remote/.claude/projects/d/${VALID_UUID}.jsonl`;
+    const exec: ExecFn = vi.fn((_file: string, args: readonly string[]) => {
+      const sshCmd = args[args.length - 1] ?? "";
+      return sshCmd.includes("tail -c")
+        ? Promise.reject(new Error("ssh read failed"))
+        : Promise.resolve({ stdout: found + "\n", stderr: "" });
+    });
+    expect(await readSessionCwd(makeRemoteEnv(["/remote/.claude"]), VALID_UUID, exec)).toBeNull();
+  });
+
+  it("skips a record whose cwd is empty and falls back to an earlier valid cwd", async () => {
+    // Guards the `r.cwd !== ""` predicate: without it the empty-cwd last record would be returned as
+    // "", which is non-null and so bypasses the endpoint's `?? cwdSnapshot` fallback.
+    const { env, sessionId } = writeTranscriptFixture([
+      { type: "user", cwd: "/real/dir" },
+      { type: "assistant", cwd: "" },
+    ]);
+    expect(await readSessionCwd(env, sessionId)).toBe("/real/dir");
   });
 });

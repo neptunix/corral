@@ -26,7 +26,7 @@ import { sanitizeSlug } from "./spawn.ts";
 import type { SpawnOpts, SpawnResult } from "./spawn.ts";
 import { aggregateAccounts } from "./statusline.ts";
 import type { Storage } from "./storage.ts";
-import { readLastActivity } from "./transcript.ts";
+import { readLastActivity, readSessionCwd } from "./transcript.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { writeUploadFile } from "./uploads.ts";
 import { PANE_RE } from "./ws-attach-guard.ts";
@@ -206,6 +206,7 @@ export function createApi(opts: {
   spawn?: SpawnFn;
   listWorkspaces?: (env: HerdrEnv) => Promise<{ workspace_id: string; label: string }[]>;
   lastActivity?: (env: HerdrEnv, sessionId: string) => Promise<number | null>;
+  sessionCwd?: (env: HerdrEnv, sessionId: string) => Promise<string | null>;
   closeTab?: (env: HerdrEnv, tabId: string) => Promise<void>;
   spawnTimeoutMs?: number; // injectable so the timeout-cleanup path is testable without a 60s wait
   allowedOrigins?: readonly string[]; // Origin allowlist for the file-upload route (default WS_ALLOWED_ORIGINS)
@@ -214,6 +215,7 @@ export function createApi(opts: {
   const read = opts.read ?? readPane;
   const listWs = opts.listWorkspaces ?? listWorkspaces;
   const lastActivity = opts.lastActivity ?? readLastActivity;
+  const sessionCwd = opts.sessionCwd ?? readSessionCwd;
   const closeTab = opts.closeTab ?? tabClose;
   const spawnTimeoutMs = opts.spawnTimeoutMs ?? SPAWN_TIMEOUT_MS;
   const allowedOrigins = opts.allowedOrigins ?? WS_ALLOWED_ORIGINS;
@@ -766,10 +768,15 @@ export function createApi(opts: {
       return c.json({ error: { code: "validation", message: "bad sessionId" } }, 400);
     }
     const repoPath = task.repo !== null && Object.hasOwn(env.repos, task.repo) ? (env.repos[task.repo] ?? null) : null;
+    // `claude --resume` is cwd-scoped: launch where the session actually ran, read from its own
+    // transcript. cwdSnapshot (the herdr pane cwd captured at bind time) is only a fallback — it can
+    // diverge from the session's real dir (e.g. an adopted session whose pane shell sat at $HOME),
+    // and resuming from the wrong dir both lands Claude there AND fails to find the transcript.
+    const resumeCwd = (await sessionCwd(env, link.sessionId)) ?? link.cwdSnapshot;
     let result: SpawnResult;
     try {
       result = await opts.spawn({
-        env, taskSlug: sanitizeSlug(task.title), cwd: link.cwdSnapshot, repo: task.repo,
+        env, taskSlug: sanitizeSlug(task.title), cwd: resumeCwd, repo: task.repo,
         assignedPaneIds: new Set(),
         spawnCommand: env.spawnCommand,
         targetWorkspaceId: link.workspaceId, repoPath,
