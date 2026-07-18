@@ -34,4 +34,15 @@ Tests are Vitest, `test/<name>.test.ts`.
   `$CORRAL_HOME/environments.json`) — Zod-validated, loaded once. NEVER add/edit envs via the API (SSH-relay risk).
 - `poller.ts` orchestrates; scheduling is in `scheduler.ts`.
 
+## Public repo — keep PRs, issues, and commits clean
+This repo is public. Outward-facing text (PR titles/bodies, issue text, commit messages, code
+comments) must carry NO local/private data — scrub before publishing:
+- No absolute home paths — use repo-relative paths or a `~/…` / `<CORRAL_HOME>` placeholder, never
+  `/Users/<name>/…` or `/home/<name>/…`.
+- No real hostnames, SSH targets, IPs, tokens, emails, or other personal identifiers.
+- No private env / board / repo names pulled from runtime config (`environments.json`,
+  `$CORRAL_HOME/boards/`) — redact to `<env>` / `<board>` / `<repo>`.
+- Bug repros use placeholder ids (`w1:p1`, `<uuid>`, `/repo/path`), never a real session or
+  transcript dump.
+
 Full design: `docs/specs/design-spec.md`.
