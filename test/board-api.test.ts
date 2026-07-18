@@ -815,6 +815,23 @@ describe("POST resume", () => {
     expect((seen as { cwd?: string }).cwd).toBe("/real/project/dir");
   });
 
+  it("calls sessionCwd with the link's sessionId and the resolved env", async () => {
+    // Pins the upstream half of the resume→transcript wiring: readSessionCwd needs the session's
+    // UUID (not the paneId) and the right env to locate the transcript. A stub that ignored its args
+    // would leave a wrong-identifier refactor green.
+    let seen: { envId: string; sid: string } | null = null;
+    const storage = createStorage(tmpDir);
+    const app = createApi({
+      poller, envs: ENVIRONMENTS, storage,
+      sessionCwd: (env, sid) => { seen = { envId: env.id, sid }; return Promise.resolve("/real/dir"); },
+      spawn: () => Promise.resolve({ paneId: "w1:p9", tabId: "w1:t9", workspaceId: "w1", workspaceLabel: "c", tabLabel: "x-a", cwdSnapshot: "/real/dir", idempotent: false }),
+    });
+    await seedTaskWithLink(app, storage);
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/resume", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(seen).toEqual({ envId: "work-local", sid: uuid });
+  });
+
   it("falls back to the stored cwdSnapshot when the transcript cwd is unavailable", async () => {
     let seen: unknown;
     const storage = createStorage(tmpDir);

@@ -344,4 +344,28 @@ describe("readSessionCwd", () => {
     const { env, sessionId } = writeTranscriptFixture([{ type: "system", subtype: "init" }]);
     expect(await readSessionCwd(env, sessionId)).toBeNull();
   });
+
+  it("returns null when the transcript read fails (remote read rejects)", async () => {
+    // findTranscript succeeds (the `ls` resolves) but the tail read throws. readSessionCwd must
+    // swallow it and return null — the resume endpoint awaits this OUTSIDE its try/catch, so a throw
+    // here would 500 instead of falling back to cwdSnapshot.
+    const found = `/remote/.claude/projects/d/${VALID_UUID}.jsonl`;
+    const exec: ExecFn = vi.fn((_file: string, args: readonly string[]) => {
+      const sshCmd = args[args.length - 1] ?? "";
+      return sshCmd.includes("tail -c")
+        ? Promise.reject(new Error("ssh read failed"))
+        : Promise.resolve({ stdout: found + "\n", stderr: "" });
+    });
+    expect(await readSessionCwd(makeRemoteEnv(["/remote/.claude"]), VALID_UUID, exec)).toBeNull();
+  });
+
+  it("skips a record whose cwd is empty and falls back to an earlier valid cwd", async () => {
+    // Guards the `r.cwd !== ""` predicate: without it the empty-cwd last record would be returned as
+    // "", which is non-null and so bypasses the endpoint's `?? cwdSnapshot` fallback.
+    const { env, sessionId } = writeTranscriptFixture([
+      { type: "user", cwd: "/real/dir" },
+      { type: "assistant", cwd: "" },
+    ]);
+    expect(await readSessionCwd(env, sessionId)).toBe("/real/dir");
+  });
 });
