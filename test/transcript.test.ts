@@ -7,7 +7,7 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { RECAP_CONTENT_MAX, RECAP_TAIL_BYTES } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import type { ExecFn } from "../server/herdr.ts";
-import { findTranscript, lastRecord, readLastActivity, readRecap, readTail } from "../server/transcript.ts";
+import { findTranscript, lastRecord, readLastActivity, readRecap, readSessionCwd, readTail } from "../server/transcript.ts";
 
 const VALID_UUID = "a13ad559-8e59-4b98-b420-2746ef0b94d8";
 
@@ -318,5 +318,30 @@ describe("readLastActivity", () => {
   it("returns null when no transcript exists", async () => {
     const { env } = writeTranscriptFixture([]);
     expect(await readLastActivity(env, "00000000-0000-0000-0000-000000000000")).toBeNull();
+  });
+});
+
+// ---- readSessionCwd ----
+// The authoritative cwd for `claude --resume <uuid>` is the one recorded in the session's own
+// transcript — NOT the herdr pane cwd corral snapshotted at bind time (they diverge when the pane
+// shell and the launched `claude` sat in different directories). See the resume-cwd regression.
+
+describe("readSessionCwd", () => {
+  it("returns the cwd recorded in the transcript", async () => {
+    const { env, sessionId } = writeTranscriptFixture([
+      { type: "user", cwd: "/Users/x/Developer/proj", timestamp: "2026-07-11T09:00:00.000Z" },
+      { type: "assistant", cwd: "/Users/x/Developer/proj", timestamp: "2026-07-11T10:00:00.000Z" },
+    ]);
+    expect(await readSessionCwd(env, sessionId)).toBe("/Users/x/Developer/proj");
+  });
+
+  it("returns null when no transcript exists", async () => {
+    const { env } = writeTranscriptFixture([]);
+    expect(await readSessionCwd(env, "00000000-0000-0000-0000-000000000000")).toBeNull();
+  });
+
+  it("returns null when transcript records carry no cwd", async () => {
+    const { env, sessionId } = writeTranscriptFixture([{ type: "system", subtype: "init" }]);
+    expect(await readSessionCwd(env, sessionId)).toBeNull();
   });
 });

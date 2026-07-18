@@ -795,6 +795,43 @@ describe("POST resume", () => {
     expect(storage.getBoard("t")?.tasks[0]?.sessions[0]?.paneId).toBe("w1:p9");
   });
 
+  it("resumes in the transcript's cwd, not the stored cwdSnapshot", async () => {
+    // `claude --resume` is cwd-scoped: it must launch where the session actually ran (per its
+    // transcript), not where the herdr pane happened to sit at bind time. seedTaskWithLink stores
+    // cwdSnapshot "/c"; the transcript resolver reports the real dir, which must win.
+    let seen: unknown;
+    const storage = createStorage(tmpDir);
+    const app = createApi({
+      poller, envs: ENVIRONMENTS, storage,
+      sessionCwd: () => Promise.resolve("/real/project/dir"),
+      spawn: (o) => {
+        seen = o;
+        return Promise.resolve({ paneId: "w1:p9", tabId: "w1:t9", workspaceId: "w1", workspaceLabel: "c", tabLabel: "x-a", cwdSnapshot: "/real/project/dir", idempotent: false });
+      },
+    });
+    await seedTaskWithLink(app, storage);
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/resume", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect((seen as { cwd?: string }).cwd).toBe("/real/project/dir");
+  });
+
+  it("falls back to the stored cwdSnapshot when the transcript cwd is unavailable", async () => {
+    let seen: unknown;
+    const storage = createStorage(tmpDir);
+    const app = createApi({
+      poller, envs: ENVIRONMENTS, storage,
+      sessionCwd: () => Promise.resolve(null),
+      spawn: (o) => {
+        seen = o;
+        return Promise.resolve({ paneId: "w1:p9", tabId: "w1:t9", workspaceId: "w1", workspaceLabel: "c", tabLabel: "x-a", cwdSnapshot: "/c", idempotent: false });
+      },
+    });
+    await seedTaskWithLink(app, storage);
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/resume", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect((seen as { cwd?: string }).cwd).toBe("/c");
+  });
+
   it("400s when the link has no sessionId", async () => {
     const storage = createStorage(tmpDir);
     const app = createApi({

@@ -191,6 +191,30 @@ export async function readRecap(
   return { recap: content.slice(0, RECAP_CONTENT_MAX), status: "ok" };
 }
 
+// Authoritative cwd for `claude --resume <uuid>`: the working directory the session recorded in its
+// own transcript. `claude --resume` is cwd-scoped, so it must launch where the session actually ran
+// — not the herdr pane cwd corral snapshotted at bind time (the two diverge when the pane shell and
+// the launched `claude` sat in different directories). Every message record carries `cwd`, so the
+// tail read suffices. Returns null when no transcript is found or none of the tailed records carry a
+// usable cwd; callers fall back to the stored cwdSnapshot.
+export async function readSessionCwd(
+  env: HerdrEnv,
+  sessionId: string,
+  exec?: ExecFn,
+): Promise<string | null> {
+  const transcriptPath = await findTranscript(env, sessionId, exec);
+  if (transcriptPath === null) return null;
+
+  let tail: string;
+  try {
+    tail = await readTail(env, transcriptPath, exec);
+  } catch {
+    return null;
+  }
+  const record = lastRecord(tail, (r) => typeof r.cwd === "string" && r.cwd !== "");
+  return record !== null && typeof record.cwd === "string" ? record.cwd : null;
+}
+
 export async function readLastActivity(
   env: HerdrEnv,
   sessionId: string,
