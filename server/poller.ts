@@ -1,13 +1,14 @@
 import type { AttentionMap, EnvState, RecapStatus, SessionRow, Snapshot, StatuslineData, StatuslineStatus } from "@shared/schema";
 
-import { ATTENTION_MIN_WORK_MS, CHEAP_INTERVAL_MS, RECAP_ENABLED, RECAP_INTERVAL_MS, STATUSLINE_ENABLED } from "../config.ts";
+import { ATTENTION_MIN_WORK_MS, CHEAP_INTERVAL_MS, RECAP_ENABLED, RECAP_INTERVAL_MS, STATUSLINE_ENABLED, SWEEP_INITIAL_DELAY_MS, TAB_RENAME_ENABLED } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import type { AttentionStore } from "./attention-store.ts";
-import { listSessions } from "./herdr.ts";
+import { listSessions, tabRename as tabRenameHerdr } from "./herdr.ts";
 import { createRecapCache, type RecapCache } from "./recap.ts";
-import { guardedInterval } from "./scheduler.ts";
+import { guardedInterval, makeGuarded } from "./scheduler.ts";
 import { createStatuslineCache, type StatuslineCache } from "./statusline-cache.ts";
 import { readStatusline } from "./statusline.ts";
+import { computeRenames } from "./tab-namer.ts";
 import { readRecap } from "./transcript.ts";
 import { detectTransitions, type WorkingMap } from "./transition.ts";
 
@@ -37,6 +38,9 @@ export function createPoller(opts: {
   recapIntervalMs?: number;
   minWorkMs?: number;
   attention?: AttentionStore;
+  tabRename?: (env: HerdrEnv, tabId: string, label: string) => Promise<void>;
+  tabRenameEnabled?: boolean;
+  initialSweepDelayMs?: number;
 }): Poller {
   const list = opts.list ?? listSessions;
   const recapFn = opts.recap ?? readRecap;
@@ -45,6 +49,9 @@ export function createPoller(opts: {
   const recapIntervalMs = opts.recapIntervalMs ?? RECAP_INTERVAL_MS;
   const minWorkMs = opts.minWorkMs ?? ATTENTION_MIN_WORK_MS;
   const attention = opts.attention;
+  const tabRenameFn = opts.tabRename ?? tabRenameHerdr;
+  const tabRenameEnabled = opts.tabRenameEnabled ?? TAB_RENAME_ENABLED;
+  const initialSweepDelayMs = opts.initialSweepDelayMs ?? SWEEP_INITIAL_DELAY_MS;
   let working: WorkingMap = {};
   const polledEnvs = new Set<string>();
   const envStates: Record<string, EnvState> = {};
@@ -153,6 +160,23 @@ export function createPoller(opts: {
         }
       }
 
+      // Rename herdr tabs to their Claude session name (user-set names only). Best-effort: a failed
+      // rename is logged and never breaks the sweep. Idempotent — once renamed, label == name → no-op.
+      // Convergence note: idempotency compares against `rows[].tab`, which is refreshed by pollEnv
+      // (CHEAP_INTERVAL_MS), NOT by this sweep. It relies on CHEAP_INTERVAL_MS < RECAP_INTERVAL_MS so
+      // the label is fresh by the next sweep; if that ordering is inverted (or herdr stores the label
+      // non-verbatim) a rename re-fires each sweep — a redundant same-value SSH call, never incorrect.
+      if (tabRenameEnabled && STATUSLINE_ENABLED) {
+        const renames = computeRenames(rows, (r) => statuslineCache.get(`${env.id}:${r.paneId}`)?.data ?? null);
+        for (const op of renames) {
+          try {
+            await tabRenameFn(env, op.tabId, op.label);
+          } catch (err) {
+            console.warn(`[tab-rename] env=${env.id} tab=${op.tabId} err=${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      }
+
       // Only surface the sweep summary when something went wrong. A clean sweep runs on every
       // recap interval, so logging it unconditionally floods the logs with uninteresting JSON.
       if (errors > 0) {
@@ -188,7 +212,20 @@ export function createPoller(opts: {
     start() {
       started = true;
       const listStops = opts.envs.map((e) => guardedInterval(() => pollEnv(e), intervalMs));
-      const sweepStop = (RECAP_ENABLED || STATUSLINE_ENABLED) ? guardedInterval(claudeSweep, recapIntervalMs) : noop;
+      let sweepStop = noop;
+      if (RECAP_ENABLED || STATUSLINE_ENABLED) {
+        // One shared guard across the immediate kick, the delayed kick, and the interval so they never
+        // overlap. The immediate kick preserves the "sweep runs on start" contract (used when perEnv is
+        // pre-populated, e.g. a cold-start pollOnce or tests) but is a no-op on a real cold start, where
+        // perEnv is still empty until the first poll lands — hence the delayed kick after
+        // initialSweepDelayMs (by which point the poll has populated perEnv) makes the first REAL sweep
+        // prompt instead of a full recap interval away.
+        const sweep = makeGuarded(claudeSweep);
+        void sweep();
+        const intervalId = setInterval(() => void sweep(), recapIntervalMs);
+        const kickId = setTimeout(() => void sweep(), initialSweepDelayMs);
+        sweepStop = () => { clearInterval(intervalId); clearTimeout(kickId); };
+      }
       stops = [...listStops, sweepStop];
     },
     stop() { for (const s of stops) s(); stops = []; started = false; },

@@ -31,6 +31,8 @@ interface Props {
   readonly awaitAgent?: boolean;
   // Bound task's title, shown as the header's primary label; "" (unassigned opens) falls back to paneId.
   readonly title?: string;
+  // herdr workspace label (≈ the repo). Shown in the header between the env and the session name; "" hides it.
+  readonly workspace?: string;
   readonly recap?: string | null;
   readonly statusline?: StatuslineData | null;
   // Enables drop-to-attach (upload + path injection). True for local envs only; remote needs SSH
@@ -71,7 +73,7 @@ function MetricChips({ sl }: { readonly sl: StatuslineData }): JSX.Element {
 }
 
 export function SessionModal({
-  env, envLabel, paneId, awaitAgent = false, title = "", recap = null, statusline = null,
+  env, envLabel, paneId, awaitAgent = false, title = "", workspace = "", recap = null, statusline = null,
   canAttachFiles = false, onClose,
 }: Props): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -339,6 +341,12 @@ export function SessionModal({
         <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
           <span className="text-foreground text-sm font-semibold">{title !== "" ? title : paneId}</span>
           <span className="text-xs text-muted-foreground/70">{title !== "" ? `${paneId} · ${envLabel}` : envLabel}</span>
+          {workspace !== "" && (
+            <span className="text-xs text-muted-foreground/60 truncate" title={workspace}>· {workspace}</span>
+          )}
+          {statusline?.session_name !== null && statusline?.session_name !== undefined && statusline.session_name !== "" && (
+            <span className="text-xs text-muted-foreground/60 truncate" title={statusline.session_name}>· {statusline.session_name}</span>
+          )}
           {starting && (
             <span className="text-xs text-warning">· starting session…</span>
           )}

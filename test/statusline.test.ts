@@ -19,7 +19,7 @@ function remoteEnv(configDirs: string[]): HerdrEnv {
   return { id: "r", label: "R", kind: "remote", sshHost: "h", socket: "~/s", herdrBin: "~/h", claudeConfigDirs: configDirs, spawnCommand: "claude", repos: {} };
 }
 const record: StatuslineData = {
-  v: 1, captured_at: 100, session_id: SID, session_name: null,
+  v: 1, captured_at: 100, session_id: SID, session_name: null, name_source: null,
   account: { uuid: "u1", email: "a@b.c", org: "O", tier: "t" },
   model: "Opus", model_id: null, ctx: { pct: 42, tokens: null, window: null },
   cost: { usd: null, lines_added: null, lines_removed: null },

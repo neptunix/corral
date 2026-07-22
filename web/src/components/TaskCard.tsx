@@ -3,6 +3,7 @@ import type { EnrichedSessionLink, EnrichedTask } from "@shared/board-schema";
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 
+import { CloseSessionModal } from "./CloseSessionModal";
 import { RestoreSessionModal } from "./RestoreSessionModal";
 import { api } from "../lib/api";
 import { CLOSING_STATUS, RESUMING_STATUS } from "../lib/optimistic";
@@ -27,11 +28,12 @@ interface Props {
   readonly onEdit: () => void;
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly onDetachSession: (env: string, paneId: string, sessionId: string | null) => void;
-  readonly onCloseSession: (env: string, paneId: string, sessionId: string | null) => void;
+  readonly onCloseSession: (env: string, paneId: string, sessionId: string | null) => Promise<void>;
+  readonly onCloseSessionByPane: (env: string, paneId: string, sessionId: string | null) => Promise<void>;
   readonly onResumeSession: (env: string, paneId: string, sessionId: string | null) => void;
 }
 
-export function TaskCard({ task, onEdit, onOpenSession, onDetachSession, onCloseSession, onResumeSession }: Props): JSX.Element {
+export function TaskCard({ task, onEdit, onOpenSession, onDetachSession, onCloseSession, onCloseSessionByPane, onResumeSession }: Props): JSX.Element {
   // Opening a session always uses awaitAgent=false (attach once). Retry-until-registered is only for
   // the post-spawn auto-open (TaskEditModal); a manual reopen of a LIVE session attaches immediately,
   // and a manual open of a DEAD one should fail fast with a clear message — not spin "starting…" for
@@ -84,6 +86,7 @@ export function TaskCard({ task, onEdit, onOpenSession, onDetachSession, onClose
               title={task.title}
               onOpenSession={onOpenSession}
               onCloseSession={onCloseSession}
+              onCloseSessionByPane={onCloseSessionByPane}
               onResumeSession={onResumeSession}
               onDetachSession={onDetachSession}
             />
@@ -98,12 +101,13 @@ interface SessionRowProps {
   readonly s: EnrichedSessionLink;
   readonly title: string;
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
-  readonly onCloseSession: (env: string, paneId: string, sessionId: string | null) => void;
+  readonly onCloseSession: (env: string, paneId: string, sessionId: string | null) => Promise<void>;
+  readonly onCloseSessionByPane: (env: string, paneId: string, sessionId: string | null) => Promise<void>;
   readonly onResumeSession: (env: string, paneId: string, sessionId: string | null) => void;
   readonly onDetachSession: (env: string, paneId: string, sessionId: string | null) => void;
 }
 
-function SessionRow({ s, title, onOpenSession, onCloseSession, onResumeSession, onDetachSession }: SessionRowProps): JSX.Element {
+function SessionRow({ s, title, onOpenSession, onCloseSession, onCloseSessionByPane, onResumeSession, onDetachSession }: SessionRowProps): JSX.Element {
   const detached = s.live?.detached === true;
   // Optimistic transient (App overlays a synthetic live.status during a close/resume round-trip). While
   // pending we suppress every row action + the click behavior so item 1 and item 2 can't fight — e.g. the
@@ -114,6 +118,7 @@ function SessionRow({ s, title, onOpenSession, onCloseSession, onResumeSession, 
   const [lastActive, setLastActive] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false); // inline Detach/Remove confirm
   const [showRestore, setShowRestore] = useState(false);
+  const [showClose, setShowClose] = useState(false);
 
   useEffect(() => {
     if (!resumable || s.sessionId === null) { setLastActive(null); return; }
@@ -160,8 +165,9 @@ function SessionRow({ s, title, onOpenSession, onCloseSession, onResumeSession, 
           ) : (
             <>
               <span className="text-muted-foreground">{s.live?.status ?? "unknown"}</span>
-              {(s.workspaceLabel !== "" || s.tabLabel !== "") && (
-                <span className="text-muted-foreground/70"> · {s.workspaceLabel} / {s.tabLabel}</span>
+              {s.tabLabel !== "" && (
+                // Workspace/repo label intentionally omitted here — it lives in the terminal header now.
+                <span className="text-muted-foreground/70"> · {s.tabLabel}</span>
               )}
             </>
           )}
@@ -212,7 +218,7 @@ function SessionRow({ s, title, onOpenSession, onCloseSession, onResumeSession, 
             <button
               type="button"
               onPointerDown={stop}
-              onClick={(e) => { stop(e); onCloseSession(s.env, s.paneId, s.sessionId); }}
+              onClick={(e) => { stop(e); setShowClose(true); }}
               className="shrink-0 text-muted-foreground/40 hover:text-orange-400 text-xs leading-none p-1 opacity-0 group-hover/session:opacity-100 transition-opacity"
               title="Close (kill) this session"
               aria-label="Close session"
@@ -236,6 +242,22 @@ function SessionRow({ s, title, onOpenSession, onCloseSession, onResumeSession, 
           resumable={resumable}
           onRestore={() => { onResumeSession(s.env, s.paneId, s.sessionId); }}
           onClose={() => { setShowRestore(false); }}
+        />
+      )}
+      {showClose && (
+        <CloseSessionModal
+          name={s.name}
+          taskTitle={title}
+          env={s.env}
+          paneId={s.paneId}
+          tabId={s.tabId}
+          sessionId={s.sessionId}
+          status={s.live?.status ?? "unknown"}
+          model={s.live?.model ?? null}
+          ctxPct={s.live?.ctxPct ?? null}
+          onCloseTab={() => onCloseSession(s.env, s.paneId, s.sessionId)}
+          onClosePane={() => onCloseSessionByPane(s.env, s.paneId, s.sessionId)}
+          onDismiss={() => { setShowClose(false); }}
         />
       )}
     </div>

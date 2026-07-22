@@ -69,16 +69,18 @@ export function AttentionFeed({ attention, boards, envs, activeBoardId, onOpen }
         {count === 0 ? (
           <p className="text-xs text-muted-foreground text-center mt-4">Nothing needs you on this board.</p>
         ) : (
-          entries.map(([key, record]) => {
+          entries.map((entry) => {
+            const { key, record, taskTitle } = entry;
             const { env, paneId } = parseKey(key);
             const blocked = record.state === "blocked";
+            const sessionName = record.sessionName ?? paneId;
             return (
               <SessionCard
                 key={key}
                 onOpen={() => { onOpen(env, paneId); }}
                 indicator={<span className={blocked ? "text-destructive" : "text-success"} aria-hidden>{blocked ? "⊘" : "✓"}</span>}
-                title={record.sessionName ?? paneId}
-                subtitle={`${blocked ? "blocked" : "finished"} · ${envLabel(envs, env)}`}
+                title={taskTitle !== "" ? taskTitle : sessionName}
+                subtitle={`${blocked ? "blocked" : "finished"} · ${sessionName} · ${envLabel(envs, env)}`}
                 age={formatAge(record.since)}
                 preview={{ text: record.lastLines, captured: record.captured }}
               />

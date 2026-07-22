@@ -94,6 +94,13 @@ export const api = {
         `/api/boards/${bid}/tasks/${tid}/sessions/${env}/${paneId}/close${sessionId !== null && sessionId !== "" ? `?sid=${sessionId}` : ""}`,
         { method: "POST" },
       ),
+    // close-pane kills the pane directly (herdr pane close) — the fallback the close modal offers when
+    // a tab-close fails with no_tab. Keeps the task→session link like close.
+    closePane: (bid: string, tid: string, env: string, paneId: string, sessionId: string | null) =>
+      req<{ ok: boolean }>(
+        `/api/boards/${bid}/tasks/${tid}/sessions/${env}/${paneId}/close-pane${sessionId !== null && sessionId !== "" ? `?sid=${sessionId}` : ""}`,
+        { method: "POST" },
+      ),
     // resume restarts a stopped Claude session (`claude --resume <uuid>`) and rebinds the link to the
     // new pane/tab/workspace, keeping the same sessionId.
     resume: (bid: string, tid: string, env: string, paneId: string, sessionId: string | null) =>

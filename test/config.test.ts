@@ -4,6 +4,7 @@ import {
   ATTENTION_MIN_WORK_MS, CHEAP_INTERVAL_MS, intFromEnv,
   RECAP_ENABLED, RECAP_INTERVAL_MS, RECAP_TAIL_BYTES,
   RECAP_READ_TIMEOUT_MS, RECAP_CONTENT_MAX,
+  TAB_RENAME_ENABLED,
 } from "../config.ts";
 
 describe("intFromEnv", () => {
@@ -50,4 +51,11 @@ describe("RECAP config defaults", () => {
 describe("poll + attention config defaults", () => {
   it("CHEAP_INTERVAL_MS defaults to 30000 (durable, not instant)", () => { expect(CHEAP_INTERVAL_MS).toBe(30000); });
   it("ATTENTION_MIN_WORK_MS defaults to 600000 (10 min)", () => { expect(ATTENTION_MIN_WORK_MS).toBe(600000); });
+});
+
+describe("TAB_RENAME_ENABLED", () => {
+  it("defaults to true when the env var is unset", () => {
+    // The test runner does not set TAB_RENAME_ENABLED, so the imported default must be true.
+    expect(TAB_RENAME_ENABLED).toBe(true);
+  });
 });

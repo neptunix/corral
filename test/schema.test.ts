@@ -73,7 +73,7 @@ describe("AttentionRecordSchema", () => {
 
 describe("StatuslineDataSchema", () => {
   const valid = {
-    v: 1, captured_at: 1752345678, session_id: "s1", session_name: "task-42-a",
+    v: 1, captured_at: 1752345678, session_id: "s1", session_name: "task-42-a", name_source: null,
     account: { uuid: "u1", email: "a@b.c", org: "O", tier: "default_claude_max_20x" },
     model: "Opus", model_id: "claude-opus-4-8",
     ctx: { pct: 42, tokens: 84000, window: 200000 },
@@ -109,6 +109,27 @@ describe("StatuslineDataSchema", () => {
     const acc = { uuid: "u1", email: "a@b.c", org: "O", tier: "t",
       fiveHour: { used_percentage: 10, resets_at: 1 }, sevenDay: null, capturedAt: 5, envIds: ["e1"] };
     expect(AccountUsageSchema.parse(acc)).toEqual(acc);
+  });
+});
+
+describe("StatuslineDataSchema name_source", () => {
+  const base = {
+    v: 1, captured_at: 1, session_id: "s", session_name: "n",
+    account: null, model: null, model_id: null,
+    ctx: { pct: null, tokens: null, window: null },
+    cost: { usd: null, lines_added: null, lines_removed: null },
+    rate: { five_hour: null, seven_day: null },
+    effort: null, thinking: null, cc_version: null,
+  };
+
+  it("defaults name_source to null when absent (old captures parse)", () => {
+    const parsed = StatuslineDataSchema.parse(base);
+    expect(parsed.name_source).toBeNull();
+  });
+
+  it("round-trips a user-set source", () => {
+    const parsed = StatuslineDataSchema.parse({ ...base, name_source: "user" });
+    expect(parsed.name_source).toBe("user");
   });
 });
 

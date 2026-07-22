@@ -768,6 +768,86 @@ describe("POST close", () => {
   });
 });
 
+describe("POST close-pane", () => {
+  // The route REQUIRES a live row for env:paneId (never pane-close a dead ref), so the success case
+  // must inject a snapshot containing that live row — seedTaskWithLink only seeds the board link, and
+  // the default `poller` returns sessions: []. Mirror the snapshot session-row shape used elsewhere in
+  // this file (tabId/workspaceId are optional on SessionRow, so they can be omitted).
+  it("closes the pane when the link is owned by the task and the pane is live", async () => {
+    const closedPanes: string[] = [];
+    const storage = createStorage(tmpDir);
+    const snapshot: Snapshot = {
+      envs: { "work-local": { reachable: true } },
+      sessions: [{
+        env: "work-local", paneId: "w1:p1", status: "working", agent: "claude",
+        cwd: "/c", tab: "x", workspace: "c",
+        sessionId: "11111111-2222-3333-4444-555555555555",
+        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+      }],
+    };
+    const app = createApi({
+      poller: { ...poller, getSnapshot: () => snapshot },
+      envs: ENVIRONMENTS, storage,
+      closePaneFn: (_e, paneId) => { closedPanes.push(paneId); return Promise.resolve(); },
+    });
+    await seedTaskWithLink(app, storage);
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close-pane", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(closedPanes).toEqual(["w1:p1"]);
+    expect(storage.getBoard("t")?.tasks[0]?.sessions).toHaveLength(1); // link retained
+  });
+
+  it("404s when the pane is not linked to the task", async () => {
+    // No snapshot needed: resolveLinkIndex returns -1 for the unlinked pane and the route 404s on the
+    // ownership check BEFORE the live-row check.
+    const storage = createStorage(tmpDir);
+    const app = createApi({ poller, envs: ENVIRONMENTS, storage, closePaneFn: () => Promise.resolve() });
+    await seedTaskWithLink(app, storage);
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w9:p9/close-pane", { method: "POST" });
+    expect(res.status).toBe(404);
+  });
+
+  it("404s (no_live_pane) when the link exists but the pane is not live", async () => {
+    // Owned link but empty snapshot → liveRow undefined → the live-row guard fires.
+    const storage = createStorage(tmpDir);
+    const app = createApi({ poller, envs: ENVIRONMENTS, storage, closePaneFn: () => Promise.resolve() });
+    await seedTaskWithLink(app, storage);
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close-pane", { method: "POST" });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /api/state — live label preference", () => {
+  it("prefers the LIVE herdr tab/workspace labels over the stored ones (so a tab rename shows)", async () => {
+    const storage = createStorage(tmpDir);
+    // Live row for the seeded pane, but with labels that DIFFER from the stored link (tabLabel "x",
+    // workspaceLabel "c" per seedTaskWithLink) — simulating a herdr tab rename after bind time.
+    const snapshot: Snapshot = {
+      envs: { "work-local": { reachable: true } },
+      sessions: [{
+        env: "work-local", paneId: "w1:p1", status: "working", agent: "claude",
+        cwd: "/c", tab: "renamed-live", workspace: "ws-live",
+        sessionId: "11111111-2222-3333-4444-555555555555",
+        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+      }],
+    };
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage });
+    await seedTaskWithLink(app, storage); // stores tabLabel "x" / workspaceLabel "c"
+    const state = await (await app.request("/api/state?board=t")).json() as { tasks: { sessions: { tabLabel: string; workspaceLabel: string }[] }[] };
+    const link = state.tasks[0]?.sessions[0];
+    expect(link?.tabLabel).toBe("renamed-live");
+    expect(link?.workspaceLabel).toBe("ws-live");
+  });
+
+  it("falls back to the stored label when the session is not live (detached)", async () => {
+    const storage = createStorage(tmpDir);
+    const app = createApi({ poller, envs: ENVIRONMENTS, storage }); // default poller: sessions: []
+    await seedTaskWithLink(app, storage);
+    const state = await (await app.request("/api/state?board=t")).json() as { tasks: { sessions: { tabLabel: string }[] }[] };
+    expect(state.tasks[0]?.sessions[0]?.tabLabel).toBe("x"); // stored value survives when no live row
+  });
+});
+
 describe("POST resume", () => {
   const uuid = "11111111-2222-3333-4444-555555555555";
 

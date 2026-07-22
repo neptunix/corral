@@ -3,11 +3,11 @@ import type { AttentionMap, AttentionRecord, AttentionState } from "@shared/sche
 import { describe, expect, it } from "vitest";
 
 import {
-  attentionCountsByBoard, boardAttention, buildBoardIndex, unassignedAttentionCount,
+  attentionCountsByBoard, boardAttention, buildMembershipIndex, unassignedAttentionCount,
 } from "../web/src/lib/attention.ts";
 
 // Pins the client-side per-board attention attribution (SessionModal design 2026-07-10): the panel and
-// every badge derive from (attention, boards) via buildBoardIndex, so they cannot disagree. An
+// every badge derive from (attention, boards) via buildMembershipIndex, so they cannot disagree. An
 // attention record whose session is bound to no task maps to no board (→ the Unassigned surface).
 
 function link(env: string, paneId: string): SessionLink {
@@ -29,16 +29,16 @@ const boards: readonly Board[] = [
   board("B", [task("t3", [link("e", "p3")])]),
 ];
 
-describe("buildBoardIndex", () => {
-  it("maps env:paneId → owning board id across boards and tasks", () => {
-    const index = buildBoardIndex(boards);
-    expect(index.get("e:p1")).toBe("A");
-    expect(index.get("e:p2")).toBe("A");
-    expect(index.get("e:p3")).toBe("B");
+describe("buildMembershipIndex", () => {
+  it("maps env:paneId → owning board id and task title across boards and tasks", () => {
+    const index = buildMembershipIndex(boards);
+    expect(index.get("e:p1")).toEqual({ boardId: "A", taskTitle: "t1" });
+    expect(index.get("e:p2")).toEqual({ boardId: "A", taskTitle: "t2" });
+    expect(index.get("e:p3")).toEqual({ boardId: "B", taskTitle: "t3" });
   });
 
   it("omits sessions bound to no task", () => {
-    expect(buildBoardIndex(boards).has("e:p9")).toBe(false);
+    expect(buildMembershipIndex(boards).has("e:p9")).toBe(false);
   });
 });
 
@@ -65,13 +65,19 @@ describe("boardAttention", () => {
       "e:p3": rec("blocked", 9),  // B — excluded
       "e:p9": rec("blocked", 9),  // unassigned — excluded
     };
-    const keys = boardAttention(attention, boards, "A").map(([k]) => k);
+    const keys = boardAttention(attention, boards, "A").map((e) => e.key);
     expect(keys).toEqual(["e:p2", "e:p1"]);
   });
 
   it("orders two blocked records most-recent first", () => {
     const attention: AttentionMap = { "e:p1": rec("blocked", 1), "e:p2": rec("blocked", 8) };
-    expect(boardAttention(attention, boards, "A").map(([k]) => k)).toEqual(["e:p2", "e:p1"]);
+    expect(boardAttention(attention, boards, "A").map((e) => e.key)).toEqual(["e:p2", "e:p1"]);
+  });
+
+  it("returns enriched entries carrying the key, record, and task title", () => {
+    const attention: AttentionMap = { "e:p1": rec("blocked", 1) };
+    const entries = boardAttention(attention, boards, "A");
+    expect(entries[0]).toEqual({ key: "e:p1", record: rec("blocked", 1), taskTitle: "t1" });
   });
 });
 
