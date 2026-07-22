@@ -14,10 +14,13 @@ export interface RenameOp {
  *  - group rows by tabId (rows with no tabId are ignored);
  *  - per tab the CANONICAL session is the row with the lexicographically smallest paneId — a documented
  *    proxy for "first pane" (herdr's agent list does not flag the root pane);
- *  - skip only AUTO-DERIVED names (name_source === "derived"); a user-set name renames. Note: in the
- *    current Claude Code version `/rename` sets `.name` but leaves `nameSource` ABSENT (captured as
- *    null), while auto names carry `nameSource: "derived"` — so null/absent means user-set and MUST
- *    rename (this mirrors the retired herdr-tab-sync hook, which skipped iff `nameSource == "derived"`);
+ *  - rename ONLY for a KNOWN user-set name. The capture encodes this in `name_source`:
+ *      "derived" → auto name → SKIP;
+ *      null      → unknown (registry miss / unnamed) → SKIP (never rename on unknown — a miss lets
+ *                  session_name fall back to the statusline payload, which may be an auto name);
+ *      any other value (e.g. "user") → known user-set → rename.
+ *    (In the current Claude Code version `/rename` leaves `nameSource` absent, which the capture maps to
+ *    "user" when a name is present — mirroring the retired herdr-tab-sync hook's "skip iff derived".)
  *  - emit a rename only when the name is non-empty AND differs from the current tab label.
  */
 export function computeRenames(
@@ -38,7 +41,7 @@ export function computeRenames(
     if (canonical === undefined) continue;
     const sl = statuslineFor(canonical);
     if (sl === null) continue;
-    if (sl.name_source === "derived") continue; // skip auto-derived only; null/absent = user-set → rename
+    if (sl.name_source === null || sl.name_source === "derived") continue; // rename only on a KNOWN user-set name (never null/derived)
     const name = sl.session_name;
     if (name === null || name === "") continue;
     if (name === canonical.tab) continue; // already matches

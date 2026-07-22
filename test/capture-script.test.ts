@@ -78,21 +78,33 @@ describe.skipIf(!hasJq())("corral-status-capture.sh", () => {
     expect(existsSync(path.join(configDir, "corral-status"))).toBe(false);
   });
 
-  function writeRegistry(configDir: string, sessionId: string, name: string, nameSource: string): void {
+  function writeRegistry(configDir: string, sessionId: string, name: string, nameSource?: string): void {
     const dir = path.join(configDir, "sessions");
     mkdirSync(dir, { recursive: true });
     // files are named by PID in the real registry; the script matches by content, so any name works.
-    writeFileSync(path.join(dir, "12345.json"), JSON.stringify({ sessionId, name, nameSource }));
+    // nameSource omitted entirely when undefined (the real "/rename leaves it unset" shape).
+    const record = nameSource === undefined ? { sessionId, name } : { sessionId, name, nameSource };
+    writeFileSync(path.join(dir, "12345.json"), JSON.stringify(record));
   }
 
-  it("records name_source and prefers the registry name (user-set)", () => {
+  it("maps a registry name with NO nameSource to name_source 'user' (the /rename-leaves-it-unset case)", () => {
     const configDir = mkdtempSync(path.join(os.tmpdir(), "corral-cap-")); dirs.push(configDir);
-    writeRegistry(configDir, statusInput.session_id, "my-real-name", "user");
+    writeRegistry(configDir, statusInput.session_id, "my-real-name"); // no nameSource
     run(configDir, statusInput);
     const out = JSON.parse(readFileSync(path.join(configDir, "corral-status", `${statusInput.session_id}.json`), "utf8"));
     const parsed = StatuslineDataSchema.parse(out);
     expect(parsed.name_source).toBe("user");
     expect(parsed.session_name).toBe("my-real-name");
+  });
+
+  it("passes an explicit 'derived' nameSource through (so downstream skips the rename)", () => {
+    const configDir = mkdtempSync(path.join(os.tmpdir(), "corral-cap-")); dirs.push(configDir);
+    writeRegistry(configDir, statusInput.session_id, "hl-trade-d2", "derived");
+    run(configDir, statusInput);
+    const out = JSON.parse(readFileSync(path.join(configDir, "corral-status", `${statusInput.session_id}.json`), "utf8"));
+    const parsed = StatuslineDataSchema.parse(out);
+    expect(parsed.name_source).toBe("derived");
+    expect(parsed.session_name).toBe("hl-trade-d2");
   });
 
   it("name_source is null and session_name falls back to statusline when no registry", () => {

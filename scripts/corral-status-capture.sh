@@ -17,9 +17,15 @@ case "$sid" in *[!A-Za-z0-9._-]*) exit 0 ;; esac
 
 # Resolve the user-set name + its source from the Claude session registry. Registry files are named
 # by PID, so glob and grep for the record whose sessionId matches (mirrors the retired herdr-tab-sync
-# hook). Prefer $CONFIG_DIR/sessions, fall back to $HOME/.claude/sessions (remote-box layout). A miss
-# leaves both empty → name_source null and session_name falls back to the statusline. (Downstream only
-# name_source == "derived" is treated as auto; null/absent counts as user-set — /rename leaves it unset.)
+# hook). Prefer $CONFIG_DIR/sessions, fall back to $HOME/.claude/sessions (remote-box layout).
+#
+# name_source semantics (load-bearing downstream — corral renames a tab only for a KNOWN user-set name):
+#   - registry found + a name + nameSource present → that value (e.g. "derived" for auto names → skipped);
+#   - registry found + a name + nameSource ABSENT  → "user" (this CC version leaves nameSource unset on
+#     /rename, so an absent source over a real name means the user set it);
+#   - registry MISS (or no name in the registry)   → "" → emitted as null. NULL MEANS "unknown", NOT
+#     user-set: downstream must NOT rename on null, else a miss (where session_name falls back to the
+#     statusline payload, possibly an auto name) could rename a tab to a non-user-set name.
 reg=""
 for base in "$CONFIG_DIR/sessions" "$HOME/.claude/sessions"; do
   [ -d "$base" ] || continue
@@ -28,8 +34,10 @@ for base in "$CONFIG_DIR/sessions" "$HOME/.claude/sessions"; do
 done
 reg_name=""; reg_src=""
 if [ -n "$reg" ]; then
-  reg_name="$(jq -r '.name // empty'       "$reg" 2>/dev/null || true)"
-  reg_src="$(jq  -r '.nameSource // empty' "$reg" 2>/dev/null || true)"
+  reg_name="$(jq -r '.name // empty' "$reg" 2>/dev/null || true)"
+  # Only claim a source when the registry actually carries a name; absent nameSource over a real name
+  # ⇒ "user" (a known user-set name). No name ⇒ leave reg_src "" (→ null, unknown, never renamed).
+  [ -n "$reg_name" ] && reg_src="$(jq -r '.nameSource // "user"' "$reg" 2>/dev/null || true)"
 fi
 
 # The oauthAccount lives at $CONFIG_DIR/.claude.json for a profile-split install (CLAUDE_CONFIG_DIR

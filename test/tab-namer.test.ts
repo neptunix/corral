@@ -28,16 +28,16 @@ describe("computeRenames", () => {
     expect(ops).toEqual([{ env: "e1", tabId: "t1", label: "my-name" }]);
   });
 
-  it("skips ONLY auto-derived names", () => {
+  it("skips auto-derived names AND null (unknown / registry miss)", () => {
     const rows = [row("pA", "t1", "1")];
     expect(computeRenames(rows, () => sl("auto-title", "derived"))).toEqual([]);
+    // null = registry miss / unnamed → unknown → never rename (else a miss could rename to a payload
+    // auto name). The capture maps a genuine user-set name (nameSource absent over a real name) to "user".
+    expect(computeRenames(rows, () => sl("auto-title", null))).toEqual([]);
   });
 
-  it("renames user-set names, including when name_source is null/absent (this CC version leaves nameSource unset on /rename)", () => {
+  it("renames on a known user-set name_source", () => {
     const rows = [row("pA", "t1", "1")];
-    // null/absent nameSource is the real-world user-set case (e.g. /rename to 'plan-614-impl-3').
-    expect(computeRenames(rows, () => sl("my-name", null))).toEqual([{ env: "e1", tabId: "t1", label: "my-name" }]);
-    // a non-"derived" explicit source also renames.
     expect(computeRenames(rows, () => sl("my-name", "user"))).toEqual([{ env: "e1", tabId: "t1", label: "my-name" }]);
   });
 

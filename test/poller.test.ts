@@ -270,7 +270,7 @@ describe("createPoller initial sweep kick", () => {
   };
   const userStatusline: StatuslineFn = () => Promise.resolve({
     data: {
-      v: 1, captured_at: 1, session_id: SID, session_name: "renamed-by-user", name_source: null,
+      v: 1, captured_at: 1, session_id: SID, session_name: "renamed-by-user", name_source: "user",
       account: null, model: null, model_id: null,
       ctx: { pct: null, tokens: null, window: null },
       cost: { usd: null, lines_added: null, lines_removed: null },
