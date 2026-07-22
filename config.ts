@@ -46,6 +46,11 @@ export const STATUSLINE_STALE_MS = intFromEnv("STATUSLINE_STALE_MS", 120000, { m
 // statusline sweep, so it is effective only when STATUSLINE_ENABLED is also on.
 export const TAB_RENAME_ENABLED = process.env.TAB_RENAME_ENABLED !== "false";
 
+// Delay before the FIRST statusline sweep after start(). The sweep can't run at t=0 (it would race the
+// initial poll and see no rows), so it is kicked once after this short delay — by which point the first
+// poll has populated the rows — then runs every RECAP_INTERVAL_MS. Keeps startup renames near-instant.
+export const SWEEP_INITIAL_DELAY_MS = intFromEnv("SWEEP_INITIAL_DELAY_MS", 5000, { min: 0 });
+
 export const BOARD_DATA_DIR = process.env.BOARD_DATA_DIR ?? CORRAL_HOME;
 export const GIT_COMMIT_INTERVAL_MS = 10_000;
 export const SPAWN_TIMEOUT_MS = 60_000;

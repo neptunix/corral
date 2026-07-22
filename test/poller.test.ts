@@ -260,3 +260,50 @@ describe("createPoller — attention detection", () => {
     expect(prunes).toEqual([1]); // once, not per tick
   });
 });
+
+describe("createPoller initial sweep kick", () => {
+  const SID = "11111111-2222-3333-4444-555555555555";
+  const liveRow: SessionRow = {
+    env: A.id, paneId: "p1", status: "working", agent: "claude", cwd: "/x",
+    tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId: SID,
+    recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+  };
+  const userStatusline: StatuslineFn = () => Promise.resolve({
+    data: {
+      v: 1, captured_at: 1, session_id: SID, session_name: "renamed-by-user", name_source: null,
+      account: null, model: null, model_id: null,
+      ctx: { pct: null, tokens: null, window: null },
+      cost: { usd: null, lines_added: null, lines_removed: null },
+      rate: { five_hour: null, seven_day: null },
+      effort: null, thinking: null, cc_version: null,
+    },
+    status: "ok",
+  });
+
+  it("kicks the first sweep after initialSweepDelayMs, not a full recap interval", async () => {
+    vi.useFakeTimers();
+    try {
+      const calls: { tabId: string; label: string }[] = [];
+      const p = createPoller({
+        envs: [A],
+        list: () => Promise.resolve([liveRow]),
+        recap: () => Promise.resolve({ recap: null, status: "no-summary" }),
+        statusline: userStatusline,
+        tabRename: (_e, tabId, label) => { calls.push({ tabId, label }); return Promise.resolve(); },
+        tabRenameEnabled: true,
+        initialSweepDelayMs: 5000,
+        recapIntervalMs: 60000,
+        intervalMs: 30000,
+      });
+      p.start();
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(calls).toEqual([]); // the racing t=0 sweep no-ops; the delayed kick has not fired yet
+      await vi.advanceTimersByTimeAsync(1);
+      // renamed at ~5s (well before the 60s recap interval); name_source null = user-set (post-fix)
+      expect(calls).toEqual([{ tabId: "t1", label: "renamed-by-user" }]);
+      p.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
