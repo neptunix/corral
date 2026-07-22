@@ -160,6 +160,10 @@ export function createPoller(opts: {
 
       // Rename herdr tabs to their Claude session name (user-set names only). Best-effort: a failed
       // rename is logged and never breaks the sweep. Idempotent — once renamed, label == name → no-op.
+      // Convergence note: idempotency compares against `rows[].tab`, which is refreshed by pollEnv
+      // (CHEAP_INTERVAL_MS), NOT by this sweep. It relies on CHEAP_INTERVAL_MS < RECAP_INTERVAL_MS so
+      // the label is fresh by the next sweep; if that ordering is inverted (or herdr stores the label
+      // non-verbatim) a rename re-fires each sweep — a redundant same-value SSH call, never incorrect.
       if (tabRenameEnabled && STATUSLINE_ENABLED) {
         const renames = computeRenames(rows, (r) => statuslineCache.get(`${env.id}:${r.paneId}`)?.data ?? null);
         for (const op of renames) {
