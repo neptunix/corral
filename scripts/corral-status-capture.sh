@@ -22,7 +22,7 @@ case "$sid" in *[!A-Za-z0-9._-]*) exit 0 ;; esac
 reg=""
 for base in "$CONFIG_DIR/sessions" "$HOME/.claude/sessions"; do
   [ -d "$base" ] || continue
-  reg="$(grep -lF "\"sessionId\":\"$sid\"" "$base"/*.json 2>/dev/null | head -1)"
+  reg="$(grep -lF "\"sessionId\":\"$sid\"" "$base"/*.json 2>/dev/null | head -1 || true)"
   [ -n "$reg" ] && break
 done
 reg_name=""; reg_src=""

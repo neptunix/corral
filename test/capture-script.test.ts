@@ -103,4 +103,14 @@ describe.skipIf(!hasJq())("corral-status-capture.sh", () => {
     expect(parsed.name_source).toBeNull();
     expect(parsed.session_name).toBe("task-42-a"); // statusInput.session_name
   });
+
+  it("still writes output (name_source null) when the sessions dir has no matching file", () => {
+    const configDir = mkdtempSync(path.join(os.tmpdir(), "corral-cap-")); dirs.push(configDir);
+    writeRegistry(configDir, "some-other-session-id", "someone-elses-name", "user");
+    run(configDir, statusInput);
+    const out = JSON.parse(readFileSync(path.join(configDir, "corral-status", `${statusInput.session_id}.json`), "utf8"));
+    const parsed = StatuslineDataSchema.parse(out);
+    expect(parsed.name_source).toBeNull();
+    expect(parsed.session_name).toBe("task-42-a");
+  });
 });
