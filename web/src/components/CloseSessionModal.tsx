@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 
 interface Props {
   readonly name: string;
@@ -18,16 +18,24 @@ interface Props {
 // Confirm-before-kill dialog for a running session. Primary action closes the herdr tab; on failure it
 // keeps the modal open, shows the error, and reveals the pane-close fallback. No window.alert anywhere.
 export function CloseSessionModal(props: Props): JSX.Element {
-  const { name, taskTitle, env, paneId, tabId, sessionId, status, model, ctxPct } = props;
+  const { name, taskTitle, env, paneId, tabId, sessionId, status, model, ctxPct, onDismiss } = props;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === "Escape" && !busy) onDismiss();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("keydown", onKey); };
+  }, [busy, onDismiss]);
 
   async function run(action: () => Promise<void>): Promise<void> {
     setBusy(true);
     setError(null);
     try {
       await action();
-      props.onDismiss(); // success → the row goes detached on the next poll
+      onDismiss(); // success → the row goes detached on the next poll
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -52,7 +60,8 @@ export function CloseSessionModal(props: Props): JSX.Element {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
-      onClick={props.onDismiss}
+      onPointerDown={(e) => { e.stopPropagation(); }}
+      onClick={() => { if (!busy) onDismiss(); }}
     >
       <div className="bg-card border border-border rounded-lg w-full max-w-md p-4" onClick={(e) => { e.stopPropagation(); }}>
         <h2 className="text-foreground text-sm font-semibold mb-1">Close session</h2>
@@ -74,7 +83,7 @@ export function CloseSessionModal(props: Props): JSX.Element {
         <div className="flex justify-end gap-2">
           <button
             type="button"
-            onClick={props.onDismiss}
+            onClick={onDismiss}
             disabled={busy}
             className="px-2 py-1 text-xs rounded border border-border text-muted-foreground hover:text-foreground disabled:opacity-50"
           >Cancel</button>
