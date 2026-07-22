@@ -15,6 +15,22 @@ sid="$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null || true)"
 [ -z "$sid" ] && exit 0
 case "$sid" in *[!A-Za-z0-9._-]*) exit 0 ;; esac
 
+# Resolve the user-set name + its source from the Claude session registry. Registry files are named
+# by PID, so glob and grep for the record whose sessionId matches (mirrors the retired herdr-tab-sync
+# hook). Prefer $CONFIG_DIR/sessions, fall back to $HOME/.claude/sessions (remote-box layout). A miss
+# leaves both empty → name_source null (not user-set) and session_name falls back to the statusline.
+reg=""
+for base in "$CONFIG_DIR/sessions" "$HOME/.claude/sessions"; do
+  [ -d "$base" ] || continue
+  reg="$(grep -lF "\"sessionId\":\"$sid\"" "$base"/*.json 2>/dev/null | head -1)"
+  [ -n "$reg" ] && break
+done
+reg_name=""; reg_src=""
+if [ -n "$reg" ]; then
+  reg_name="$(jq -r '.name // empty'       "$reg" 2>/dev/null || true)"
+  reg_src="$(jq  -r '.nameSource // empty' "$reg" 2>/dev/null || true)"
+fi
+
 # The oauthAccount lives at $CONFIG_DIR/.claude.json for a profile-split install (CLAUDE_CONFIG_DIR
 # → nested .claude.json), but at $HOME/.claude.json for a default single-profile install (e.g. the
 # remote boxes). Prefer the nested one; fall back to the home one so remote accounts resolve too.
@@ -23,9 +39,12 @@ acct_file="$CONFIG_DIR/.claude.json"
 acct="$(jq -c '.oauthAccount | {uuid:.accountUuid, email:.emailAddress, org:.organizationName, tier:.organizationRateLimitTier}' \
           "$acct_file" 2>/dev/null || echo null)"
 
-out="$(printf '%s' "$input" | jq -c --argjson acct "$acct" --argjson ts "$(date +%s)" '{
+out="$(printf '%s' "$input" | jq -c --argjson acct "$acct" --argjson ts "$(date +%s)" \
+        --arg reg_name "$reg_name" --arg reg_src "$reg_src" '{
   v: 1, captured_at: $ts,
-  session_id: .session_id, session_name: (.session_name // null),
+  session_id: .session_id,
+  session_name: (if $reg_name != "" then $reg_name else (.session_name // null) end),
+  name_source: (if $reg_src != "" then $reg_src else null end),
   account: $acct,
   model: (.model.display_name // null), model_id: (.model.id // null),
   ctx: { pct: (.context_window.used_percentage // null),

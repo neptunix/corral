@@ -77,4 +77,30 @@ describe.skipIf(!hasJq())("corral-status-capture.sh", () => {
     run(configDir, { model: { display_name: "Opus" } });
     expect(existsSync(path.join(configDir, "corral-status"))).toBe(false);
   });
+
+  function writeRegistry(configDir: string, sessionId: string, name: string, nameSource: string): void {
+    const dir = path.join(configDir, "sessions");
+    mkdirSync(dir, { recursive: true });
+    // files are named by PID in the real registry; the script matches by content, so any name works.
+    writeFileSync(path.join(dir, "12345.json"), JSON.stringify({ sessionId, name, nameSource }));
+  }
+
+  it("records name_source and prefers the registry name (user-set)", () => {
+    const configDir = mkdtempSync(path.join(os.tmpdir(), "corral-cap-")); dirs.push(configDir);
+    writeRegistry(configDir, statusInput.session_id, "my-real-name", "user");
+    run(configDir, statusInput);
+    const out = JSON.parse(readFileSync(path.join(configDir, "corral-status", `${statusInput.session_id}.json`), "utf8"));
+    const parsed = StatuslineDataSchema.parse(out);
+    expect(parsed.name_source).toBe("user");
+    expect(parsed.session_name).toBe("my-real-name");
+  });
+
+  it("name_source is null and session_name falls back to statusline when no registry", () => {
+    const configDir = mkdtempSync(path.join(os.tmpdir(), "corral-cap-")); dirs.push(configDir);
+    run(configDir, statusInput); // no sessions/ dir
+    const out = JSON.parse(readFileSync(path.join(configDir, "corral-status", `${statusInput.session_id}.json`), "utf8"));
+    const parsed = StatuslineDataSchema.parse(out);
+    expect(parsed.name_source).toBeNull();
+    expect(parsed.session_name).toBe("task-42-a"); // statusInput.session_name
+  });
 });
