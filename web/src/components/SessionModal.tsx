@@ -339,6 +339,9 @@ export function SessionModal({
         <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
           <span className="text-foreground text-sm font-semibold">{title !== "" ? title : paneId}</span>
           <span className="text-xs text-muted-foreground/70">{title !== "" ? `${paneId} · ${envLabel}` : envLabel}</span>
+          {statusline?.session_name !== null && statusline?.session_name !== undefined && statusline.session_name !== "" && (
+            <span className="text-xs text-muted-foreground/60 truncate" title={statusline.session_name}>· {statusline.session_name}</span>
+          )}
           {starting && (
             <span className="text-xs text-warning">· starting session…</span>
           )}
