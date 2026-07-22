@@ -42,6 +42,10 @@ export const STATUSLINE_READ_TIMEOUT_MS = intFromEnv("STATUSLINE_READ_TIMEOUT_MS
 export const STATUSLINE_MAX_BYTES = intFromEnv("STATUSLINE_MAX_BYTES", 65536, { min: 1 });
 export const STATUSLINE_STALE_MS = intFromEnv("STATUSLINE_STALE_MS", 120000, { min: 1 });
 
+// Tab rename: corral renames a herdr tab to its Claude session name (user-set names only). Rides the
+// statusline sweep, so it is effective only when STATUSLINE_ENABLED is also on.
+export const TAB_RENAME_ENABLED = process.env.TAB_RENAME_ENABLED !== "false";
+
 export const BOARD_DATA_DIR = process.env.BOARD_DATA_DIR ?? CORRAL_HOME;
 export const GIT_COMMIT_INTERVAL_MS = 10_000;
 export const SPAWN_TIMEOUT_MS = 60_000;
