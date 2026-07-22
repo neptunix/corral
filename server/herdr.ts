@@ -323,6 +323,11 @@ export async function tabClose(env: HerdrEnv, tabId: string, exec?: ExecFn): Pro
     exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec });
 }
 
+export async function tabRename(env: HerdrEnv, tabId: string, label: string, exec?: ExecFn): Promise<void> {
+  await runHerdr(env, ["tab", "rename", tabId, label],
+    exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec });
+}
+
 export async function workspaceClose(env: HerdrEnv, workspaceId: string, exec?: ExecFn): Promise<void> {
   await runHerdr(env, ["workspace", "close", workspaceId],
     exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec });

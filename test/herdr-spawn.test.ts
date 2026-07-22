@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import { ENVIRONMENTS } from "../environments.ts";
 import type { ExecFn } from "../server/herdr.ts";
-import { paneRun, paneGet, tabCreate, workspaceCreate, tabClose, listPanes } from "../server/herdr.ts";
+import { paneRun, paneGet, tabCreate, workspaceCreate, tabClose, tabRename, listPanes } from "../server/herdr.ts";
 
 const env = ENVIRONMENTS[0]!;
 
@@ -97,5 +97,14 @@ describe("tabClose", () => {
     await tabClose(env, "t1", exec);
     expect((makeExec as unknown as { lastArgs: string[] }).lastArgs).toContain("close");
     expect((makeExec as unknown as { lastArgs: string[] }).lastArgs).toContain("t1");
+  });
+});
+
+describe("tabRename", () => {
+  it("calls tab rename with tabId and label", async () => {
+    const exec = makeExec("");
+    await tabRename(env, "t1", "my label", exec);
+    const args = (makeExec as unknown as { lastArgs: string[] }).lastArgs;
+    expect(args).toEqual(["tab", "rename", "t1", "my label"]);
   });
 });
