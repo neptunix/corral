@@ -108,12 +108,14 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
       return {
         ...link,
         paneId,
-        // Backfill empty labels from the live session row (a session attached via drag before the
-        // write-time enrichment landed stored blank labels). `name` is shown only on a DETACHED card
-        // ("⚠ {name}"), where `live` is undefined — so it can never come from `live`; fall back to
-        // paneId, which also heals records persisted with an empty name before this fix.
-        tabLabel: link.tabLabel !== "" ? link.tabLabel : (live?.tab ?? ""),
-        workspaceLabel: link.workspaceLabel !== "" ? link.workspaceLabel : (live?.workspace ?? ""),
+        // For a LIVE session the herdr row carries the CURRENT labels, so prefer them — a tab rename or
+        // workspace move then shows immediately. The stored link labels are only a bind-time snapshot
+        // (they go stale on rename) and are the source of truth for nothing that's displayed: they serve
+        // ONLY as a fallback when there is no live row (detached) or the live label is unknown ("?"/"").
+        // `name` is shown only on a DETACHED card ("⚠ {name}"), where `live` is undefined — so it can
+        // never come from `live`; fall back to paneId, which also heals records persisted with an empty name.
+        tabLabel: live !== undefined && live.tab !== "" && live.tab !== "?" ? live.tab : link.tabLabel,
+        workspaceLabel: live !== undefined && live.workspace !== "" && live.workspace !== "?" ? live.workspace : link.workspaceLabel,
         name: link.name !== "" ? link.name : link.paneId,
         live: live !== undefined
           ? { status: live.status, model: live.statusline?.model ?? null,

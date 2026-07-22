@@ -817,6 +817,37 @@ describe("POST close-pane", () => {
   });
 });
 
+describe("GET /api/state — live label preference", () => {
+  it("prefers the LIVE herdr tab/workspace labels over the stored ones (so a tab rename shows)", async () => {
+    const storage = createStorage(tmpDir);
+    // Live row for the seeded pane, but with labels that DIFFER from the stored link (tabLabel "x",
+    // workspaceLabel "c" per seedTaskWithLink) — simulating a herdr tab rename after bind time.
+    const snapshot: Snapshot = {
+      envs: { "work-local": { reachable: true } },
+      sessions: [{
+        env: "work-local", paneId: "w1:p1", status: "working", agent: "claude",
+        cwd: "/c", tab: "renamed-live", workspace: "ws-live",
+        sessionId: "11111111-2222-3333-4444-555555555555",
+        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+      }],
+    };
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage });
+    await seedTaskWithLink(app, storage); // stores tabLabel "x" / workspaceLabel "c"
+    const state = await (await app.request("/api/state?board=t")).json() as { tasks: { sessions: { tabLabel: string; workspaceLabel: string }[] }[] };
+    const link = state.tasks[0]?.sessions[0];
+    expect(link?.tabLabel).toBe("renamed-live");
+    expect(link?.workspaceLabel).toBe("ws-live");
+  });
+
+  it("falls back to the stored label when the session is not live (detached)", async () => {
+    const storage = createStorage(tmpDir);
+    const app = createApi({ poller, envs: ENVIRONMENTS, storage }); // default poller: sessions: []
+    await seedTaskWithLink(app, storage);
+    const state = await (await app.request("/api/state?board=t")).json() as { tasks: { sessions: { tabLabel: string }[] }[] };
+    expect(state.tasks[0]?.sessions[0]?.tabLabel).toBe("x"); // stored value survives when no live row
+  });
+});
+
 describe("POST resume", () => {
   const uuid = "11111111-2222-3333-4444-555555555555";
 
