@@ -165,8 +165,9 @@ function SessionRow({ s, title, onOpenSession, onCloseSession, onCloseSessionByP
           ) : (
             <>
               <span className="text-muted-foreground">{s.live?.status ?? "unknown"}</span>
-              {(s.workspaceLabel !== "" || s.tabLabel !== "") && (
-                <span className="text-muted-foreground/70"> · {s.workspaceLabel} / {s.tabLabel}</span>
+              {s.tabLabel !== "" && (
+                // Workspace/repo label intentionally omitted here — it lives in the terminal header now.
+                <span className="text-muted-foreground/70"> · {s.tabLabel}</span>
               )}
             </>
           )}

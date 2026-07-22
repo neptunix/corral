@@ -105,11 +105,13 @@ export function App(): JSX.Element {
   // Recap/statusline lookup for the live-terminal header's second line, keyed by `env:paneId` — covers
   // both unassigned rows and every task's enriched session link (`live` is null for a detached link).
   const liveByKey = useMemo(() => {
-    const m = new Map<string, { recap: string | null; statusline: StatuslineData | null }>();
-    for (const s of globalState?.unassigned ?? []) m.set(`${s.env}:${s.paneId}`, { recap: s.recap, statusline: s.statusline });
+    const m = new Map<string, { recap: string | null; statusline: StatuslineData | null; workspace: string }>();
+    // workspace (≈ repo) shown in the terminal header; "?" is herdr's unknown-label sentinel → drop it.
+    const clean = (w: string): string => (w === "?" ? "" : w);
+    for (const s of globalState?.unassigned ?? []) m.set(`${s.env}:${s.paneId}`, { recap: s.recap, statusline: s.statusline, workspace: clean(s.workspace) });
     if (activeBoardState !== null) {
       for (const t of activeBoardState.tasks) for (const link of t.sessions) {
-        if (link.live !== null) m.set(`${link.env}:${link.paneId}`, { recap: link.live.recap, statusline: link.live.statusline });
+        if (link.live !== null) m.set(`${link.env}:${link.paneId}`, { recap: link.live.recap, statusline: link.live.statusline, workspace: clean(link.workspaceLabel) });
       }
     }
     return m;
@@ -288,6 +290,7 @@ export function App(): JSX.Element {
           paneId={session.paneId}
           awaitAgent={session.awaitAgent}
           title={session.title}
+          workspace={liveByKey.get(`${session.env}:${session.paneId}`)?.workspace ?? ""}
           recap={liveByKey.get(`${session.env}:${session.paneId}`)?.recap ?? null}
           statusline={liveByKey.get(`${session.env}:${session.paneId}`)?.statusline ?? null}
           canAttachFiles={globalState?.envs[session.env]?.kind === "local"}
