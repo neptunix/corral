@@ -45,7 +45,7 @@ describe("api", () => {
       sessions: [{
         env: "work-local", paneId: "w1-1", status: "working", agent: "claude", cwd: "/c",
         tab: "t", workspace: "w", sessionId: "sid", recap: "did X", recapAt: 5,
-        recapStatus: "ok", statusline: { v: 1, captured_at: 9, session_id: "sid", session_name: null,
+        recapStatus: "ok", statusline: { v: 1, captured_at: 9, session_id: "sid", session_name: null, name_source: null,
           account: { uuid: "u1", email: "a@b.c", org: "O", tier: "t" }, model: "Opus", model_id: null,
           ctx: { pct: 42, tokens: null, window: null }, cost: { usd: null, lines_added: null, lines_removed: null },
           rate: { five_hour: { used_percentage: 31, resets_at: 1 }, seven_day: null }, effort: null,

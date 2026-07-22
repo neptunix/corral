@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createStatuslineCache } from "../server/statusline-cache.ts";
 
 const data = (n: number): StatuslineData => ({
-  v: 1, captured_at: n, session_id: "s1", session_name: null, account: null,
+  v: 1, captured_at: n, session_id: "s1", session_name: null, name_source: null, account: null,
   model: "Opus", model_id: null, ctx: { pct: n, tokens: null, window: null },
   cost: { usd: null, lines_added: null, lines_removed: null },
   rate: { five_hour: null, seven_day: null }, effort: null, thinking: null, cc_version: null,

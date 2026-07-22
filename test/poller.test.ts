@@ -167,7 +167,7 @@ describe("createPoller — recap sweep", () => {
 describe("createPoller — statusline sweep", () => {
   it("merges statusline data onto session rows via the sweep", async () => {
     const sl: StatuslineData = {
-      v: 1, captured_at: 100, session_id: "sid-1", session_name: null,
+      v: 1, captured_at: 100, session_id: "sid-1", session_name: null, name_source: null,
       account: { uuid: "u1", email: "a@b.c", org: "O", tier: "t" },
       model: "Opus", model_id: null, ctx: { pct: 42, tokens: null, window: null },
       cost: { usd: null, lines_added: null, lines_removed: null },

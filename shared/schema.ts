@@ -31,6 +31,7 @@ export const StatuslineDataSchema = z.object({
   captured_at: z.number(),
   session_id: z.string(),
   session_name: z.string().nullable(),
+  name_source: z.string().nullable().optional().default(null),
   account: StatuslineAccountSchema.nullable(),
   model: z.string().nullable(),
   model_id: z.string().nullable(),
