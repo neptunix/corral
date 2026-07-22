@@ -1,13 +1,14 @@
 import type { AttentionMap, EnvState, RecapStatus, SessionRow, Snapshot, StatuslineData, StatuslineStatus } from "@shared/schema";
 
-import { ATTENTION_MIN_WORK_MS, CHEAP_INTERVAL_MS, RECAP_ENABLED, RECAP_INTERVAL_MS, STATUSLINE_ENABLED } from "../config.ts";
+import { ATTENTION_MIN_WORK_MS, CHEAP_INTERVAL_MS, RECAP_ENABLED, RECAP_INTERVAL_MS, STATUSLINE_ENABLED, TAB_RENAME_ENABLED } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import type { AttentionStore } from "./attention-store.ts";
-import { listSessions } from "./herdr.ts";
+import { listSessions, tabRename as tabRenameHerdr } from "./herdr.ts";
 import { createRecapCache, type RecapCache } from "./recap.ts";
 import { guardedInterval } from "./scheduler.ts";
 import { createStatuslineCache, type StatuslineCache } from "./statusline-cache.ts";
 import { readStatusline } from "./statusline.ts";
+import { computeRenames } from "./tab-namer.ts";
 import { readRecap } from "./transcript.ts";
 import { detectTransitions, type WorkingMap } from "./transition.ts";
 
@@ -37,6 +38,8 @@ export function createPoller(opts: {
   recapIntervalMs?: number;
   minWorkMs?: number;
   attention?: AttentionStore;
+  tabRename?: (env: HerdrEnv, tabId: string, label: string) => Promise<void>;
+  tabRenameEnabled?: boolean;
 }): Poller {
   const list = opts.list ?? listSessions;
   const recapFn = opts.recap ?? readRecap;
@@ -45,6 +48,8 @@ export function createPoller(opts: {
   const recapIntervalMs = opts.recapIntervalMs ?? RECAP_INTERVAL_MS;
   const minWorkMs = opts.minWorkMs ?? ATTENTION_MIN_WORK_MS;
   const attention = opts.attention;
+  const tabRenameFn = opts.tabRename ?? tabRenameHerdr;
+  const tabRenameEnabled = opts.tabRenameEnabled ?? TAB_RENAME_ENABLED;
   let working: WorkingMap = {};
   const polledEnvs = new Set<string>();
   const envStates: Record<string, EnvState> = {};
@@ -149,6 +154,19 @@ export function createPoller(opts: {
             statuslineCache.update(key, row.sessionId, data, status);
           } catch (err) {
             console.warn(`[statusline] read error: env=${env.id} pane=${row.paneId} err=${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      }
+
+      // Rename herdr tabs to their Claude session name (user-set names only). Best-effort: a failed
+      // rename is logged and never breaks the sweep. Idempotent — once renamed, label == name → no-op.
+      if (tabRenameEnabled && STATUSLINE_ENABLED) {
+        const renames = computeRenames(rows, (r) => statuslineCache.get(`${env.id}:${r.paneId}`)?.data ?? null);
+        for (const op of renames) {
+          try {
+            await tabRenameFn(env, op.tabId, op.label);
+          } catch (err) {
+            console.warn(`[tab-rename] env=${env.id} tab=${op.tabId} err=${err instanceof Error ? err.message : String(err)}`);
           }
         }
       }

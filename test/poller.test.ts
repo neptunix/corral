@@ -58,6 +58,41 @@ describe("createPoller", () => {
   });
 });
 
+describe("createPoller tab rename", () => {
+  it("renames a tab when the canonical pane has a user-set name differing from the label", async () => {
+    const env = A; // existing local env fixture in this file
+    const rows = [{
+      env: env.id, paneId: "p1", status: "working", agent: "claude", cwd: "/x",
+      tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId: "11111111-2222-3333-4444-555555555555",
+      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+    }];
+    const statusline: StatuslineFn = () => Promise.resolve({
+      data: {
+        v: 1, captured_at: 1, session_id: "11111111-2222-3333-4444-555555555555",
+        session_name: "renamed-by-user", name_source: "user",
+        account: null, model: null, model_id: null,
+        ctx: { pct: null, tokens: null, window: null },
+        cost: { usd: null, lines_added: null, lines_removed: null },
+        rate: { five_hour: null, seven_day: null },
+        effort: null, thinking: null, cc_version: null,
+      },
+      status: "ok",
+    });
+    const calls: { tabId: string; label: string }[] = [];
+    const p = createPoller({
+      envs: [env],
+      list: () => Promise.resolve(rows),
+      recap: () => Promise.resolve({ recap: null, status: "no-summary" }),
+      statusline,
+      tabRename: (_e, tabId, label) => { calls.push({ tabId, label }); return Promise.resolve(); },
+      tabRenameEnabled: true,
+    });
+    await p.pollOnce();          // populate perEnv rows
+    await p.runClaudeSweepOnce(); // capture statusline + apply renames
+    expect(calls).toEqual([{ tabId: "t1", label: "renamed-by-user" }]);
+  });
+});
+
 const VALID_UUID = "a13ad559-8e59-4b98-b420-2746ef0b94d8";
 const OTHER_UUID = "b24be66a-9f6a-5ca9-c531-3857fc1ca5e9";
 
