@@ -208,6 +208,7 @@ export function createApi(opts: {
   lastActivity?: (env: HerdrEnv, sessionId: string) => Promise<number | null>;
   sessionCwd?: (env: HerdrEnv, sessionId: string) => Promise<string | null>;
   closeTab?: (env: HerdrEnv, tabId: string) => Promise<void>;
+  closePaneFn?: (env: HerdrEnv, paneId: string) => Promise<void>;
   spawnTimeoutMs?: number; // injectable so the timeout-cleanup path is testable without a 60s wait
   allowedOrigins?: readonly string[]; // Origin allowlist for the file-upload route (default WS_ALLOWED_ORIGINS)
   uploadRoot?: string; // drop-upload temp root (injectable so tests write to a scratch dir)
@@ -217,6 +218,7 @@ export function createApi(opts: {
   const lastActivity = opts.lastActivity ?? readLastActivity;
   const sessionCwd = opts.sessionCwd ?? readSessionCwd;
   const closeTab = opts.closeTab ?? tabClose;
+  const closePaneFn = opts.closePaneFn ?? closePane;
   const spawnTimeoutMs = opts.spawnTimeoutMs ?? SPAWN_TIMEOUT_MS;
   const allowedOrigins = opts.allowedOrigins ?? WS_ALLOWED_ORIGINS;
   const uploadRoot = opts.uploadRoot ?? UPLOAD_ROOT;
@@ -731,6 +733,39 @@ export function createApi(opts: {
     }
     try {
       await closeTab(env, tabId);
+    } catch (err) {
+      return c.json({ error: { code: "close_failed", message: err instanceof Error ? err.message : String(err) } }, 502);
+    }
+    return c.json({ ok: true });
+  });
+
+  // Fallback close: kills the PANE directly (herdr pane close <paneId>) rather than the tab. Used by the
+  // close modal when a tab-close hits `no_tab` (no stored tabId, no safe heal). Resolves the link like
+  // /close so it can only close a pane THIS task owns, and requires a live row so a dead ref is a no-op
+  // 404 rather than a blind kill.
+  app.post("/api/boards/:bid/tasks/:tid/sessions/:env/:paneId/close-pane", async (c) => {
+    if (opts.storage === undefined) return c.json({ error: { code: "no_storage" } }, 503);
+    const bid = c.req.param("bid");
+    if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
+    const tid = c.req.param("tid");
+    if (!TID_RE.test(tid)) return c.json({ error: { code: "validation", message: "bad taskId" } }, 400);
+    const env = opts.envs.find((e) => e.id === c.req.param("env"));
+    if (!env) return c.json({ error: { code: "validation", message: "unknown env" } }, 400);
+    const paneId = c.req.param("paneId");
+    if (!PANE_RE.test(paneId)) return c.json({ error: { code: "validation", message: "bad paneId" } }, 400);
+    const board = opts.storage.getBoard(bid);
+    if (board === null) return c.json({ error: { code: "not_found" } }, 404);
+    const task = board.tasks.find((t) => t.id === tid);
+    if (task === undefined) return c.json({ error: { code: "not_found" } }, 404);
+    const sid = c.req.query("sid") ?? null;
+    if (sid !== null && !UUID_RE.test(sid)) return c.json({ error: { code: "validation", message: "bad sid" } }, 400);
+    const key = `${env.id}:${paneId}`;
+    const liveRow = opts.poller.getSnapshot().sessions.find((s) => `${s.env}:${s.paneId}` === key);
+    const idx = resolveLinkIndex(task.sessions, { env: env.id, paneId, sessionId: sid, liveSessionId: liveRow?.sessionId ?? null });
+    if (idx === -1) return c.json({ error: { code: "not_found", message: "session not linked" } }, 404);
+    if (liveRow === undefined) return c.json({ error: { code: "no_live_pane", message: "pane is not live — nothing to close" } }, 404);
+    try {
+      await closePaneFn(env, paneId);
     } catch (err) {
       return c.json({ error: { code: "close_failed", message: err instanceof Error ? err.message : String(err) } }, 502);
     }
