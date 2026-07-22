@@ -18,7 +18,8 @@ case "$sid" in *[!A-Za-z0-9._-]*) exit 0 ;; esac
 # Resolve the user-set name + its source from the Claude session registry. Registry files are named
 # by PID, so glob and grep for the record whose sessionId matches (mirrors the retired herdr-tab-sync
 # hook). Prefer $CONFIG_DIR/sessions, fall back to $HOME/.claude/sessions (remote-box layout). A miss
-# leaves both empty → name_source null (not user-set) and session_name falls back to the statusline.
+# leaves both empty → name_source null and session_name falls back to the statusline. (Downstream only
+# name_source == "derived" is treated as auto; null/absent counts as user-set — /rename leaves it unset.)
 reg=""
 for base in "$CONFIG_DIR/sessions" "$HOME/.claude/sessions"; do
   [ -d "$base" ] || continue
