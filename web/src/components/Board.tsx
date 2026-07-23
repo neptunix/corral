@@ -39,11 +39,10 @@ interface DroppableColumnProps {
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly onDetachSession: (taskId: string, env: string, paneId: string, sessionId: string | null) => void;
   readonly onCloseSession: (taskId: string, env: string, paneId: string, sessionId: string | null) => Promise<void>;
-  readonly onCloseSessionByPane: (taskId: string, env: string, paneId: string, sessionId: string | null) => Promise<void>;
   readonly onResumeSession: (taskId: string, env: string, paneId: string, sessionId: string | null) => void;
 }
 
-function DroppableColumn({ columnId, label, collapsible, tasks, onTaskEdit, onOpenSession, onDetachSession, onCloseSession, onCloseSessionByPane, onResumeSession }: DroppableColumnProps): JSX.Element {
+function DroppableColumn({ columnId, label, collapsible, tasks, onTaskEdit, onOpenSession, onDetachSession, onCloseSession, onResumeSession }: DroppableColumnProps): JSX.Element {
   const { setNodeRef, isOver } = useDroppable({ id: `col:${columnId}`, data: { type: "column", columnId } });
   // Closed columns start collapsed on every load (in-memory only, no persistence). Toggle to peek.
   const [collapsed, setCollapsed] = useState(collapsible);
@@ -92,7 +91,6 @@ function DroppableColumn({ columnId, label, collapsible, tasks, onTaskEdit, onOp
             onOpenSession={onOpenSession}
             onDetachSession={(env, paneId, sessionId) => { onDetachSession(task.id, env, paneId, sessionId); }}
             onCloseSession={(env, paneId, sessionId) => onCloseSession(task.id, env, paneId, sessionId)}
-            onCloseSessionByPane={(env, paneId, sessionId) => onCloseSessionByPane(task.id, env, paneId, sessionId)}
             onResumeSession={(env, paneId, sessionId) => { onResumeSession(task.id, env, paneId, sessionId); }}
           />
         ))}
@@ -205,19 +203,6 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
     }
   }
 
-  // Fallback close via herdr pane close (used by the modal after a tab-close failure).
-  async function handleCloseSessionByPane(taskId: string, env: string, paneId: string, sessionId: string | null): Promise<void> {
-    const key = sessionKey(taskId, env, paneId, sessionId);
-    if (key !== null) onMarkOptimistic(key, "closing");
-    try {
-      await api.tasks.closePane(board.id, taskId, env, paneId, sessionId);
-      onBoardStateChange();
-    } catch (err) {
-      if (key !== null) onClearOptimistic(key);
-      throw err instanceof Error ? err : new Error(String(err));
-    }
-  }
-
   // Resume = restart a detached session (`claude --resume <uuid>`), rebinding the link to the new pane,
   // then auto-open it (mirrors the post-spawn auto-open in TaskEditModal's onSpawn flow). Flip the row to
   // live immediately; revert on error.
@@ -246,7 +231,6 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
               onOpenSession={onOpenSession}
               onDetachSession={handleDetachSession}
               onCloseSession={handleCloseSession}
-              onCloseSessionByPane={handleCloseSessionByPane}
               onResumeSession={handleResumeSession}
             />
           ))}

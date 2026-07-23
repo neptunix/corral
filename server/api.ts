@@ -18,8 +18,9 @@ import { z } from "zod";
 import { READ_CACHE_TTL_MS, SPAWN_TIMEOUT_MS, UPLOAD_ROOT, WS_ALLOWED_ORIGINS } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { syncClaudeThemeBase, ThemeModeSchema } from "./claude-theme.ts";
-import { closePane, listWorkspaces, readPane, tabClose, type ReadFn } from "./herdr.ts";
+import { closePane, listWorkspaces, readPane, type ReadFn } from "./herdr.ts";
 import { isLoopbackHost } from "./host-guard.ts";
+import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
 import { isSessionBound, resolveLinkIndex } from "./session-binding.ts";
 import { sanitizeSlug } from "./spawn.ts";
@@ -74,13 +75,7 @@ function buildUnassigned(storage: Storage | undefined, snapshot: Snapshot): Sess
 }
 
 function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, attention: AttentionMap): BoardState {
-  const liveMap = new Map<string, SessionRow>();
-  const bySession = new Map<string, SessionRow>();
-  for (const s of snapshot.sessions) {
-    liveMap.set(`${s.env}:${s.paneId}`, s);
-    // Index by the stable Claude UUID so a stale-paneId link can resolve to its current pane.
-    if (s.sessionId !== null && s.sessionId !== "") bySession.set(`${s.env}:${s.sessionId}`, s);
-  }
+  const index = buildLiveIndex(snapshot.sessions);
 
   const enrichedTasks: EnrichedTask[] = sortTasks(board.tasks).map((task) => ({
     ...task,
@@ -98,13 +93,8 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
       // reused paneId. React-key uniqueness rests on TaskCard's sessionId-inclusive key
       // (web/src/components/TaskCard.tsx), and every paneId-keyed write resolves the specific link by
       // sessionId (server/session-binding.ts).
-      let live = liveMap.get(`${link.env}:${link.paneId}`);
-      let paneId = link.paneId;
-      if (link.sessionId !== null && link.sessionId !== "" && live?.sessionId !== link.sessionId) {
-        const healed = bySession.get(`${link.env}:${link.sessionId}`);
-        live = healed;
-        paneId = healed !== undefined ? healed.paneId : link.paneId;
-      }
+      const live = resolveLiveRow(link, index);
+      const paneId = live?.paneId ?? link.paneId;
       return {
         ...link,
         paneId,
@@ -209,7 +199,6 @@ export function createApi(opts: {
   listWorkspaces?: (env: HerdrEnv) => Promise<{ workspace_id: string; label: string }[]>;
   lastActivity?: (env: HerdrEnv, sessionId: string) => Promise<number | null>;
   sessionCwd?: (env: HerdrEnv, sessionId: string) => Promise<string | null>;
-  closeTab?: (env: HerdrEnv, tabId: string) => Promise<void>;
   closePaneFn?: (env: HerdrEnv, paneId: string) => Promise<void>;
   spawnTimeoutMs?: number; // injectable so the timeout-cleanup path is testable without a 60s wait
   allowedOrigins?: readonly string[]; // Origin allowlist for the file-upload route (default WS_ALLOWED_ORIGINS)
@@ -219,7 +208,6 @@ export function createApi(opts: {
   const listWs = opts.listWorkspaces ?? listWorkspaces;
   const lastActivity = opts.lastActivity ?? readLastActivity;
   const sessionCwd = opts.sessionCwd ?? readSessionCwd;
-  const closeTab = opts.closeTab ?? tabClose;
   const closePaneFn = opts.closePaneFn ?? closePane;
   const spawnTimeoutMs = opts.spawnTimeoutMs ?? SPAWN_TIMEOUT_MS;
   const allowedOrigins = opts.allowedOrigins ?? WS_ALLOWED_ORIGINS;
@@ -697,10 +685,13 @@ export function createApi(opts: {
     return c.json({ ok: true });
   });
 
-  // Task-scoped "close" kills a running Claude session's herdr tab (herdr tab close <tabId>), which
-  // terminates the session but keeps the task→session LINK — distinct from /detach above, which only
-  // unlinks. This route does NOT mutate the board; the session disappears from the next poll and the
-  // card renders detached.
+  // Task-scoped "close" kills a running Claude session with `herdr pane close <paneId>`, which cascades
+  // pane → tab → workspace (herdr refuses `tab close` on a workspace's last tab, so pane close is the
+  // one primitive that always works and cleans up the empty workspace when it was ours). It keeps the
+  // task→session LINK — distinct from /detach above, which only unlinks — and does NOT mutate the
+  // board; the session disappears from the next poll and the card renders detached. A live row for the
+  // pane is REQUIRED, and its sessionId must match the link's, so a detached or churn-reused pane is
+  // never closed out from under a stranger.
   app.post("/api/boards/:bid/tasks/:tid/sessions/:env/:paneId/close", async (c) => {
     if (opts.storage === undefined) return c.json({ error: { code: "no_storage" } }, 503);
     const bid = c.req.param("bid");
@@ -723,49 +714,12 @@ export function createApi(opts: {
     const idx = resolveLinkIndex(task.sessions, { env: env.id, paneId, sessionId: sid, liveSessionId: liveRow?.sessionId ?? null });
     const link = idx === -1 ? undefined : task.sessions[idx];
     if (link === undefined) return c.json({ error: { code: "not_found", message: "session not linked" } }, 404);
-    // Prefer the live row's CURRENT tabId — but only when its sessionId confirms it's the same session
-    // (never trust a reused pane). This also heals a legacy link persisted with an empty tabId.
-    const linkSid = link.sessionId;
-    let tabId = link.tabId;
-    if (liveRow !== undefined && linkSid !== null && linkSid !== "" && liveRow.sessionId === linkSid && liveRow.tabId !== undefined && liveRow.tabId !== "") {
-      tabId = liveRow.tabId;
-    }
-    if (tabId === "") {
-      return c.json({ error: { code: "no_tab", message: "no herdr tab recorded for this session — re-attach it, then close" } }, 400);
-    }
-    try {
-      await closeTab(env, tabId);
-    } catch (err) {
-      return c.json({ error: { code: "close_failed", message: err instanceof Error ? err.message : String(err) } }, 502);
-    }
-    return c.json({ ok: true });
-  });
-
-  // Fallback close: kills the PANE directly (herdr pane close <paneId>) rather than the tab. Used by the
-  // close modal when a tab-close hits `no_tab` (no stored tabId, no safe heal). Resolves the link like
-  // /close so it can only close a pane THIS task owns, and requires a live row so a dead ref is a no-op
-  // 404 rather than a blind kill.
-  app.post("/api/boards/:bid/tasks/:tid/sessions/:env/:paneId/close-pane", async (c) => {
-    if (opts.storage === undefined) return c.json({ error: { code: "no_storage" } }, 503);
-    const bid = c.req.param("bid");
-    if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
-    const tid = c.req.param("tid");
-    if (!TID_RE.test(tid)) return c.json({ error: { code: "validation", message: "bad taskId" } }, 400);
-    const env = opts.envs.find((e) => e.id === c.req.param("env"));
-    if (!env) return c.json({ error: { code: "validation", message: "unknown env" } }, 400);
-    const paneId = c.req.param("paneId");
-    if (!PANE_RE.test(paneId)) return c.json({ error: { code: "validation", message: "bad paneId" } }, 400);
-    const board = opts.storage.getBoard(bid);
-    if (board === null) return c.json({ error: { code: "not_found" } }, 404);
-    const task = board.tasks.find((t) => t.id === tid);
-    if (task === undefined) return c.json({ error: { code: "not_found" } }, 404);
-    const sid = c.req.query("sid") ?? null;
-    if (sid !== null && !UUID_RE.test(sid)) return c.json({ error: { code: "validation", message: "bad sid" } }, 400);
-    const key = `${env.id}:${paneId}`;
-    const liveRow = opts.poller.getSnapshot().sessions.find((s) => `${s.env}:${s.paneId}` === key);
-    const idx = resolveLinkIndex(task.sessions, { env: env.id, paneId, sessionId: sid, liveSessionId: liveRow?.sessionId ?? null });
-    if (idx === -1) return c.json({ error: { code: "not_found", message: "session not linked" } }, 404);
     if (liveRow === undefined) return c.json({ error: { code: "no_live_pane", message: "pane is not live — nothing to close" } }, 404);
+    // Poisoning guard: only close the pane when the live row IS our session. A link sessionId the live
+    // row disagrees with means a herdr restart reused the pane for a stranger — refuse, don't kill it.
+    if (link.sessionId !== null && link.sessionId !== "" && liveRow.sessionId !== link.sessionId) {
+      return c.json({ error: { code: "pane_reused", message: "pane now belongs to a different session" } }, 409);
+    }
     try {
       await closePaneFn(env, paneId);
     } catch (err) {
@@ -950,7 +904,9 @@ export function createApi(opts: {
         // would kill a session the user never spawned.
         void spawnPromise.then((r) => {
           if (r.idempotent) return;
-          return closeTab(targetEnv, r.tabId);
+          // pane close (not tab close): the orphan is a fresh single-tab workspace, and tab close
+          // refuses a workspace's last tab — pane close cascades and removes the whole workspace.
+          return closePaneFn(targetEnv, r.paneId);
         }).catch(() => void 0);
       }
       const code = timedOut ? "spawn_timeout" : "spawn_error";

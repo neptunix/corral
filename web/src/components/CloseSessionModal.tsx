@@ -10,13 +10,13 @@ interface Props {
   readonly status: string;
   readonly model: string | null;
   readonly ctxPct: string | null;
-  readonly onCloseTab: () => Promise<void>;   // primary: herdr tab close
-  readonly onClosePane: () => Promise<void>;  // fallback: herdr pane close
+  readonly onClose: () => Promise<void>;      // herdr pane close (cascades pane → tab → workspace)
   readonly onDismiss: () => void;             // close the modal without acting
 }
 
-// Confirm-before-kill dialog for a running session. Primary action closes the herdr tab; on failure it
-// keeps the modal open, shows the error, and reveals the pane-close fallback. No window.alert anywhere.
+// Confirm-before-kill dialog for a running session. Closing runs `herdr pane close`, which always
+// works (unlike tab close on a workspace's last tab) and cascades to remove the workspace when it was
+// ours. On failure the modal stays open and shows the error so the user can retry. No window.alert.
 export function CloseSessionModal(props: Props): JSX.Element {
   const { name, taskTitle, env, paneId, tabId, sessionId, status, model, ctxPct, onDismiss } = props;
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +77,6 @@ export function CloseSessionModal(props: Props): JSX.Element {
         {error !== null && (
           <div className="text-[11px] text-red-400 border border-red-400/40 rounded p-2 mb-3">
             Close failed: {error}
-            <div className="text-muted-foreground/70 mt-1">You can close the pane directly instead.</div>
           </div>
         )}
         <div className="flex justify-end gap-2">
@@ -87,17 +86,9 @@ export function CloseSessionModal(props: Props): JSX.Element {
             disabled={busy}
             className="px-2 py-1 text-xs rounded border border-border text-muted-foreground hover:text-foreground disabled:opacity-50"
           >Cancel</button>
-          {error !== null && (
-            <button
-              type="button"
-              onClick={() => { void run(props.onClosePane); }}
-              disabled={busy}
-              className="px-2 py-1 text-xs rounded border border-orange-400/60 text-orange-300 hover:border-orange-400 disabled:opacity-50"
-            >Close by pane</button>
-          )}
           <button
             type="button"
-            onClick={() => { void run(props.onCloseTab); }}
+            onClick={() => { void run(props.onClose); }}
             disabled={busy}
             className="px-2 py-1 text-xs rounded bg-destructive text-destructive-foreground hover:opacity-90 disabled:opacity-50"
           >{busy ? "Closing…" : "Close session"}</button>

@@ -29,11 +29,10 @@ interface Props {
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly onDetachSession: (env: string, paneId: string, sessionId: string | null) => void;
   readonly onCloseSession: (env: string, paneId: string, sessionId: string | null) => Promise<void>;
-  readonly onCloseSessionByPane: (env: string, paneId: string, sessionId: string | null) => Promise<void>;
   readonly onResumeSession: (env: string, paneId: string, sessionId: string | null) => void;
 }
 
-export function TaskCard({ task, onEdit, onOpenSession, onDetachSession, onCloseSession, onCloseSessionByPane, onResumeSession }: Props): JSX.Element {
+export function TaskCard({ task, onEdit, onOpenSession, onDetachSession, onCloseSession, onResumeSession }: Props): JSX.Element {
   // Opening a session always uses awaitAgent=false (attach once). Retry-until-registered is only for
   // the post-spawn auto-open (TaskEditModal); a manual reopen of a LIVE session attaches immediately,
   // and a manual open of a DEAD one should fail fast with a clear message — not spin "starting…" for
@@ -86,7 +85,6 @@ export function TaskCard({ task, onEdit, onOpenSession, onDetachSession, onClose
               title={task.title}
               onOpenSession={onOpenSession}
               onCloseSession={onCloseSession}
-              onCloseSessionByPane={onCloseSessionByPane}
               onResumeSession={onResumeSession}
               onDetachSession={onDetachSession}
             />
@@ -102,12 +100,11 @@ interface SessionRowProps {
   readonly title: string;
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly onCloseSession: (env: string, paneId: string, sessionId: string | null) => Promise<void>;
-  readonly onCloseSessionByPane: (env: string, paneId: string, sessionId: string | null) => Promise<void>;
   readonly onResumeSession: (env: string, paneId: string, sessionId: string | null) => void;
   readonly onDetachSession: (env: string, paneId: string, sessionId: string | null) => void;
 }
 
-function SessionRow({ s, title, onOpenSession, onCloseSession, onCloseSessionByPane, onResumeSession, onDetachSession }: SessionRowProps): JSX.Element {
+function SessionRow({ s, title, onOpenSession, onCloseSession, onResumeSession, onDetachSession }: SessionRowProps): JSX.Element {
   const detached = s.live?.detached === true;
   // Optimistic transient (App overlays a synthetic live.status during a close/resume round-trip). While
   // pending we suppress every row action + the click behavior so item 1 and item 2 can't fight — e.g. the
@@ -255,8 +252,7 @@ function SessionRow({ s, title, onOpenSession, onCloseSession, onCloseSessionByP
           status={s.live?.status ?? "unknown"}
           model={s.live?.model ?? null}
           ctxPct={s.live?.ctxPct ?? null}
-          onCloseTab={() => onCloseSession(s.env, s.paneId, s.sessionId)}
-          onClosePane={() => onCloseSessionByPane(s.env, s.paneId, s.sessionId)}
+          onClose={() => onCloseSession(s.env, s.paneId, s.sessionId)}
           onDismiss={() => { setShowClose(false); }}
         />
       )}
