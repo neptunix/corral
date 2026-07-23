@@ -38,13 +38,13 @@ export function detectZombies(input: DetectInput): DetectOutput {
   const reap: { env: string; paneId: string }[] = [];
   for (const link of detached) {
     if (link.tabId === "") continue;
-    // Triple guard (id + workspace + label): the stored tab must still exist unchanged. A herdr
-    // restart reassigns ids, so a missing tab, or a same-id tab whose workspace/label differs, is not
-    // ours — skip it (and don't seed a timer), so churn can never be mistaken for an exited Claude.
+    // Guard on the STABLE coordinates (workspaceId + tabId): the stored tab must still exist. A herdr
+    // restart reassigns ids, so a missing tab — or a same-id tab in a different workspace — is not ours;
+    // skip it (and don't seed a timer) so churn is never mistaken for an exited Claude. We deliberately
+    // do NOT compare the label: corral renames herdr tabs to the Claude session name, so link.tabLabel
+    // goes stale — comparing it would leave every renamed session's zombie tab uncollected.
     const tabs = tabsByEnv.get(link.env) ?? [];
-    const matches = tabs.some(
-      (t) => t.tabId === link.tabId && t.workspaceId === link.workspaceId && t.label === link.tabLabel,
-    );
+    const matches = tabs.some((t) => t.tabId === link.tabId && t.workspaceId === link.workspaceId);
     if (!matches) continue;
     const key = `${link.env}:${link.tabId}`;
     const first = since.get(key) ?? now;

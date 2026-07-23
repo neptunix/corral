@@ -38,12 +38,14 @@ describe("detectZombies", () => {
     expect(r.reap).toEqual([]);
   });
 
-  it("does not reap when the tab's label disagrees (id reuse after restart)", () => {
+  it("reaps even when the herdr tab was renamed since spawn (stored label is stale)", () => {
+    // corral itself renames herdr tabs to the Claude session name, so link.tabLabel goes stale — the
+    // guard must NOT compare it, only the stable tabId + workspaceId.
     const r = detectZombies({
-      detached: [link()], tabsByEnv: tabsByEnv([tab({ label: "someone-else" })]),
+      detached: [link({ tabLabel: "test-corral-b" })], tabsByEnv: tabsByEnv([tab({ label: "test-corral-5" })]),
       now: 20_000, since: new Map([["e:w1:t2", 0]]), graceMs: 20_000,
     });
-    expect(r.reap).toEqual([]);
+    expect(r.reap).toEqual([{ env: "e", paneId: "w1:p2" }]);
   });
 
   it("ignores a link with an empty tabId", () => {
