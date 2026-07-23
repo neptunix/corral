@@ -26,7 +26,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@fontsource/inter": "^5.2.8",
-    "@hono/node-server": "^1.13.0",
+    "@hono/node-server": "^2.0.10",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "ansi_up": "^6.0.6",
