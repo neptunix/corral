@@ -256,6 +256,9 @@ const WorkspaceCreateSchema = z.object({
   result: z.object({
     workspace: z.object({ workspace_id: z.string() }).optional(),
     workspace_id: z.string().optional(),
+    // `workspace create` also seeds a root tab + pane; surface them so spawn can reuse that tab
+    // instead of leaving it empty and creating a second one.
+    root_pane: z.object({ pane_id: z.string().optional(), tab_id: z.string().optional() }).optional(),
   }),
 });
 
@@ -298,7 +301,7 @@ export async function tabCreate(
 
 export async function workspaceCreate(
   env: HerdrEnv, cwd: string, label: string, exec?: ExecFn,
-): Promise<string> {
+): Promise<{ workspaceId: string; rootTabId: string | undefined; rootPaneId: string | undefined }> {
   const out = await runHerdr(
     env, ["workspace", "create", "--cwd", cwd, "--label", label],
     exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec },
@@ -306,7 +309,7 @@ export async function workspaceCreate(
   const r = WorkspaceCreateSchema.parse(JSON.parse(out.trim())).result;
   const id = r.workspace?.workspace_id ?? r.workspace_id;
   if (id === undefined) throw new Error(`workspace create: missing workspace_id in response: ${out.slice(0, 200)}`);
-  return id;
+  return { workspaceId: id, rootTabId: r.root_pane?.tab_id, rootPaneId: r.root_pane?.pane_id };
 }
 
 export async function listPanes(

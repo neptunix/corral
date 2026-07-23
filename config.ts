@@ -51,6 +51,13 @@ export const TAB_RENAME_ENABLED = process.env.TAB_RENAME_ENABLED !== "false";
 // poll has populated the rows — then runs every RECAP_INTERVAL_MS. Keeps startup renames near-instant.
 export const SWEEP_INITIAL_DELAY_MS = intFromEnv("SWEEP_INITIAL_DELAY_MS", 5000, { min: 0 });
 
+// Zombie-tab reaper: when a Claude session exits it leaves a shell-only tab behind (herdr keeps the
+// pane, drops the agent). corral closes such tabs automatically once a detached link's tab has
+// lingered for this grace window — long enough to rule out a poll flicker or a slow-to-register
+// spawn. Set ZOMBIE_REAP_ENABLED=false to turn the reaper off entirely.
+export const ZOMBIE_REAP_ENABLED = process.env.ZOMBIE_REAP_ENABLED !== "false";
+export const ZOMBIE_REAP_GRACE_MS = intFromEnv("ZOMBIE_REAP_GRACE_MS", 20000, { min: 0 });
+
 export const BOARD_DATA_DIR = process.env.BOARD_DATA_DIR ?? CORRAL_HOME;
 export const GIT_COMMIT_INTERVAL_MS = 10_000;
 export const SPAWN_TIMEOUT_MS = 60_000;

@@ -1,12 +1,12 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 
-import { BOARD_DATA_DIR, HOST, PORT, UPLOAD_ROOT, WS_ALLOWED_ORIGINS } from "../config.ts";
+import { BOARD_DATA_DIR, HOST, PORT, UPLOAD_ROOT, WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED } from "../config.ts";
 import { ENVIRONMENTS } from "../environments.ts";
 import { createApi } from "./api.ts";
 import { createAttentionStore } from "./attention-store.ts";
 import { createGit } from "./git.ts";
-import { listWorkspaces, readPane, tabClose, workspaceClose } from "./herdr.ts";
+import { closePane, listTabs, listWorkspaces, readPane, workspaceClose } from "./herdr.ts";
 import { assertLoopback } from "./host-guard.ts";
 import { createPoller } from "./poller.ts";
 import { startReconciler } from "./reconcile.ts";
@@ -15,6 +15,7 @@ import { createStorage } from "./storage.ts";
 import { readLastActivity } from "./transcript.ts";
 import { sweepUploadRoot } from "./uploads.ts";
 import { attachWebSocketServer } from "./ws-attach.ts";
+import { startZombieReaper } from "./zombie-reaper.ts";
 
 assertLoopback(HOST);
 
@@ -43,11 +44,13 @@ void (async () => {
   // Backfill stored links' Claude sessionId once the poller sees it (spawned links start null) — the
   // write-side half of persistent session identity; buildBoardState does the read-side churn-heal.
   startReconciler({ poller, storage });
+  // Close shell-only tabs left behind when a Claude session exits (detached link whose herdr tab still
+  // lingers). The ONLY place the poll loop mutates herdr — gated, guarded, and via pane close only.
+  if (ZOMBIE_REAP_ENABLED) startZombieReaper({ poller, storage, envs: ENVIRONMENTS, listTabs, closePane });
 
   const app = createApi({
     poller, envs: ENVIRONMENTS, storage,
     listWorkspaces,
-    closeTab: tabClose,
     lastActivity: readLastActivity,
     allowedOrigins: WS_ALLOWED_ORIGINS,
     spawn: (opts) => spawnSession({

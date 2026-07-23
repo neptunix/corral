@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import { getEnv } from "../environments.ts";
-import { listSessions, type ExecFn } from "../server/herdr.ts";
+import { listSessions, listTabs, type ExecFn } from "../server/herdr.ts";
 
 const VALID_UUID = "a13ad559-8e59-4b98-b420-2746ef0b94d8";
 
@@ -35,6 +35,18 @@ function execWithAgentSession(agentPatch: Record<string, unknown>): ExecFn {
     return Promise.resolve({ stdout: "{}", stderr: "" });
   };
 }
+
+describe("listTabs", () => {
+  it("parses tab list into raw {tab_id,label,workspace_id} (all tabs, agent or not)", async () => {
+    const tabs = await listTabs(getEnv("work-local"), baseExec);
+    expect(tabs).toEqual([{ tab_id: "w1:1", label: "jira", workspace_id: "w1" }]);
+  });
+
+  it("returns [] on a valid-JSON-but-unexpected shape", async () => {
+    const exec: ExecFn = () => Promise.resolve({ stdout: JSON.stringify({ result: { tabs: "garbage" } }), stderr: "" });
+    expect(await listTabs(getEnv("work-local"), exec)).toEqual([]);
+  });
+});
 
 describe("listSessions", () => {
   it("joins agents with tab + workspace labels", async () => {

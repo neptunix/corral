@@ -87,18 +87,12 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ env, paneId, sessionId }),
       }),
-    // close kills the session's herdr tab but keeps the task→session link (unlike detach, which only
-    // unlinks); the session disappears from the next poll and the card renders detached.
+    // close kills the session's pane via herdr pane close (which cascades pane → tab → workspace) but
+    // keeps the task→session link (unlike detach, which only unlinks); the session disappears from the
+    // next poll and the card renders detached.
     close: (bid: string, tid: string, env: string, paneId: string, sessionId: string | null) =>
       req<{ ok: boolean }>(
         `/api/boards/${bid}/tasks/${tid}/sessions/${env}/${paneId}/close${sessionId !== null && sessionId !== "" ? `?sid=${sessionId}` : ""}`,
-        { method: "POST" },
-      ),
-    // close-pane kills the pane directly (herdr pane close) — the fallback the close modal offers when
-    // a tab-close fails with no_tab. Keeps the task→session link like close.
-    closePane: (bid: string, tid: string, env: string, paneId: string, sessionId: string | null) =>
-      req<{ ok: boolean }>(
-        `/api/boards/${bid}/tasks/${tid}/sessions/${env}/${paneId}/close-pane${sessionId !== null && sessionId !== "" ? `?sid=${sessionId}` : ""}`,
         { method: "POST" },
       ),
     // resume restarts a stopped Claude session (`claude --resume <uuid>`) and rebinds the link to the

@@ -744,76 +744,82 @@ async function seedTaskWithLink(app: ReturnType<typeof createApi>, storage: Retu
   });
 }
 
-describe("POST close", () => {
-  it("calls tabClose(link.tabId) and leaves task.sessions unchanged", async () => {
+describe("POST close (herdr pane close)", () => {
+  const SID = "11111111-2222-3333-4444-555555555555"; // seedTaskWithLink's default link sessionId
+  const liveAt = (paneId: string, sessionId: string | null): Snapshot => ({
+    envs: { "work-local": { reachable: true } },
+    sessions: [makeLiveRow({ paneId, sessionId, tabId: "w1:t1" })],
+  });
+
+  // close now kills the PANE (herdr pane close cascades pane → tab → workspace); it requires a live
+  // row for env:paneId whose sessionId matches the link, so a detached / reused pane is never closed.
+  it("closes the pane and leaves task.sessions unchanged", async () => {
     const closed: string[] = [];
     const storage = createStorage(tmpDir);
-    const app = createApi({ poller, envs: ENVIRONMENTS, storage, closeTab: (_e, tabId) => { closed.push(tabId); return Promise.resolve(); } });
+    const app = createApi({
+      poller: { ...poller, getSnapshot: () => liveAt("w1:p1", SID) },
+      envs: ENVIRONMENTS, storage,
+      closePaneFn: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); },
+    });
     await seedTaskWithLink(app, storage);
     const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close", { method: "POST" });
     expect(res.status).toBe(200);
-    expect(closed).toEqual(["w1:t1"]);
-    const board = storage.getBoard("t");
-    expect(board?.tasks[0]?.sessions).toHaveLength(1); // link retained
+    expect(closed).toEqual(["w1:p1"]);
+    expect(storage.getBoard("t")?.tasks[0]?.sessions).toHaveLength(1); // link retained
   });
 
-  it("502s when tabClose throws, session retained", async () => {
+  it("502s when pane close throws, session retained", async () => {
     const storage = createStorage(tmpDir);
-    const app = createApi({ poller, envs: ENVIRONMENTS, storage, closeTab: () => Promise.reject(new Error("unreachable")) });
+    const app = createApi({
+      poller: { ...poller, getSnapshot: () => liveAt("w1:p1", SID) },
+      envs: ENVIRONMENTS, storage,
+      closePaneFn: () => Promise.reject(new Error("unreachable")),
+    });
     await seedTaskWithLink(app, storage);
     const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close", { method: "POST" });
     expect(res.status).toBe(502);
-    const board = storage.getBoard("t");
-    expect(board?.tasks[0]?.sessions).toHaveLength(1); // link retained
-  });
-});
-
-describe("POST close-pane", () => {
-  // The route REQUIRES a live row for env:paneId (never pane-close a dead ref), so the success case
-  // must inject a snapshot containing that live row — seedTaskWithLink only seeds the board link, and
-  // the default `poller` returns sessions: []. Mirror the snapshot session-row shape used elsewhere in
-  // this file (tabId/workspaceId are optional on SessionRow, so they can be omitted).
-  it("closes the pane when the link is owned by the task and the pane is live", async () => {
-    const closedPanes: string[] = [];
-    const storage = createStorage(tmpDir);
-    const snapshot: Snapshot = {
-      envs: { "work-local": { reachable: true } },
-      sessions: [{
-        env: "work-local", paneId: "w1:p1", status: "working", agent: "claude",
-        cwd: "/c", tab: "x", workspace: "c",
-        sessionId: "11111111-2222-3333-4444-555555555555",
-        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
-      }],
-    };
-    const app = createApi({
-      poller: { ...poller, getSnapshot: () => snapshot },
-      envs: ENVIRONMENTS, storage,
-      closePaneFn: (_e, paneId) => { closedPanes.push(paneId); return Promise.resolve(); },
-    });
-    await seedTaskWithLink(app, storage);
-    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close-pane", { method: "POST" });
-    expect(res.status).toBe(200);
-    expect(closedPanes).toEqual(["w1:p1"]);
     expect(storage.getBoard("t")?.tasks[0]?.sessions).toHaveLength(1); // link retained
   });
 
   it("404s when the pane is not linked to the task", async () => {
-    // No snapshot needed: resolveLinkIndex returns -1 for the unlinked pane and the route 404s on the
-    // ownership check BEFORE the live-row check.
     const storage = createStorage(tmpDir);
     const app = createApi({ poller, envs: ENVIRONMENTS, storage, closePaneFn: () => Promise.resolve() });
     await seedTaskWithLink(app, storage);
-    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w9:p9/close-pane", { method: "POST" });
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w9:p9/close", { method: "POST" });
     expect(res.status).toBe(404);
   });
 
   it("404s (no_live_pane) when the link exists but the pane is not live", async () => {
-    // Owned link but empty snapshot → liveRow undefined → the live-row guard fires.
     const storage = createStorage(tmpDir);
     const app = createApi({ poller, envs: ENVIRONMENTS, storage, closePaneFn: () => Promise.resolve() });
     await seedTaskWithLink(app, storage);
-    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close-pane", { method: "POST" });
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close", { method: "POST" });
     expect(res.status).toBe(404);
+  });
+
+  // A null-sessionId link (no herdr integration, or the pre-backfill /new window) can't be verified by
+  // sessionId. Prove ownership by the live row's tab identity instead, so a churn-reused pane whose tab
+  // now differs is refused rather than closed out from under a stranger.
+  it("409s a null-sessionId link when the live pane's tab identity differs (churn-reused)", async () => {
+    const storage = createStorage(tmpDir);
+    const snapshot: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [makeLiveRow({ paneId: "w1:p1", sessionId: "99999999-8888-7777-6666-555555555555", tabId: "stranger:t", workspaceId: "w9" })] };
+    const closed: string[] = [];
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage, closePaneFn: (_e, p) => { closed.push(p); return Promise.resolve(); } });
+    await seedTaskWithLink(app, storage, null); // link.sessionId = null
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect(closed).toEqual([]);
+  });
+
+  it("closes a null-sessionId link when the live pane's tab identity matches", async () => {
+    const storage = createStorage(tmpDir);
+    const snapshot: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [makeLiveRow({ paneId: "w1:p1", sessionId: null, tabId: "w1:t1", workspaceId: "w1" })] };
+    const closed: string[] = [];
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage, closePaneFn: (_e, p) => { closed.push(p); return Promise.resolve(); } });
+    await seedTaskWithLink(app, storage, null);
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(closed).toEqual(["w1:p1"]);
   });
 });
 
@@ -1081,43 +1087,43 @@ describe("POST close — churn-heal + poisoning safety (#1)", () => {
 
   async function makeCloseApp(storage: ReturnType<typeof createStorage>, snapshot: Snapshot): Promise<{ app: ReturnType<typeof createApi>; closed: string[] }> {
     const closed: string[] = [];
-    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage, closeTab: (_e, tabId) => { closed.push(tabId); return Promise.resolve(); } });
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage, closePaneFn: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); } });
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "T" }) });
     return { app, closed };
   }
 
-  it("heals a legacy empty-tabId link from the live row's current tabId (same sessionId)", async () => {
+  it("closes the live pane for a legacy empty-tabId link (same sessionId)", async () => {
     const storage = createStorage(tmpDir);
     const snapshot: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [makeLiveRow({ paneId: "w9:p1", sessionId: S, tabId: "w9:t1" })] };
     const { app, closed } = await makeCloseApp(storage, snapshot);
     await seedLinkOnBoardT(storage, { paneId: "w9:p1", tabId: "", sessionId: S }); // broken: empty tabId
     const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w9:p1/close", { method: "POST" });
     expect(res.status).toBe(200);
-    expect(closed).toEqual(["w9:t1"]); // used the LIVE tabId, not the stored ""
+    expect(closed).toEqual(["w9:p1"]); // pane close needs no tabId at all
   });
 
-  it("resolves a churn-relocated pane by sessionId and closes the current tab", async () => {
+  it("resolves a churn-relocated pane by sessionId and closes the current pane", async () => {
     const storage = createStorage(tmpDir);
-    // Link stored at old:p / old:t; herdr restarted → same session now at new:p / new:t. buildBoardState
-    // heals the served paneId to new:p, so the UI closes via new:p.
+    // Link stored at old:p; herdr restarted → same session now at new:p. buildBoardState heals the
+    // served paneId to new:p, so the UI closes via new:p.
     const snapshot: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [makeLiveRow({ paneId: "new:p", sessionId: S, tabId: "new:t" })] };
     const { app, closed } = await makeCloseApp(storage, snapshot);
     await seedLinkOnBoardT(storage, { paneId: "old:p", tabId: "old:t", sessionId: S });
     const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/new:p/close", { method: "POST" });
     expect(res.status).toBe(200);
-    expect(closed).toEqual(["new:t"]);
+    expect(closed).toEqual(["new:p"]);
   });
 
-  it("never closes a stranger's tab when the pane was reused by a different session", async () => {
+  it("never closes a stranger's pane when the pane was reused by a different session", async () => {
     const storage = createStorage(tmpDir);
-    // Pane w9:p1 now hosts a DIFFERENT session (S2); our link (S) has an empty stored tabId. Close must
-    // NOT trust the reused pane's tabId — it 400s and calls closeTab for nothing.
+    // Pane w9:p1 now hosts a DIFFERENT session (S2); our link is S. The live row's sessionId disagrees,
+    // so close refuses (409) and touches nothing rather than killing the stranger's pane.
     const snapshot: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [makeLiveRow({ paneId: "w9:p1", sessionId: S2, tabId: "stranger:t" })] };
     const { app, closed } = await makeCloseApp(storage, snapshot);
     await seedLinkOnBoardT(storage, { paneId: "w9:p1", tabId: "", sessionId: S });
     const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w9:p1/close", { method: "POST" });
-    expect(res.status).toBe(400);
-    expect(closed).toEqual([]); // stranger:t never closed
+    expect(res.status).toBe(409);
+    expect(closed).toEqual([]); // stranger's pane never closed
   });
 });
 
@@ -1176,22 +1182,22 @@ describe("POST close — targets one of two same-pane links by ?sid", () => {
     });
   }
 
-  it("closes the ?sid-matched link's tab (not the sibling's)", async () => {
+  it("closes the ?sid-matched link's pane (the live one)", async () => {
     const closed: string[] = [];
     const storage = createStorage(tmpDir);
-    // Live row confirms NEW at pX so close trusts NEW's live tab; OLD keeps its stored tab.
+    // Live row confirms NEW at pX; ?sid=NEW resolves our link and the pane is closed once.
     const snapshot: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [makeLiveRow({ paneId: "pX", sessionId: NEW, tabId: "new:t" })] };
-    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage, closeTab: (_e, tabId) => { closed.push(tabId); return Promise.resolve(); } });
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage, closePaneFn: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); } });
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "T" }) });
     await seedTwo(storage);
     const res = await app.request(`/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/pX/close?sid=${NEW}`, { method: "POST" });
     expect(res.status).toBe(200);
-    expect(closed).toEqual(["new:t"]);
+    expect(closed).toEqual(["pX"]);
   });
 
   it("400s a malformed ?sid", async () => {
     const storage = createStorage(tmpDir);
-    const app = createApi({ poller, envs: ENVIRONMENTS, storage, closeTab: () => Promise.resolve() });
+    const app = createApi({ poller, envs: ENVIRONMENTS, storage, closePaneFn: () => Promise.resolve() });
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "T" }) });
     await seedTwo(storage);
     const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/pX/close?sid=not-a-uuid", { method: "POST" });
@@ -1271,7 +1277,7 @@ describe("POST spawn — timeout cleanup (#5)", () => {
     const { promise, resolve } = pendingSpawn();
     const app = createApi({
       poller, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
-      spawn: () => promise, closeTab: (_e, tabId) => { closed.push(tabId); return Promise.resolve(); },
+      spawn: () => promise, closePaneFn: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); },
       spawnTimeoutMs: 10,
     });
     const id = await taskOnBoard(app);
@@ -1280,16 +1286,16 @@ describe("POST spawn — timeout cleanup (#5)", () => {
     });
     expect(res.status).toBe(500);
     expect((await res.json() as { error: { code: string } }).error.code).toBe("spawn_timeout");
-    resolve(doneResult("orphan:t", false)); // the abandoned spawn finishes → its tab must be closed
-    await vi.waitFor(() => { expect(closed).toEqual(["orphan:t"]); });
+    resolve(doneResult("orphan:t", false)); // the abandoned spawn finishes → its pane must be closed
+    await vi.waitFor(() => { expect(closed).toEqual(["w1:p2"]); }); // doneResult paneId (pane close cascades the fresh workspace)
   });
 
-  it("does NOT close the tab when the timed-out spawn was an idempotent rejoin (pre-existing session)", async () => {
+  it("does NOT close the pane when the timed-out spawn was an idempotent rejoin (pre-existing session)", async () => {
     const closed: string[] = [];
     const { promise, resolve } = pendingSpawn();
     const app = createApi({
       poller, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
-      spawn: () => promise, closeTab: (_e, tabId) => { closed.push(tabId); return Promise.resolve(); },
+      spawn: () => promise, closePaneFn: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); },
       spawnTimeoutMs: 10,
     });
     const id = await taskOnBoard(app);

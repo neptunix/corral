@@ -19,9 +19,11 @@ function baseFns() {
   return {
     listFn: vi.fn().mockResolvedValue([]),
     tabCreateFn: vi.fn().mockResolvedValue({ tabId: "w1:t2", paneId: "w1:p2" }),
+    tabRenameFn: vi.fn().mockResolvedValue(undefined),
     paneRunFn: vi.fn().mockResolvedValue(undefined),
     paneGetFn: vi.fn().mockResolvedValue({ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", cwd: "/proj" }),
-    workspaceCreateFn: vi.fn().mockResolvedValue("w1"),
+    // workspace create seeds a root tab + pane; spawn reuses that tab rather than leaving it empty.
+    workspaceCreateFn: vi.fn().mockResolvedValue({ workspaceId: "w1", rootTabId: "w1:t1", rootPaneId: "w1:p1" }),
     workspaceCloseFn: vi.fn().mockResolvedValue(undefined),
     tabCloseFn: vi.fn().mockResolvedValue(undefined),
     workspaceListFn: vi.fn().mockResolvedValue([{ workspace_id: "w1", label: "corral" }]),
@@ -30,21 +32,35 @@ function baseFns() {
 }
 
 describe("spawnSession — create new workspace", () => {
-  it("creates at repoPath and runs spawnCommand in a `<slug>-a` tab", async () => {
+  it("reuses the workspace's root tab (renames it) instead of leaving it empty", async () => {
     const fns = baseFns();
+    fns.paneGetFn = vi.fn().mockResolvedValue({ paneId: "w1:p1", tabId: "w1:t1", workspaceId: "w1", cwd: "/repos/corral" });
     const result = await spawnSession({
       env: localEnv, taskSlug: "my-task", cwd: "/fallback", repo: "corral",
       assignedPaneIds: new Set(), spawnCommand: "claude-personal",
       targetWorkspaceId: null, repoPath: "/repos/corral", ...fns,
     });
     expect(result.idempotent).toBe(false);
-    expect(result.paneId).toBe("w1:p2");
+    expect(result.paneId).toBe("w1:p1");                  // the ROOT pane, not a second one
     expect(result.tabLabel).toBe("my-task-a");
     expect(fns.workspaceCreateFn).toHaveBeenCalledWith(localEnv, "/repos/corral", "corral");
-    expect(fns.tabCreateFn).toHaveBeenCalledWith(localEnv, "w1", "/repos/corral", "my-task-a");
-    expect(fns.paneRunFn).toHaveBeenCalledWith(localEnv, "w1:p2", "claude-personal", undefined);
-    // No idempotency scan on the create-new path (a fresh workspace has no tabs).
+    expect(fns.tabRenameFn).toHaveBeenCalledWith(localEnv, "w1:t1", "my-task-a"); // root tab renamed
+    expect(fns.tabCreateFn).not.toHaveBeenCalled();       // no second tab → no empty leftover
+    expect(fns.paneRunFn).toHaveBeenCalledWith(localEnv, "w1:p1", "claude-personal", undefined);
+    // No idempotency scan on the create-new path (a fresh workspace has no tabs to rejoin).
     expect(fns.listPanesFn).not.toHaveBeenCalled();
+  });
+
+  it("falls back to creating a tab when the workspace exposes no root pane (older herdr)", async () => {
+    const fns = baseFns();
+    fns.workspaceCreateFn = vi.fn().mockResolvedValue({ workspaceId: "w1", rootTabId: undefined, rootPaneId: undefined });
+    const result = await spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/fallback", repo: "corral",
+      assignedPaneIds: new Set(), targetWorkspaceId: null, repoPath: "/repos/corral", ...fns,
+    });
+    expect(result.paneId).toBe("w1:p2");
+    expect(fns.tabRenameFn).not.toHaveBeenCalled();
+    expect(fns.tabCreateFn).toHaveBeenCalledWith(localEnv, "w1", "/repos/corral", "my-task-a");
   });
 
   it("throws when creating a new space with no repoPath", async () => {
@@ -135,10 +151,11 @@ describe("spawnSession — resume mode", () => {
   // Resume must re-create the space at cwdSnapshot instead — `claude --resume` is cwd-scoped, so the
   // transcript is still reachable from that path. Note repo is null here (the real-world case), so the
   // create-new branch's repoPath requirement must NOT apply on the resume path.
-  it("re-creates the workspace at cwd when the stored workspaceId is gone", async () => {
+  it("re-creates the workspace at cwd when the stored workspaceId is gone, reusing its root tab", async () => {
     const runCalls: { paneId: string; text: string }[] = [];
     const wsCreateCalls: { cwd: string; label: string }[] = [];
-    const tabCalls: { workspaceId: string; cwd: string }[] = [];
+    const renameCalls: { tabId: string; label: string }[] = [];
+    const tabCreateFn = vi.fn();
     const result = await spawnSession({
       env: localEnv, taskSlug: "my-task", cwd: "/orig/cwd", repo: null,
       assignedPaneIds: new Set(),
@@ -151,21 +168,20 @@ describe("spawnSession — resume mode", () => {
       workspaceListFn: () => Promise.resolve([{ workspace_id: "wOTHER", label: "corral" }]),
       workspaceCreateFn: (_e, cwd, label) => {
         wsCreateCalls.push({ cwd, label });
-        return Promise.resolve("wNEW");
+        return Promise.resolve({ workspaceId: "wNEW", rootTabId: "wNEW:t1", rootPaneId: "wNEW:p1" });
       },
+      tabRenameFn: (_e, tabId, label) => { renameCalls.push({ tabId, label }); return Promise.resolve(); },
+      tabCreateFn,
       paneGetFn: (_e, p) => Promise.resolve({ paneId: p, tabId: "wNEW:t1", workspaceId: "wNEW", cwd: "/orig/cwd" }),
-      tabCreateFn: (_e, workspaceId, cwd) => {
-        tabCalls.push({ workspaceId, cwd });
-        return Promise.resolve({ tabId: "wNEW:t1", paneId: "wNEW:p1" });
-      },
       paneRunFn: (_e, paneId, text) => {
         runCalls.push({ paneId, text });
         return Promise.resolve();
       },
     });
     expect(wsCreateCalls).toEqual([{ cwd: "/orig/cwd", label: "my-task" }]);
-    expect(tabCalls).toEqual([{ workspaceId: "wNEW", cwd: "/orig/cwd" }]);
-    expect(runCalls).toEqual([{ paneId: "wNEW:p1", text: "claude --resume abc" }]);
+    expect(renameCalls).toEqual([{ tabId: "wNEW:t1", label: "my-task-a" }]);
+    expect(tabCreateFn).not.toHaveBeenCalled();            // root tab reused, none created
+    expect(runCalls).toEqual([{ paneId: "wNEW:p1", text: "claude --resume abc" }]); // root pane
     expect(result.workspaceId).toBe("wNEW");
   });
 });
@@ -188,24 +204,37 @@ describe("spawnSession — session suffix (Nth session)", () => {
 });
 
 describe("spawnSession — cleanup on failure", () => {
-  it("closes a created workspace when tabCreate fails", async () => {
+  it("closes a created workspace when the root-tab rename fails", async () => {
     const fns = baseFns();
-    fns.tabCreateFn = vi.fn().mockRejectedValue(new Error("boom"));
+    fns.tabRenameFn = vi.fn().mockRejectedValue(new Error("boom"));
     await expect(spawnSession({
       env: localEnv, taskSlug: "t", cwd: "/x", repo: "corral",
       assignedPaneIds: new Set(), targetWorkspaceId: null, repoPath: "/repos/corral", ...fns,
-    })).rejects.toThrow(/tab create/);
+    })).rejects.toThrow(/tab (create|rename)/);
     expect(fns.workspaceCloseFn).toHaveBeenCalledWith(localEnv, "w1");
   });
 
-  it("closes the created tab + workspace when paneRun fails", async () => {
+  it("closes the created workspace (which drops the root tab) when paneRun fails", async () => {
     const fns = baseFns();
     fns.paneRunFn = vi.fn().mockRejectedValue(new Error("nope"));
     await expect(spawnSession({
       env: localEnv, taskSlug: "t", cwd: "/x", repo: "corral",
       assignedPaneIds: new Set(), targetWorkspaceId: null, repoPath: "/repos/corral", ...fns,
     })).rejects.toThrow(/pane run/);
-    expect(fns.tabCloseFn).toHaveBeenCalledWith(localEnv, "w1:t2");
+    // We reused the root tab, so closing the workspace is the cleanup — no separate tab close.
+    expect(fns.tabCloseFn).not.toHaveBeenCalled();
     expect(fns.workspaceCloseFn).toHaveBeenCalledWith(localEnv, "w1");
+  });
+
+  it("closes only the created tab (never the user's workspace) when paneRun fails on the join path", async () => {
+    const fns = baseFns();
+    fns.listPanesFn = vi.fn().mockResolvedValue([{ paneId: "w1:p1", cwd: "/proj" }]);
+    fns.paneRunFn = vi.fn().mockRejectedValue(new Error("nope"));
+    await expect(spawnSession({
+      env: localEnv, taskSlug: "t", cwd: "/x", repo: "corral",
+      assignedPaneIds: new Set(), targetWorkspaceId: "w1", repoPath: null, ...fns,
+    })).rejects.toThrow(/pane run/);
+    expect(fns.tabCloseFn).toHaveBeenCalledWith(localEnv, "w1:t2"); // the tab we created in the existing ws
+    expect(fns.workspaceCloseFn).not.toHaveBeenCalled();           // the joined workspace is left intact
   });
 });
