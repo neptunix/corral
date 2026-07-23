@@ -3,7 +3,7 @@ import type { SessionRow } from "@shared/schema";
 import type { HerdrEnv } from "../environments.ts";
 import type { ExecFn } from "./herdr.ts";
 import {
-  listPanes, paneGet, paneRun, tabClose, tabCreate, workspaceClose, workspaceCreate,
+  listPanes, paneGet, paneRun, tabClose, tabCreate, tabRename, workspaceClose, workspaceCreate,
 } from "./herdr.ts";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -29,8 +29,9 @@ export interface SpawnOpts {
   readonly listFn?: (env: HerdrEnv, exec?: ExecFn) => Promise<SessionRow[]>;
   readonly paneGetFn?: (env: HerdrEnv, paneId: string, exec?: ExecFn) => Promise<{ paneId: string; tabId: string; workspaceId: string; cwd: string }>;
   readonly paneRunFn?: (env: HerdrEnv, paneId: string, text: string, exec?: ExecFn) => Promise<void>;
-  readonly workspaceCreateFn?: (env: HerdrEnv, cwd: string, label: string, exec?: ExecFn) => Promise<string>;
+  readonly workspaceCreateFn?: (env: HerdrEnv, cwd: string, label: string, exec?: ExecFn) => Promise<{ workspaceId: string; rootTabId: string | undefined; rootPaneId: string | undefined }>;
   readonly tabCreateFn?: (env: HerdrEnv, workspaceId: string, cwd: string, label: string, exec?: ExecFn) => Promise<{ tabId: string; paneId: string }>;
+  readonly tabRenameFn?: (env: HerdrEnv, tabId: string, label: string, exec?: ExecFn) => Promise<void>;
   readonly tabCloseFn?: (env: HerdrEnv, tabId: string, exec?: ExecFn) => Promise<void>;
   readonly workspaceCloseFn?: (env: HerdrEnv, workspaceId: string, exec?: ExecFn) => Promise<void>;
   readonly workspaceListFn?: (env: HerdrEnv) => Promise<{ workspace_id: string; label: string }[]>;
@@ -70,6 +71,7 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
   const doPaneRun = opts.paneRunFn ?? paneRun;
   const doWorkspaceCreate = opts.workspaceCreateFn ?? workspaceCreate;
   const doTabCreate = opts.tabCreateFn ?? tabCreate;
+  const doTabRename = opts.tabRenameFn ?? tabRename;
   const doTabClose = opts.tabCloseFn ?? tabClose;
   const doWorkspaceClose = opts.workspaceCloseFn ?? workspaceClose;
 
@@ -82,6 +84,9 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
   let workspaceLabel: string;
   let tabCwd: string;
   let createdWorkspaceId: string | null = null;
+  // When we CREATE the workspace, herdr seeds a root tab + pane; reuse it (§ Step 3) rather than
+  // leaving it empty and making a second tab. Null on the join path, or if herdr returns no root pane.
+  let rootTab: { tabId: string; paneId: string } | null = null;
 
   if (targetWorkspaceId !== null) {
     // Join: label from the picked workspace, cwd from one of its panes (a custom space's own path,
@@ -101,8 +106,11 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
       // default would report every space as missing).
       if (targetWs === undefined) {
         try {
-          workspaceId = await doWorkspaceCreate(env, cwd, workspaceLabel);
+          const created = await doWorkspaceCreate(env, cwd, workspaceLabel);
+          workspaceId = created.workspaceId;
           createdWorkspaceId = workspaceId;
+          rootTab = created.rootTabId !== undefined && created.rootPaneId !== undefined
+            ? { tabId: created.rootTabId, paneId: created.rootPaneId } : null;
         } catch (err) {
           throw new Error(`spawn: workspace create failed: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -135,29 +143,47 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
     workspaceLabel = repo ?? taskSlug;
     tabCwd = repoPath;
     try {
-      workspaceId = await doWorkspaceCreate(env, repoPath, workspaceLabel);
+      const created = await doWorkspaceCreate(env, repoPath, workspaceLabel);
+      workspaceId = created.workspaceId;
       createdWorkspaceId = workspaceId;
+      rootTab = created.rootTabId !== undefined && created.rootPaneId !== undefined
+        ? { tabId: created.rootTabId, paneId: created.rootPaneId } : null;
     } catch (err) {
       throw new Error(`spawn: workspace create failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  // Step 3: create the tab (returns a ready interactive-shell root pane).
+  // Step 3: land in a tab named `tabName`, each holding a ready interactive-shell pane. On a create
+  // path the workspace already seeded a root tab — reuse it (rename) so we don't leave it empty and
+  // spawn a second one. On the join path (or older herdr that returns no root pane) create a tab.
   let tabId: string;
   let paneId: string;
-  try {
-    ({ tabId, paneId } = await doTabCreate(env, workspaceId, tabCwd, tabName));
-  } catch (err) {
-    if (createdWorkspaceId !== null) await doWorkspaceClose(env, createdWorkspaceId).catch(() => void 0);
-    throw new Error(`spawn: tab create failed: ${err instanceof Error ? err.message : String(err)}`);
+  if (rootTab !== null) {
+    try {
+      await doTabRename(env, rootTab.tabId, tabName);
+    } catch (err) {
+      if (createdWorkspaceId !== null) await doWorkspaceClose(env, createdWorkspaceId).catch(() => void 0);
+      throw new Error(`spawn: tab rename failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    tabId = rootTab.tabId;
+    paneId = rootTab.paneId;
+  } else {
+    try {
+      ({ tabId, paneId } = await doTabCreate(env, workspaceId, tabCwd, tabName));
+    } catch (err) {
+      if (createdWorkspaceId !== null) await doWorkspaceClose(env, createdWorkspaceId).catch(() => void 0);
+      throw new Error(`spawn: tab create failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   // Step 4: launch Claude by sending the per-env command into the interactive shell.
   try {
     await doPaneRun(env, paneId, command, undefined);
   } catch (err) {
-    await doTabClose(env, tabId).catch(() => void 0);
+    // Cleanup: closing a workspace we created drops its tab (reused or fresh) too, so it's the only
+    // call needed there; on the join path close just the tab we added to the user's workspace.
     if (createdWorkspaceId !== null) await doWorkspaceClose(env, createdWorkspaceId).catch(() => void 0);
+    else await doTabClose(env, tabId).catch(() => void 0);
     throw new Error(`spawn: pane run failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 

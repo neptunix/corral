@@ -70,13 +70,13 @@ describe("tabCreate (herdr 0.7.1 nested shape)", () => {
 });
 
 describe("workspaceCreate (herdr 0.7.1 nested shape)", () => {
-  it("reads result.workspace.workspace_id", async () => {
-    const payload = JSON.stringify({ result: { workspace: { workspace_id: "w8", label: "corral" }, root_pane: { pane_id: "w8:p1" } } });
-    expect(await workspaceCreate(env, "/proj", "corral", makeExec(payload))).toBe("w8");
+  it("reads result.workspace.workspace_id + the root_pane ids (so spawn can reuse the root tab)", async () => {
+    const payload = JSON.stringify({ result: { workspace: { workspace_id: "w8", label: "corral" }, root_pane: { pane_id: "w8:p1", tab_id: "w8:t1" } } });
+    expect(await workspaceCreate(env, "/proj", "corral", makeExec(payload))).toEqual({ workspaceId: "w8", rootTabId: "w8:t1", rootPaneId: "w8:p1" });
   });
 
-  it("falls back to flat result.workspace_id", async () => {
-    expect(await workspaceCreate(env, "/proj", "w", makeExec(JSON.stringify({ result: { workspace_id: "ws2" } })))).toBe("ws2");
+  it("falls back to flat result.workspace_id with no root ids (older herdr → spawn creates a tab)", async () => {
+    expect(await workspaceCreate(env, "/proj", "w", makeExec(JSON.stringify({ result: { workspace_id: "ws2" } })))).toEqual({ workspaceId: "ws2", rootTabId: undefined, rootPaneId: undefined });
   });
 });
 
