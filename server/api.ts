@@ -715,9 +715,14 @@ export function createApi(opts: {
     const link = idx === -1 ? undefined : task.sessions[idx];
     if (link === undefined) return c.json({ error: { code: "not_found", message: "session not linked" } }, 404);
     if (liveRow === undefined) return c.json({ error: { code: "no_live_pane", message: "pane is not live — nothing to close" } }, 404);
-    // Poisoning guard: only close the pane when the live row IS our session. A link sessionId the live
-    // row disagrees with means a herdr restart reused the pane for a stranger — refuse, don't kill it.
-    if (link.sessionId !== null && link.sessionId !== "" && liveRow.sessionId !== link.sessionId) {
+    // Poisoning guard: only close the pane when we can PROVE the live row is ours — by sessionId, or
+    // (for a null-sessionId link: no integration, or the pre-backfill /new window) by matching the
+    // link's stored tab identity. A herdr restart can reuse a paneId for a stranger; without this we'd
+    // kill it. Mirrors the zombie reaper's tab-identity guard.
+    const linkSid = link.sessionId;
+    const ownsBySession = linkSid !== null && linkSid !== "" && liveRow.sessionId === linkSid;
+    const ownsByTab = (linkSid === null || linkSid === "") && liveRow.tabId === link.tabId && liveRow.workspaceId === link.workspaceId;
+    if (!ownsBySession && !ownsByTab) {
       return c.json({ error: { code: "pane_reused", message: "pane now belongs to a different session" } }, 409);
     }
     try {

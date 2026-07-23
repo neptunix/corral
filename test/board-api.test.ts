@@ -796,6 +796,31 @@ describe("POST close (herdr pane close)", () => {
     const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close", { method: "POST" });
     expect(res.status).toBe(404);
   });
+
+  // A null-sessionId link (no herdr integration, or the pre-backfill /new window) can't be verified by
+  // sessionId. Prove ownership by the live row's tab identity instead, so a churn-reused pane whose tab
+  // now differs is refused rather than closed out from under a stranger.
+  it("409s a null-sessionId link when the live pane's tab identity differs (churn-reused)", async () => {
+    const storage = createStorage(tmpDir);
+    const snapshot: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [makeLiveRow({ paneId: "w1:p1", sessionId: "99999999-8888-7777-6666-555555555555", tabId: "stranger:t", workspaceId: "w9" })] };
+    const closed: string[] = [];
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage, closePaneFn: (_e, p) => { closed.push(p); return Promise.resolve(); } });
+    await seedTaskWithLink(app, storage, null); // link.sessionId = null
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect(closed).toEqual([]);
+  });
+
+  it("closes a null-sessionId link when the live pane's tab identity matches", async () => {
+    const storage = createStorage(tmpDir);
+    const snapshot: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [makeLiveRow({ paneId: "w1:p1", sessionId: null, tabId: "w1:t1", workspaceId: "w1" })] };
+    const closed: string[] = [];
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage, closePaneFn: (_e, p) => { closed.push(p); return Promise.resolve(); } });
+    await seedTaskWithLink(app, storage, null);
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(closed).toEqual(["w1:p1"]);
+  });
 });
 
 describe("GET /api/state — live label preference", () => {

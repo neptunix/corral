@@ -77,7 +77,7 @@ export interface ZombieReaperOpts {
 // diverge from what the board shows. herdr is only ever MUTATED here (the poller is otherwise
 // read-only), and only via `pane close`, which cascades tab → workspace. Two safety rails: an
 // unreachable env is skipped entirely (a herdr restart flips every link detached at once — we must not
-// reap then), and detectZombies' id+workspace+label guard rejects any reused id. `since` (the
+// reap then), and detectZombies' workspaceId+tabId guard rejects a reassigned id. `since` (the
 // per-tab grace clock) is retained across snapshots; an in-flight guard serializes overlapping polls.
 export function startZombieReaper(opts: ZombieReaperOpts): () => void {
   const now = opts.now ?? ((): number => Date.now());
@@ -98,6 +98,11 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
         for (const task of board.tasks) {
           for (const link of task.sessions) {
             if (link.tabId === "" || resolveLiveRow(link, index) !== undefined) continue;
+            // A genuine zombie has NO agent at its pane (Claude exited, herdr dropped the agent). If a
+            // live agent occupies link.paneId, the pane was reused by a DIFFERENT session (e.g. the user
+            // re-ran `claude` in the lingering shell) — resolveLiveRow still reports our link detached,
+            // but reaping would kill that session. Skip it, mirroring the /close route's pane_reused guard.
+            if (index.liveMap.has(`${link.env}:${link.paneId}`)) continue;
             const arr = byEnv.get(link.env) ?? [];
             arr.push({
               env: link.env, paneId: link.paneId, tabId: link.tabId,
@@ -126,9 +131,14 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
       const result = detectZombies({ detached, tabsByEnv, now: now(), since, graceMs });
       since = result.since;
 
+      // Re-read liveness against a FRESH snapshot: the reap decision was made before the (possibly slow,
+      // remote-SSH) listTabs await, during which a session could have started in a pane. Never close a
+      // pane that now hosts a live agent — this closes the TOCTOU window the candidate guard can't.
+      const fresh = buildLiveIndex(opts.poller.getSnapshot().sessions);
       await Promise.all(result.reap.map(async (r) => {
         const env = opts.envs.find((e) => e.id === r.env);
         if (env === undefined) return;
+        if (fresh.liveMap.has(`${r.env}:${r.paneId}`)) return;
         try {
           await opts.closePane(env, r.paneId);
         } catch (err) {

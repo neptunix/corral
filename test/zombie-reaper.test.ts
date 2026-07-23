@@ -176,6 +176,101 @@ describe("startZombieReaper", () => {
     expect(h.listCalls).toBe(0);             // did not even query tabs on an unreachable env
   });
 
+  it("does NOT reap a pane now occupied by a DIFFERENT live session (shell reused after Claude exited)", async () => {
+    // link's own session S1 ended, but the user ran `claude` again in the lingering shell → a new
+    // session S2 now holds the SAME pane/tab. resolveLiveRow reports the link detached (S1 gone), yet
+    // reaping link.paneId would kill S2. The reaper must skip a pane that hosts a live agent.
+    const S2 = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
+    const h = harness({
+      snapshot: { envs: { "work-local": { reachable: true } }, sessions: [{
+        env: "work-local", paneId: "w1:p2", status: "idle", agent: "claude", cwd: "/c",
+        tab: "task-a", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: S2,
+        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+      }] },
+      boards: [boardWithLink({ sessionId: SID })], // link.sessionId = S1 (ended)
+      tabs: [rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })],
+    });
+    h.setClock(0); h.fire(); await flush();
+    h.setClock(20_000); h.fire(); await flush();
+    expect(h.closed).toEqual([]);
+  });
+
+  it("does NOT reap a pane a session takes over DURING the listTabs await (TOCTOU)", async () => {
+    // The pane is an agentless zombie when candidates are chosen, but a session starts in it while we
+    // await listTabs. Reaping on the now-stale decision would kill it — the close must re-check.
+    const S2 = "cccccccc-dddd-eeee-ffff-000000000000";
+    const zombie: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+    const reused: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [{
+      env: "work-local", paneId: "w1:p2", status: "idle", agent: "claude", cwd: "/c",
+      tab: "task-a", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: S2,
+      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+    }] };
+    let snap: Snapshot = zombie;
+    let clock = 0;
+    const closed: string[] = [];
+    let cb: ((s: Snapshot) => void) | null = null;
+    startZombieReaper({
+      poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+      storage: { getAllBoards: () => [boardWithLink({ sessionId: SID })] },
+      envs: [getEnv("work-local")],
+      listTabs: () => { if (clock >= 20_000) snap = reused; return Promise.resolve([rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })]); },
+      closePane: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); },
+      now: () => clock, graceMs: 20_000,
+    });
+    clock = 0; cb!(zombie); await flush();          // seed the timer (pane still empty)
+    clock = 20_000; cb!(zombie); await flush();      // listTabs flips the pane to a live session mid-tick
+    expect(closed).toEqual([]);
+  });
+
+  it("serializes overlapping polls: a snapshot fired while a tick is in flight is skipped (inFlight)", async () => {
+    let release: () => void = () => void 0;
+    let listCalls = 0;
+    const snap: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+    let cb: ((s: Snapshot) => void) | null = null;
+    startZombieReaper({
+      poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+      storage: { getAllBoards: () => [boardWithLink()] },
+      envs: [getEnv("work-local")],
+      listTabs: () => { listCalls++; return new Promise((res) => { release = () => { res([rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })]); }; }); },
+      closePane: () => Promise.resolve(),
+      now: () => 0, graceMs: 20_000,
+    });
+    cb!(snap); await flush();  // tick 1 reaches listTabs and parks there (inFlight = true)
+    cb!(snap); await flush();  // tick 2 must short-circuit before touching listTabs
+    expect(listCalls).toBe(1);
+    release(); await flush();
+  });
+
+  it("isolates a closePane failure: one zombie's close error doesn't abort the others or escape the tick", async () => {
+    const link = (paneId: string, tabId: string, ws: string, sid: string): typeof board.tasks[0]["sessions"][0] => ({
+      env: "work-local", paneId, tabId, tabLabel: "z", workspaceId: ws, workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: sid,
+    });
+    const board: Board = {
+      id: "b", label: "B", columns: [],
+      tasks: [{ id: "t", title: "x", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1,
+        sessions: [link("w1:p2", "w1:t2", "w1", SID), link("w2:p3", "w2:t3", "w2", "dddddddd-1111-2222-3333-444444444444")] }],
+    };
+    const closed: string[] = [];
+    let clock = 0;
+    let cb: ((s: Snapshot) => void) | null = null;
+    const empty: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+    startZombieReaper({
+      poller: { getSnapshot: () => empty, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+      storage: { getAllBoards: () => [board] },
+      envs: [getEnv("work-local")],
+      listTabs: () => Promise.resolve([rawTab({ tab_id: "w1:t2", label: "z", workspace_id: "w1" }), rawTab({ tab_id: "w2:t3", label: "z", workspace_id: "w2" })]),
+      closePane: (_e, paneId) => {
+        if (paneId === "w1:p2") return Promise.reject(new Error("boom"));
+        closed.push(paneId);
+        return Promise.resolve();
+      },
+      now: () => clock, graceMs: 20_000,
+    });
+    clock = 0; cb!(empty); await flush();
+    clock = 20_000; cb!(empty); await flush();
+    expect(closed).toEqual(["w2:p3"]); // w1's rejection was caught; w2 still reaped; no unhandled rejection
+  });
+
   it("ignores a live (non-detached) link", async () => {
     const live: Snapshot = {
       envs: { "work-local": { reachable: true } },
