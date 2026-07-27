@@ -1,4 +1,5 @@
 import type { SessionRow } from "@shared/schema";
+import { quote } from "shell-quote";
 
 import type { HerdrEnv } from "../environments.ts";
 import type { ExecFn } from "./herdr.ts";
@@ -22,6 +23,11 @@ export interface SpawnOpts {
   // Part A/B: which command to send, and where to land.
   readonly spawnCommand?: string;                 // default "claude"
   readonly resumeSessionId?: string;   // when set: run `${spawnCommand} --resume <uuid>` and force the tab cwd
+  // Absolute path to a brief file on the pane's own host. When set (and not resuming), the launch
+  // command reads it through the pane's shell, so the brief's bytes never enter a command string —
+  // only this server-generated, shell-quoted path does. Local environments only (the route enforces
+  // that): the file lives on the corral host, and `cat` would otherwise run on a remote box.
+  readonly briefPath?: string;
   readonly sessionSuffix?: string;                // tab suffix a|b|c for a task's Nth session (default "a")
   readonly targetWorkspaceId?: string | null;     // null/absent = create a new workspace
   readonly repoPath?: string | null;              // resolved env.repos[repo]; required to create
@@ -59,7 +65,9 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
   const spawnCommand = opts.spawnCommand ?? "claude";
   const command = opts.resumeSessionId !== undefined
     ? `${spawnCommand} --resume ${opts.resumeSessionId}`
-    : spawnCommand;
+    : opts.briefPath !== undefined
+      ? `${spawnCommand} "$(cat ${quote([opts.briefPath])})"`
+      : spawnCommand;
   const sessionSuffix = opts.sessionSuffix ?? "a";
   const targetWorkspaceId = opts.targetWorkspaceId ?? null;
   const repoPath = opts.repoPath ?? null;
