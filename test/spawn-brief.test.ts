@@ -42,7 +42,11 @@ describe("spawn with a brief", () => {
     expect(ran).toEqual(['claude "$(cat /data/briefs/abc123.md)"']);
   });
 
-  it("keeps the injected command on a single line regardless of brief size", async () => {
+  // The launched command only ever embeds `briefPath` (a short, server-generated file path) — never
+  // the brief's own content, which the pane's shell reads at runtime via `$(cat …)`. So this does not
+  // exercise a large or multi-line brief; it only proves an ordinary path produces a single-line
+  // command, which is what `pane run` (append-Enter) requires.
+  it("produces a single-line command for an ordinary brief path", async () => {
     const { ran, stubs } = harness();
     await spawnSession({
       env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
@@ -59,6 +63,22 @@ describe("spawn with a brief", () => {
     });
     expect(ran[0]).toContain("'/data dir/briefs/abc.md'");
     expect(ran[0]).not.toContain("cat /data dir/");
+  });
+
+  it("neutralizes shell metacharacters in the brief path (semicolon, $(), backticks, quote)", async () => {
+    const { ran, stubs } = harness();
+    const hostile = "/data/briefs/a;b$(c)`d`e'f.md";
+    await spawnSession({
+      env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
+      spawnCommand: "claude", repoPath: "/repo", briefPath: hostile, ...stubs,
+    });
+    // shell-quote wraps the path in double quotes and backslash-escapes `$` and `` ` `` so the
+    // command substitution and backticks cannot be interpreted by the shell that runs `cat`.
+    expect(ran[0]).toBe("claude \"$(cat \"/data/briefs/a;b\\$(c)\\`d\\`e'f.md\")\"");
+    // The hostile substrings must never appear raw/unescaped — that would mean the shell could
+    // execute `c` (via `$(c)` or backticks) or terminate the `cat` command early via `;`.
+    expect(ran[0]).not.toContain("cat /data/briefs/a;b$(c)");
+    expect(ran[0]).not.toContain("a;b$(c)`d`e'f.md\"");
   });
 
   it("prefers resume over a brief when both are somehow supplied", async () => {
