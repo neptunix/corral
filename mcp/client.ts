@@ -1,7 +1,8 @@
-import { BoardSchema, TaskSchema } from "@shared/board-schema.ts";
-import { AttentionMapSchema, SnapshotSchema } from "@shared/schema";
-import { WhoamiResponseSchema } from "@shared/whoami-schema.ts";
 import { z } from "zod";
+
+import { BoardSchema, TaskSchema } from "../shared/board-schema.ts";
+import { AttentionMapSchema, SnapshotSchema } from "../shared/schema.ts";
+import { WhoamiResponseSchema } from "../shared/whoami-schema.ts";
 
 export type FetchFn = typeof fetch;
 

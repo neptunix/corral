@@ -1,7 +1,6 @@
-import type { WhoamiResolved } from "@shared/whoami-schema.ts";
-
 import type { CorralClient } from "./client.ts";
 import { CorralError } from "./client.ts";
+import type { WhoamiResolved } from "../shared/whoami-schema.ts";
 
 export interface HerdrContext {
   readonly paneId: string;

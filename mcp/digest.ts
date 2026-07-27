@@ -1,7 +1,7 @@
-import type { Board } from "@shared/board-schema.ts";
-import { closedColumnIds } from "@shared/board-schema.ts";
-import type { AttentionMap, SessionRow, Snapshot } from "@shared/schema";
-import type { WhoamiResolved } from "@shared/whoami-schema.ts";
+import type { Board } from "../shared/board-schema.ts";
+import { closedColumnIds } from "../shared/board-schema.ts";
+import type { AttentionMap, SessionRow, Snapshot } from "../shared/schema.ts";
+import type { WhoamiResolved } from "../shared/whoami-schema.ts";
 
 // This module is the token/prompt-injection firewall between corral's stored state and whatever
 // text a tool call hands back into a Claude session's context (design spec §7). `limit`,
