@@ -29,7 +29,6 @@ const poller: Poller = {
   // eslint-disable-next-line @typescript-eslint/no-empty-function
   stop: () => {},
 };
-// eslint-disable-next-line @typescript-eslint/require-await
 const okRead = async () => ({ text: "", ctxPct: null, model: null, sessionName: null });
 
 describe("api", () => {
@@ -120,7 +119,6 @@ describe("api", () => {
   });
 
   it("GET /read returns the pane buffer", async () => {
-    // eslint-disable-next-line @typescript-eslint/require-await
     const read = vi.fn(async () => ({ text: "hi", ctxPct: "5", model: "Opus", sessionName: "s" }));
     const res = await createApi({ poller, envs: ENVIRONMENTS, read }).request("/api/sessions/work-local/w1-1/read?lines=20");
     expect(await res.json()).toEqual({ text: "hi", ctxPct: "5", model: "Opus", sessionName: "s" });

@@ -25,5 +25,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["server", "web", "shared", "test", "config.ts", "environments.ts"]
+  "include": ["server", "web", "shared", "test", "mcp", "config.ts", "environments.ts"]
 }

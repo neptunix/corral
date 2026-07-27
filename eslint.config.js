@@ -35,7 +35,7 @@ export default tseslint.config(
       eqeqeq: "error",
     },
   },
-  { files: ["server/**", "shared/**", "config.ts", "environments.ts"], languageOptions: { globals: globals.node } },
+  { files: ["server/**", "shared/**", "mcp/**", "config.ts", "environments.ts"], languageOptions: { globals: globals.node } },
   { files: ["server/index.ts"], rules: { "no-console": "off" } },
   {
     files: ["web/**"],
@@ -52,6 +52,7 @@ export default tseslint.config(
       "@typescript-eslint/no-unsafe-call": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/require-await": "off",
       "no-console": "off",
     },
   },

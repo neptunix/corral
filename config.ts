@@ -76,6 +76,13 @@ export const ATTACH_AUDIT_LOG = path.join(CORRAL_HOME, "attach-audit.log"); // o
 // history/GC by design. macOS /var/folders is not reliably auto-purged, hence the explicit sweep.
 export const UPLOAD_ROOT = path.join(os.tmpdir(), "corral-uploads");
 
+// Brief store for MCP-driven spawns. A brief is written here and the launch command reads it via
+// `$(cat <path>)`, so only a server-generated path ever reaches the pane's shell. Swept on startup
+// like UPLOAD_ROOT: bounded to one server run, no history by design.
+export const BRIEF_ROOT = path.join(CORRAL_HOME, "briefs");
+// Cap so a runaway brief cannot blow the pane or the spawned session's context window.
+export const BRIEF_MAX_BYTES = intFromEnv("BRIEF_MAX_BYTES", 16384, { min: 1 });
+
 // SEC-1: WebSockets bypass same-origin policy, so the upgrade must Origin-allowlist. The Vite dev origin
 // is added ONLY outside production — prod serves same-origin from web/dist, and keeping the dev origin in
 // prod would be permanent standing attack surface. `assertLoopback` binds the server to 127.0.0.1 anyway.

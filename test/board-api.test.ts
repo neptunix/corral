@@ -481,7 +481,6 @@ describe("GET /api/state — name healing for persisted empty-name links", () =>
 });
 
 function makeApiWithSpawn(dataDir: string) {
-  // eslint-disable-next-line @typescript-eslint/require-await
   const spawn = vi.fn(async (_opts: unknown): Promise<SpawnResult> => ({
     paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1",
     workspaceLabel: "corral", tabLabel: "t-a", cwdSnapshot: "/proj", idempotent: false,

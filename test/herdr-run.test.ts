@@ -5,7 +5,6 @@ import { runHerdr, type ExecFn } from "../server/herdr.ts";
 
 describe("runHerdr", () => {
   it("returns local stdout unchanged", async () => {
-    // eslint-disable-next-line @typescript-eslint/require-await
     const exec: ExecFn = vi.fn(async () => ({ stdout: '{"result":{}}', stderr: "" }));
     const out = await runHerdr(getEnv("work-local"), ["agent", "list"], { timeout: 1000, exec });
     expect(out).toBe('{"result":{}}');
@@ -13,7 +12,6 @@ describe("runHerdr", () => {
   });
 
   it("strips SSH-noise lines from remote stdout without trimming pane text", async () => {
-    // eslint-disable-next-line @typescript-eslint/require-await
     const exec: ExecFn = vi.fn(async () => ({
       stdout: "Warning: remote port forwarding failed\nline one\n  line two  \n",
       stderr: "",
