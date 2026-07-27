@@ -257,6 +257,38 @@ WebSocket attach: `WS_MAX_CONCURRENT` (3) · `WS_RATE_PER_WINDOW` (10) / `WS_RAT
 
 For deeper live scrollback set `pane_history = true` in `~/.config/herdr/config.toml`.
 
+## MCP server
+
+corral also ships an MCP server (`mcp/index.ts`) so a Claude session running inside a herdr pane
+can see its own assignment and drive its own lifecycle instead of an operator retyping it by hand
+— see [ADR 0002](docs/adr/0002-mcp-server-as-the-agent-seam.md) for why. Register it once, with
+absolute paths so it resolves from any cwd:
+
+```bash
+claude mcp add --scope user corral -- /path/to/corral/node_modules/.bin/tsx /path/to/corral/mcp/index.ts
+```
+
+The six tools:
+
+- `corral_whoami` — this session's pane/tab/workspace, Claude session id, model/context/cost, and its bound task card; call it first.
+- `corral_fleet` — one bounded line per session across every environment, for cross-session triage.
+- `corral_task_bind` — link this session to an existing task card (no card creation).
+- `corral_task_update` — update the bound card's title, description, status, or priority.
+- `corral_spawn` — start a new session on this session's card, with a brief as its first message.
+- `corral_session_close` — stop this session or one on the same card; suspend, not destroy.
+
+The server registers **no tools outside herdr** — launched with `HERDR_ENV`/`HERDR_PANE_ID` unset,
+it connects and advertises an empty tool list, so installing it at user scope is safe for any
+non-herdr session too. A spawn brief is available for **local environments only**, and the audit
+trail it leaves records coordinates and size, never contents. A same-environment spawn **joins the
+caller's own workspace** (a new tab beside it); a cross-environment spawn **roots a new workspace**
+at that environment's configured repo path instead. Phase 1 has no path to write into another
+*existing* session's pane — the spawn brief is the only agent-authored text that reaches a pane at
+all, and that pane is always brand-new. `corral_spawn` and `corral_session_close` are marked
+destructive in their tool descriptions, but nothing in the server enforces confirmation — that's
+the operator's Claude Code permission configuration (simply not allowlisting them), same as any
+other destructive tool call.
+
 ## Architecture (short version)
 
 TypeScript end-to-end. Backend: Hono + SSE, shelling out to the herdr CLI via `execFile`
