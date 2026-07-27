@@ -5,22 +5,32 @@ function hasId(s: string | null): boolean {
   return s !== null && s !== "";
 }
 
-// Is the incoming live session already bound by one of `links`? This is the EXACT per-link complement
+// Does this single stored link denote the given live session? This is the EXACT per-link complement
 // of buildUnassigned (server/api.ts:65-72), expressed as two INDEPENDENT disjuncts — NOT a
 // `liveSessionId ? … : …` ternary (that shape reintroduces the /new-window bug):
 //   - a link WITHOUT a sessionId claims its pane   (env:paneId), and
 //   - a link WITH a sessionId claims its session   (env:sessionId, only when the live row has a UUID).
 // A stale non-null pane-mate therefore never binds a restarted session, and a live row whose UUID is
-// briefly null mid-`/new` binds nothing (it is genuinely unassigned).
+// briefly null mid-`/new` binds nothing (it is genuinely unassigned). Shared by `isSessionBound` below
+// and the whoami card builder (server/whoami.ts) — the write-side (bind/close/resume) and the
+// whoami read-side must agree on exactly one encoding of this rule.
+export function linkBindsSession(
+  link: SessionLink,
+  incoming: { readonly env: string; readonly paneId: string; readonly liveSessionId: string | null },
+): boolean {
+  const { env, paneId, liveSessionId } = incoming;
+  return (
+    (!hasId(link.sessionId) && link.env === env && link.paneId === paneId) ||
+    (hasId(liveSessionId) && link.env === env && link.sessionId === liveSessionId)
+  );
+}
+
+// Is the incoming live session already bound by one of `links`?
 export function isSessionBound(
   links: readonly SessionLink[],
   incoming: { readonly env: string; readonly paneId: string; readonly liveSessionId: string | null },
 ): boolean {
-  const { env, paneId, liveSessionId } = incoming;
-  return links.some((l) =>
-    (!hasId(l.sessionId) && l.env === env && l.paneId === paneId) ||
-    (hasId(liveSessionId) && l.env === env && l.sessionId === liveSessionId),
-  );
+  return links.some((l) => linkBindsSession(l, incoming));
 }
 
 // Which stored link does a per-card action (detach/close/resume) target? Returns the index into

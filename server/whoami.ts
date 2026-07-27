@@ -5,6 +5,7 @@ import type { WhoamiCardSession, WhoamiEnv, WhoamiResponse, WhoamiSession, Whoam
 import type { HerdrEnv } from "../environments.ts";
 import { expandTilde } from "./herdr.ts";
 import { buildLiveIndex, type LiveIndex, resolveLiveRow } from "./live-resolve.ts";
+import { linkBindsSession } from "./session-binding.ts";
 
 type LocalEnv = Extract<HerdrEnv, { kind: "local" }>;
 
@@ -83,18 +84,6 @@ function envList(envs: readonly HerdrEnv[], snapshot: Snapshot): WhoamiEnv[] {
   }));
 }
 
-function hasId(s: string | null): boolean {
-  return s !== null && s !== "";
-}
-
-// Does this stored link denote the given live session? The same two independent disjuncts as
-// server/session-binding.ts: a link without a UUID claims its pane; a link with one claims its session.
-function linkMatches(link: SessionLink, env: string, paneId: string, sessionId: string | null): boolean {
-  if (link.env !== env) return false;
-  if (!hasId(link.sessionId)) return link.paneId === paneId;
-  return hasId(sessionId) && link.sessionId === sessionId;
-}
-
 function cardSession(index: LiveIndex, link: SessionLink, selfRow: SessionRow): WhoamiCardSession {
   // Liveness via the CANONICAL resolver (server/live-resolve.ts), not a local reimplementation: a
   // UUID-carrying link whose pane now holds a different session resolves via the UUID index or
@@ -107,7 +96,7 @@ function cardSession(index: LiveIndex, link: SessionLink, selfRow: SessionRow): 
     status: live?.status ?? "detached",
     detached: live === undefined,
     ctxPct: live?.statusline?.ctx.pct ?? null,
-    self: linkMatches(link, selfRow.env, selfRow.paneId, selfRow.sessionId),
+    self: linkBindsSession(link, { env: selfRow.env, paneId: selfRow.paneId, liveSessionId: selfRow.sessionId }),
   };
 }
 
@@ -115,9 +104,10 @@ function findCard(
   boards: readonly Board[],
   row: SessionRow,
 ): { readonly board: Board; readonly task: Task } | undefined {
+  const incoming = { env: row.env, paneId: row.paneId, liveSessionId: row.sessionId };
   for (const board of boards) {
     for (const task of board.tasks) {
-      if (task.sessions.some((l) => linkMatches(l, row.env, row.paneId, row.sessionId))) {
+      if (task.sessions.some((l) => linkBindsSession(l, incoming))) {
         return { board, task };
       }
     }
