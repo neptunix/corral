@@ -1,5 +1,5 @@
 import type { Snapshot } from "@shared/schema";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -130,5 +130,65 @@ describe("POST spawn with a brief", () => {
       body: JSON.stringify({ env: "work-remote", repo: "repo" }),
     });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("brief file cleanup after spawn", () => {
+  let tmpDir: string;
+  let seen: SpawnOpts[];
+  beforeEach(() => { tmpDir = mkdtempSync(path.join(os.tmpdir(), "spawn-brief-cleanup-")); seen = []; });
+  afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
+
+  // Regression guard for the "leaks one brief file per spawn" finding: a long-lived server used to
+  // never unlink a brief, so disk use grew by one file per spawn for the process's whole life. The
+  // brief must be gone shortly after ITS spawn settles — not kept around indefinitely, and not deleted
+  // so early that it races the pane's shell still reading `$(cat <path>)` (server/spawn.ts Step 4:
+  // `pane run` resolves once the command is handed to the pty, not once the shell has executed it).
+  it("keeps the brief file at response time, then removes it after the bounded delay", async () => {
+    const a = createApi({
+      poller, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
+      briefRoot: path.join(tmpDir, "briefs"),
+      briefCleanupDelayMs: 20,
+      spawn: async (opts) => {
+        seen.push(opts);
+        return {
+          paneId: "w1:p2", tabId: "t2", workspaceId: "ws1", workspaceLabel: "repo",
+          tabLabel: "refactor-the-api-a", cwdSnapshot: "/repo", idempotent: false,
+        };
+      },
+    });
+    const tid = await makeBoardAndTask(a);
+    const res = await a.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", repo: "repo", brief: "Continue the refactor." }),
+    });
+    expect(res.status).toBe(200);
+    const briefPath = seen[0]?.briefPath;
+    if (briefPath === undefined) throw new Error("expected briefPath");
+    expect(existsSync(briefPath)).toBe(true); // still there the instant the route responds
+    await new Promise((resolve) => { setTimeout(resolve, 200); });
+    expect(existsSync(briefPath)).toBe(false); // gone once the bounded grace window has passed
+  });
+
+  it("still cleans up the brief file when the spawn attempt fails", async () => {
+    const a = createApi({
+      poller, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
+      briefRoot: path.join(tmpDir, "briefs"),
+      briefCleanupDelayMs: 5,
+      spawn: async (opts) => {
+        seen.push(opts);
+        throw new Error("spawn: pane run failed: boom");
+      },
+    });
+    const tid = await makeBoardAndTask(a);
+    const res = await a.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", repo: "repo", brief: "Continue the refactor." }),
+    });
+    expect(res.status).toBe(500);
+    const briefPath = seen[0]?.briefPath;
+    if (briefPath === undefined) throw new Error("expected briefPath");
+    await new Promise((resolve) => { setTimeout(resolve, 100); });
+    expect(existsSync(briefPath)).toBe(false);
   });
 });

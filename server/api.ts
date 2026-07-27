@@ -16,10 +16,11 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 
 import {
-  BRIEF_MAX_BYTES, BRIEF_ROOT, READ_CACHE_TTL_MS, SPAWN_TIMEOUT_MS, UPLOAD_ROOT, WS_ALLOWED_ORIGINS,
+  BRIEF_CLEANUP_DELAY_MS, BRIEF_MAX_BYTES, BRIEF_ROOT, READ_CACHE_TTL_MS, SPAWN_TIMEOUT_MS,
+  UPLOAD_ROOT, WS_ALLOWED_ORIGINS,
 } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
-import { briefByteLength, composeBrief, writeBrief } from "./brief.ts";
+import { briefByteLength, cleanupBrief, composeBrief, writeBrief } from "./brief.ts";
 import { syncClaudeThemeBase, ThemeModeSchema } from "./claude-theme.ts";
 import { closePane, listWorkspaces, readPane, type ReadFn } from "./herdr.ts";
 import { isLoopbackHost } from "./host-guard.ts";
@@ -212,6 +213,7 @@ export function createApi(opts: {
   allowedOrigins?: readonly string[]; // Origin allowlist for the file-upload route (default WS_ALLOWED_ORIGINS)
   uploadRoot?: string; // drop-upload temp root (injectable so tests write to a scratch dir)
   briefRoot?: string; // spawn-brief root (injectable so tests write to a scratch dir)
+  briefCleanupDelayMs?: number; // injectable so the post-spawn brief unlink is testable without a real wait
 }): Hono {
   const read = opts.read ?? readPane;
   const listWs = opts.listWorkspaces ?? listWorkspaces;
@@ -223,6 +225,7 @@ export function createApi(opts: {
   const allowedOrigins = opts.allowedOrigins ?? WS_ALLOWED_ORIGINS;
   const uploadRoot = opts.uploadRoot ?? UPLOAD_ROOT;
   const briefRoot = opts.briefRoot ?? BRIEF_ROOT;
+  const briefCleanupDelayMs = opts.briefCleanupDelayMs ?? BRIEF_CLEANUP_DELAY_MS;
   // Last-active timestamps (transcript-derived); caches `null` too (no transcript). Bounded + TTL'd.
   const laCache = createTtlCache<number | null>({ ttlMs: LAST_ACTIVE_TTL_MS });
   // #4: coalesce sub-second /read bursts (each is a herdr/SSH round-trip). Success-only; keyed by the
@@ -960,6 +963,19 @@ export function createApi(opts: {
       targetWorkspaceId, repoPath,
       ...(briefPath === undefined ? {} : { briefPath }),
     });
+    // Unlink the brief once THIS spawn attempt is done — a brief's on-disk lifetime is one spawn, not
+    // one server run. Chained off `spawnPromise` itself (not the race below): a timed-out spawn keeps
+    // running in the background, and its eventual settlement — success or failure — is exactly when
+    // the launch command has been sent, so that is what must gate the delete, not the route's response.
+    // The delay (not an immediate unlink) is deliberate: `pane run` resolving only means the launch
+    // command was handed to the pane's pty, not that its shell has finished `$(cat <path>)` yet — an
+    // immediate delete would race that read (see config.ts BRIEF_CLEANUP_DELAY_MS).
+    if (briefPath !== undefined) {
+      const bp = briefPath;
+      void spawnPromise.finally(() => {
+        setTimeout(() => { void cleanupBrief(bp); }, briefCleanupDelayMs).unref();
+      }).catch(() => undefined);
+    }
     try {
       const result = await Promise.race([spawnPromise, spawnTimeoutPromise]);
       const link: SessionLink = {

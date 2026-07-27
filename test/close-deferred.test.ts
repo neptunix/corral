@@ -2,7 +2,7 @@ import type { Snapshot } from "@shared/schema";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ENVIRONMENTS } from "../environments.ts";
 import { createApi } from "../server/api.ts";
@@ -81,6 +81,33 @@ describe("close with ?deferred=1", () => {
     );
     expect(res.status).toBe(200);
     await ran; // resolves only if the deferred closePaneFn fired
+  });
+
+  // A rejected `closePaneFn` inside the scheduled `setTimeout` is the only thing standing between a
+  // failed self-close and an unhandled rejection in a bare timer callback (server/api.ts ~774-779).
+  // Prove it is actually caught: the route must still have responded 200 earlier, and the rejection
+  // must surface only as a logged warning — never as an unhandled rejection that would fail this test.
+  it("catches a rejected deferred close instead of leaving an unhandled rejection", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const app = createApi({
+      poller, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
+      closePaneFn: async () => { throw new Error("boom: pane close failed"); },
+      closeDeferMs: 1,
+    });
+    const tid = await boardWithLink(app);
+    const res = await app.request(
+      `/api/boards/test/tasks/${tid}/sessions/work-local/${encodeURIComponent("w1:p1")}/close?deferred=1`,
+      { method: "POST" },
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, scheduled: true });
+    // Poll briefly for the warn call rather than a fixed sleep: the timer + rejection are both real
+    // async work, not something we control the scheduling of.
+    for (let i = 0; i < 50 && warnSpy.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => { setTimeout(resolve, 5); });
+    }
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("boom: pane close failed"));
+    warnSpy.mockRestore();
   });
 
   it("runs every ownership guard BEFORE scheduling (unlinked pane still 404s)", async () => {

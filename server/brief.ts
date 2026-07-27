@@ -31,7 +31,16 @@ export async function writeBrief(root: string, text: string): Promise<string> {
   return dest;
 }
 
-/** Best-effort recursive remove of the brief root (bounds disk to one server run). Never throws. */
+/** Best-effort recursive remove of the brief root (belt-and-braces for a crashed process). Never throws. */
 export async function sweepBriefRoot(root: string): Promise<void> {
   await rm(root, { recursive: true, force: true }).catch(() => undefined);
+}
+
+/**
+ * Best-effort removal of a single brief file once its spawn attempt is done (bounds disk to one
+ * spawn, not one server run — see config.ts BRIEF_CLEANUP_DELAY_MS for why the caller delays this
+ * rather than calling it the instant the spawn call returns). Never throws.
+ */
+export async function cleanupBrief(filePath: string): Promise<void> {
+  await rm(filePath, { force: true }).catch(() => undefined);
 }

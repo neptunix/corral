@@ -77,11 +77,22 @@ export const ATTACH_AUDIT_LOG = path.join(CORRAL_HOME, "attach-audit.log"); // o
 export const UPLOAD_ROOT = path.join(os.tmpdir(), "corral-uploads");
 
 // Brief store for MCP-driven spawns. A brief is written here and the launch command reads it via
-// `$(cat <path>)`, so only a server-generated path ever reaches the pane's shell. Swept on startup
-// like UPLOAD_ROOT: bounded to one server run, no history by design.
-export const BRIEF_ROOT = path.join(CORRAL_HOME, "briefs");
+// `$(cat <path>)`, so only a server-generated path ever reaches the pane's shell. MUST live outside
+// BOARD_DATA_DIR/CORRAL_HOME: server/git.ts `git add -A`s that tree every GIT_COMMIT_INTERVAL_MS, and
+// a brief written under it would be committed to the board-data repo's history permanently (this
+// happened — a real brief was found committed and had to be purged from history by hand). Mirrors
+// UPLOAD_ROOT for the same reason: os.tmpdir() is outside any git repo, which is what makes "bounded
+// to one run" true rather than aspirational.
+export const BRIEF_ROOT = path.join(os.tmpdir(), "corral-briefs");
 // Cap so a runaway brief cannot blow the pane or the spawned session's context window.
 export const BRIEF_MAX_BYTES = intFromEnv("BRIEF_MAX_BYTES", 16384, { min: 1 });
+// Bounded post-spawn delay before a single brief file is unlinked (server/api.ts). `herdr pane run`
+// (server/spawn.ts spawnSession, Step 4) returns once the daemon has been told to inject the launch
+// command into the pane's pty — NOT once the pane's shell has actually executed `$(cat <path>)`. An
+// unlink the instant spawnSession's promise settles would race that shell read, so deletion happens
+// this long afterward instead. Bounds a brief's disk lifetime to one spawn attempt + this grace
+// window, not the life of the server process (previously: one file leaked per spawn, forever).
+export const BRIEF_CLEANUP_DELAY_MS = intFromEnv("BRIEF_CLEANUP_DELAY_MS", 5000, { min: 0 });
 
 // SEC-1: WebSockets bypass same-origin policy, so the upgrade must Origin-allowlist. The Vite dev origin
 // is added ONLY outside production — prod serves same-origin from web/dist, and keeping the dev origin in

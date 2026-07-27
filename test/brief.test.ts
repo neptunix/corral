@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { BRIEF_PREAMBLE, briefByteLength, composeBrief, sweepBriefRoot, writeBrief } from "../server/brief.ts";
+import { BRIEF_PREAMBLE, briefByteLength, cleanupBrief, composeBrief, sweepBriefRoot, writeBrief } from "../server/brief.ts";
 
 describe("brief store", () => {
   let root: string;
@@ -53,5 +53,15 @@ describe("brief store", () => {
     await sweepBriefRoot(root);
     expect(existsSync(root)).toBe(false);
     await expect(sweepBriefRoot(root)).resolves.toBeUndefined();
+  });
+
+  it("cleanupBrief removes a single brief file", async () => {
+    const p = await writeBrief(root, "hello");
+    await cleanupBrief(p);
+    expect(existsSync(p)).toBe(false);
+  });
+
+  it("cleanupBrief never throws when the file is already gone", async () => {
+    await expect(cleanupBrief(path.join(root, "nonexistent.md"))).resolves.toBeUndefined();
   });
 });

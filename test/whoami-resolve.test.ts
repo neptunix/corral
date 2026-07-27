@@ -61,6 +61,20 @@ describe("resolveSelf", () => {
     expect(r.env.id).toBe("personal-local");
   });
 
+  // The normal case in practice: the MCP client always forwards HERDR_SOCKET_PATH, but
+  // environments.json need not configure `socket` for every local env, so a supplied socket often
+  // matches none of the candidates. That must fall through to the cwd tie-break, not report ambiguous.
+  it("falls through to the cwd tie-break when a socket IS supplied but matches no configured env", () => {
+    const r = resolveSelf({
+      snapshot: snapshot([row("work-local", "w1:p1", "/a"), row("personal-local", "w1:p1", "/b")]),
+      envs: ENVIRONMENTS, paneId: "w1:p1", cwd: "/b",
+      socket: "~/.config/herdr/sessions/nonexistent/herdr.sock",
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("expected ok");
+    expect(r.env.id).toBe("personal-local");
+  });
+
   it("breaks a two-env tie on cwd when no socket is supplied", () => {
     const r = resolveSelf({
       snapshot: snapshot([row("work-local", "w1:p1", "/a"), row("personal-local", "w1:p1", "/b")]),
