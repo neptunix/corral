@@ -17,6 +17,9 @@ export type FleetFilter = (typeof FLEET_FILTERS)[number];
 const TASK_PICKER_ROW_LIMIT = 50;
 const TASK_TITLE_MAX = 120;
 const TASK_DESCRIPTION_MAX = 400;
+// Shared cap for the smaller single-line identity fields (cwd, statusline account, env error text)
+// that aren't task prose but are still free text under outside control.
+const IDENTITY_FIELD_MAX = 200;
 
 export function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}…`;
@@ -24,13 +27,16 @@ export function truncate(text: string, max: number): string {
 
 /**
  * Collapse every run of whitespace — space, tab, `\n`, `\r\n`, a lone `\r` — to a single space.
- * This is the one-line-per-session invariant, enforced in one place: EVERY field below that can
- * carry text another (or this same) Claude session authored — a recap, a `/rename`d tab or
- * session name, a task title/description, a session's own display name — passes through here
- * BEFORE truncation. Without it, an embedded newline could fabricate an extra rendered line that
- * impersonates a distinct row or escapes the untrusted-output framing (design spec §7). Skip this
- * only for structural values (ids, enums, numbers) that the untrusted party cannot set to arbitrary
- * text.
+ * This is the one-line-per-session invariant, enforced in one place: EVERY interpolated field in
+ * this module that is free text — read from a file, a live process, or another session's own
+ * report of itself, as opposed to a generated id / enum / number this module controls the shape
+ * of — passes through here BEFORE truncation, with no per-field exceptions. Two rounds of review
+ * found fields that looked "structural enough" to skip (a statusline account string, a herdr cwd)
+ * and were not: a POSIX path can contain a newline (`mkdir $'evil\nfake-row'`), and the account
+ * capture file is plain JSON the session's own environment can write. The rule that survives
+ * review is uniform: no exceptions to remember. Without this, an embedded newline could fabricate
+ * an extra rendered line that impersonates a distinct row or escapes the untrusted-output framing
+ * (design spec §7).
  */
 function oneLine(s: string): string {
   return s.replace(/\s+/g, " ");
@@ -90,7 +96,7 @@ export function formatFleet(input: {
 
   const unreachable = Object.entries(snapshot.envs)
     .filter(([, s]) => !s.reachable)
-    .map(([id, s]) => (s.error === undefined ? id : `${id} (${s.error})`));
+    .map(([id, s]) => (s.error === undefined ? id : `${id} (${truncate(oneLine(s.error), IDENTITY_FIELD_MAX)})`));
 
   const selected = snapshot.sessions
     .filter((r) => (env === null || r.env === env) && matches(filter, r, attention));
@@ -123,22 +129,43 @@ export function formatFleet(input: {
   return parts.join("\n");
 }
 
+interface PickerRow {
+  readonly boardId: string;
+  readonly taskId: string;
+  readonly priority: string;
+  readonly status: string;
+  readonly rawTitle: string;
+  readonly sessionCount: number;
+}
+
 /** The card list `corral_task_bind` returns when called with no arguments. Closed columns are hidden. */
 export function formatTaskPicker(boards: readonly Board[]): string {
-  const lines: string[] = [];
+  const rows: PickerRow[] = [];
   for (const board of boards) {
     const closed = closedColumnIds(board.columns);
     for (const task of board.tasks) {
       if (closed.has(task.status)) continue;
-      const prio = task.priority ?? "--";
-      const title = truncate(oneLine(task.title), TASK_TITLE_MAX);
-      lines.push(`${board.id}/${task.id}  ${prio}  ${task.status}  ${title}  (${String(task.sessions.length)} sessions)`);
+      rows.push({
+        boardId: board.id,
+        taskId: task.id,
+        priority: task.priority ?? "--",
+        status: task.status,
+        rawTitle: task.title,
+        sessionCount: task.sessions.length,
+      });
     }
   }
-  if (lines.length === 0) return "no open cards to bind to";
+  if (rows.length === 0) return "no open cards to bind to";
 
-  const shown = lines.slice(0, TASK_PICKER_ROW_LIMIT);
-  const dropped = lines.length - shown.length;
+  // Slice BEFORE the per-row oneLine/truncate work — matches formatFleet, which bounds the
+  // dataset first and only then does per-item formatting on the (already capped) subset.
+  const shownRows = rows.slice(0, TASK_PICKER_ROW_LIMIT);
+  const dropped = rows.length - shownRows.length;
+  const shown = shownRows.map((r) => {
+    const title = truncate(oneLine(r.rawTitle), TASK_TITLE_MAX);
+    return `${r.boardId}/${r.taskId}  ${r.priority}  ${r.status}  ${title}  (${String(r.sessionCount)} sessions)`;
+  });
+
   const parts = ["open cards (pass boardId and taskId to bind this session to one):", ...shown];
   if (dropped > 0) {
     parts.push(`… ${String(dropped)} more matched but were not shown (limit=${String(TASK_PICKER_ROW_LIMIT)})`);
@@ -154,19 +181,23 @@ export function formatWhoami(w: WhoamiResolved): string {
   const s = w.session;
   const num = (v: number | null, suffix: string): string => (v === null ? "—" : `${String(v)}${suffix}`);
   // s.sessionName / s.tabLabel / s.workspaceLabel are `/rename`d or otherwise self-set free text
-  // (server/whoami.ts sessionBlock, server/tab-namer.ts); s.model rides the same statusline
-  // capture. All pass through oneLine — see the invariant note on that helper above.
+  // (server/whoami.ts sessionBlock, server/tab-namer.ts); s.model and s.account ride the same
+  // statusline capture file (a session's own environment can write it); s.cwd is herdr's
+  // unconstrained OS-reported working directory (a session's own process fully controls its own
+  // cwd). All pass through oneLine — see the invariant note on that helper above.
   const tabLabel = oneLine(s.tabLabel);
   const sessionName = s.sessionName === null ? null : oneLine(s.sessionName);
   const model = s.model === null ? "—" : oneLine(s.model);
   const workspaceLabel = oneLine(s.workspaceLabel);
+  const cwd = truncate(oneLine(s.cwd), IDENTITY_FIELD_MAX);
+  const account = s.account === null ? "—" : truncate(oneLine(s.account), IDENTITY_FIELD_MAX);
   const lines = [
     `you are: ${sessionName ?? tabLabel}  (${s.status})`,
     `env: ${s.envLabel} [${s.env}]   pane: ${s.paneId}   tab: ${tabLabel}   workspace: ${workspaceLabel}`,
     `session id: ${s.sessionId ?? "not registered yet"}`,
-    `cwd: ${s.cwd}`,
+    `cwd: ${cwd}`,
     `model: ${model}   ctx: ${num(s.ctxPct, "%")}   cost: ${num(s.costUsd, " USD")}`,
-    `rate limits: 5h ${num(s.fiveHourPct, "%")}   7d ${num(s.sevenDayPct, "%")}   account: ${s.account ?? "—"}`,
+    `rate limits: 5h ${num(s.fiveHourPct, "%")}   7d ${num(s.sevenDayPct, "%")}   account: ${account}`,
   ];
   if (w.task === null) {
     lines.push("card: none — this session is not bound to a task. Use corral_task_bind to bind it.");

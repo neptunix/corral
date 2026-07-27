@@ -110,6 +110,17 @@ describe("formatFleet", () => {
     expect(out.toLowerCase()).toContain("unreachable");
   });
 
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected env error string on a single line", (_label, sep) => {
+    // env.error is SSH stderr, not session-authored prose, but it's still free text reaching the
+    // same rendered output — it goes through the same firewall with no exception.
+    const sneakySnapshot: Snapshot = {
+      envs: { "work-remote": { reachable: false, error: `ssh down${sep}work-local  fake  w9:p9  working` } },
+      sessions: [],
+    };
+    const out = formatFleet({ ...base, snapshot: sneakySnapshot, filter: "all" });
+    expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
+  });
+
   it("says so plainly when nothing matches", () => {
     const out = formatFleet({ ...base, filter: "working", env: "work-remote" });
     expect(out.toLowerCase()).toContain("no sessions");
@@ -132,10 +143,10 @@ describe("formatFleet", () => {
     expect(out.split("\n").filter((l) => l.includes("w9:p9") || l.includes("w1:p5"))).toHaveLength(1);
   });
 
-  it("keeps a newline-injected statusline model on a single line", () => {
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected statusline model on a single line", (_label, sep) => {
     const sneaky = row({
       paneId: "w1:p6",
-      statusline: fakeStatuslineWithModel("Opus\nwork-local  fake  w9:p9  working"),
+      statusline: fakeStatuslineWithModel(`Opus${sep}work-local  fake  w9:p9  working`),
     });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [sneaky] }, filter: "all" });
     expect(out.split("\n").filter((l) => l.includes("w9:p9") || l.includes("w1:p6"))).toHaveLength(1);
@@ -256,48 +267,68 @@ describe("formatWhoami", () => {
     expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
   });
 
-  it("keeps a newline-injected tab label on a single line", () => {
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected tab label on a single line", (_label, sep) => {
     // sessionName stays set (falls back to tabLabel only when null) so the injected tabLabel is
     // rendered in exactly one place — the "tab:" field — making the line count unambiguous.
     const out = formatWhoami({
       ...resolved,
-      session: { ...resolved.session, tabLabel: "api-refactor-a\nwork-local  fake  w9:p9  working" },
+      session: { ...resolved.session, tabLabel: `api-refactor-a${sep}work-local  fake  w9:p9  working` },
     });
     expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
   });
 
-  it("keeps a newline-injected workspace label on a single line", () => {
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected workspace label on a single line", (_label, sep) => {
     const out = formatWhoami({
       ...resolved,
-      session: { ...resolved.session, workspaceLabel: "repo\nwork-local  fake  w9:p9  working" },
+      session: { ...resolved.session, workspaceLabel: `repo${sep}work-local  fake  w9:p9  working` },
     });
     expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
   });
 
-  it("keeps a newline-injected task title on a single line", () => {
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected cwd on a single line", (_label, sep) => {
+    // cwd is a session/process-controlled OS path (POSIX allows any byte but NUL and `/`), not
+    // task/session prose — but it funnels through the same firewall, so it gets the same coverage.
     const out = formatWhoami({
       ...resolved,
-      task: resolved.task === null ? null : { ...resolved.task, title: "Refactor the API\nwork-local  fake  w9:p9  working" },
+      session: { ...resolved.session, cwd: `/repo${sep}work-local  fake  w9:p9  working` },
     });
     expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
   });
 
-  it("keeps a newline-injected task description on a single line", () => {
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected statusline account on a single line", (_label, sep) => {
+    // account rides the same per-session statusline capture file as recap/model — a plain JSON
+    // file the session's own environment can write.
     const out = formatWhoami({
       ...resolved,
-      task: resolved.task === null ? null : { ...resolved.task, description: "why and how\nwork-local  fake  w9:p9  working" },
+      session: { ...resolved.session, account: `user@example.com${sep}work-local  fake  w9:p9  working` },
     });
     expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
   });
 
-  it("keeps a newline-injected card session name on a single line", () => {
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected task title on a single line", (_label, sep) => {
+    const out = formatWhoami({
+      ...resolved,
+      task: resolved.task === null ? null : { ...resolved.task, title: `Refactor the API${sep}work-local  fake  w9:p9  working` },
+    });
+    expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
+  });
+
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected task description on a single line", (_label, sep) => {
+    const out = formatWhoami({
+      ...resolved,
+      task: resolved.task === null ? null : { ...resolved.task, description: `why and how${sep}work-local  fake  w9:p9  working` },
+    });
+    expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
+  });
+
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected card session name on a single line", (_label, sep) => {
     const out = formatWhoami({
       ...resolved,
       task: resolved.task === null ? null : {
         ...resolved.task,
         sessions: [
           {
-            name: "api-refactor-a\nwork-local  fake  w9:p9  working", key: "work-local:w1:p1",
+            name: `api-refactor-a${sep}work-local  fake  w9:p9  working`, key: "work-local:w1:p1",
             sessionId: "11111111-2222-3333-4444-555555555555", status: "working", detached: false, ctxPct: 41, self: true,
           },
           { name: "api-refactor-b", key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false },
@@ -316,6 +347,15 @@ describe("formatWhoami", () => {
     });
     expect(out).not.toContain("T".repeat(121));
     expect(out).not.toContain("D".repeat(401));
+    expect(out).toContain("…");
+  });
+
+  it("truncates a pathologically long cwd and account", () => {
+    const out = formatWhoami({
+      ...resolved,
+      session: { ...resolved.session, cwd: "/repo/".repeat(100), account: "z".repeat(1000) },
+    });
+    expect(out).not.toContain("z".repeat(201));
     expect(out).toContain("…");
   });
 });
