@@ -1,7 +1,10 @@
+import type { Board, SessionLink, Task } from "@shared/board-schema.ts";
 import type { SessionRow, Snapshot } from "@shared/schema";
+import type { WhoamiCardSession, WhoamiEnv, WhoamiResponse, WhoamiSession, WhoamiTask } from "@shared/whoami-schema.ts";
 
 import type { HerdrEnv } from "../environments.ts";
 import { expandTilde } from "./herdr.ts";
+import { buildLiveIndex, type LiveIndex, resolveLiveRow } from "./live-resolve.ts";
 
 type LocalEnv = Extract<HerdrEnv, { kind: "local" }>;
 
@@ -68,4 +71,114 @@ export function resolveSelf(input: {
 
   const ids = candidates.map((c) => c.env.id).join(", ");
   return { ok: false, reason: `pane ${paneId} is ambiguous across environments: ${ids}` };
+}
+
+function envList(envs: readonly HerdrEnv[], snapshot: Snapshot): WhoamiEnv[] {
+  return envs.map((e) => ({
+    id: e.id,
+    label: e.label,
+    kind: e.kind,
+    // An env absent from the snapshot has not been polled successfully yet → treat as unreachable.
+    reachable: snapshot.envs[e.id]?.reachable ?? false,
+  }));
+}
+
+function hasId(s: string | null): boolean {
+  return s !== null && s !== "";
+}
+
+// Does this stored link denote the given live session? The same two independent disjuncts as
+// server/session-binding.ts: a link without a UUID claims its pane; a link with one claims its session.
+function linkMatches(link: SessionLink, env: string, paneId: string, sessionId: string | null): boolean {
+  if (link.env !== env) return false;
+  if (!hasId(link.sessionId)) return link.paneId === paneId;
+  return hasId(sessionId) && link.sessionId === sessionId;
+}
+
+function cardSession(index: LiveIndex, link: SessionLink, selfRow: SessionRow): WhoamiCardSession {
+  // Liveness via the CANONICAL resolver (server/live-resolve.ts), not a local reimplementation: a
+  // UUID-carrying link whose pane now holds a different session resolves via the UUID index or
+  // reports detached — never the stranger. Board UI and whoami must agree on this.
+  const live = resolveLiveRow(link, index);
+  return {
+    name: link.name,
+    key: `${link.env}:${link.paneId}`,
+    sessionId: link.sessionId,
+    status: live?.status ?? "detached",
+    detached: live === undefined,
+    ctxPct: live?.statusline?.ctx.pct ?? null,
+    self: linkMatches(link, selfRow.env, selfRow.paneId, selfRow.sessionId),
+  };
+}
+
+function findCard(
+  boards: readonly Board[],
+  row: SessionRow,
+): { readonly board: Board; readonly task: Task } | undefined {
+  for (const board of boards) {
+    for (const task of board.tasks) {
+      if (task.sessions.some((l) => linkMatches(l, row.env, row.paneId, row.sessionId))) {
+        return { board, task };
+      }
+    }
+  }
+  return undefined;
+}
+
+function taskBlock(boards: readonly Board[], snapshot: Snapshot, row: SessionRow): WhoamiTask | null {
+  const found = findCard(boards, row);
+  if (found === undefined) return null;
+  const index = buildLiveIndex(snapshot.sessions);
+  return {
+    boardId: found.board.id,
+    boardLabel: found.board.label,
+    taskId: found.task.id,
+    title: found.task.title,
+    description: found.task.description,
+    status: found.task.status,
+    priority: found.task.priority,
+    columns: found.board.columns.map((c) => ({ id: c.id, label: c.label })),
+    sessions: found.task.sessions.map((l) => cardSession(index, l, row)),
+  };
+}
+
+function sessionBlock(env: HerdrEnv, row: SessionRow): WhoamiSession {
+  const sl = row.statusline;
+  return {
+    env: env.id,
+    envLabel: env.label,
+    paneId: row.paneId,
+    tabId: row.tabId ?? "",
+    tabLabel: row.tab,
+    workspaceId: row.workspaceId ?? "",
+    workspaceLabel: row.workspace,
+    sessionId: row.sessionId,
+    sessionName: sl?.session_name ?? null,
+    cwd: row.cwd,
+    status: row.status,
+    model: sl?.model ?? null,
+    ctxPct: sl?.ctx.pct ?? null,
+    costUsd: sl?.cost.usd ?? null,
+    fiveHourPct: sl?.rate.five_hour?.used_percentage ?? null,
+    sevenDayPct: sl?.rate.seven_day?.used_percentage ?? null,
+    account: sl?.account?.email ?? sl?.account?.org ?? null,
+  };
+}
+
+/** Compose the whoami payload. Pure: takes already-read boards rather than the storage handle. */
+export function buildWhoami(input: {
+  readonly resolution: SelfResolution;
+  readonly envs: readonly HerdrEnv[];
+  readonly snapshot: Snapshot;
+  readonly boards: readonly Board[];
+}): WhoamiResponse {
+  const { resolution, envs, snapshot, boards } = input;
+  const list = envList(envs, snapshot);
+  if (!resolution.ok) return { resolved: false, reason: resolution.reason, envs: list };
+  return {
+    resolved: true,
+    session: sessionBlock(resolution.env, resolution.row),
+    task: taskBlock(boards, snapshot, resolution.row),
+    envs: list,
+  };
 }
