@@ -131,6 +131,16 @@ describe("formatFleet", () => {
     expect(out.toLowerCase()).toContain("untrusted");
   });
 
+  it("pins the literal column spacing of a rendered row (double-space separators, not collapsed)", () => {
+    // Guards against oneLine's line-terminator sweep silently reformatting column alignment —
+    // the exact failure mode a prior version (which collapsed ALL whitespace, not just line
+    // terminators) introduced.
+    const solo = row({ paneId: "w1:p1", status: "working", tab: "alpha" });
+    const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [solo] }, filter: "all" });
+    const firstLine = out.split("\n")[0];
+    expect(firstLine).toBe("work-local  alpha  w1:p1  working  —  —  [unassigned]");
+  });
+
   it.each(NEWLINE_VARIANTS)("keeps a %s-injected recap on a single line", (_label, sep) => {
     const sneaky = row({ paneId: "w1:p4", tab: "sneaky", recap: `done${sep}work-local  fake  w9:p9  working` });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [sneaky] }, filter: "all" });
@@ -181,6 +191,12 @@ describe("formatTaskPicker", () => {
     expect(out).toContain("t_aaaaaaa");
     expect(out).toContain("Open one");
     expect(out).not.toContain("t_bbbbbbb");
+  });
+
+  it("pins the literal column spacing of a rendered row", () => {
+    const out = formatTaskPicker(boards);
+    const cardRow = out.split("\n").find((l) => l.startsWith("board/t_aaaaaaa"));
+    expect(cardRow).toBe("board/t_aaaaaaa  p1  todo  Open one  (0 sessions)");
   });
 
   it("says so plainly when there is nothing to bind to", () => {
@@ -266,6 +282,12 @@ describe("formatWhoami", () => {
     const otherLine = out.split("\n").find((l) => l.includes("api-refactor-b"));
     expect(selfLine?.trimStart().startsWith("*")).toBe(true);
     expect(otherLine?.trimStart().startsWith("*")).toBe(false);
+  });
+
+  it("pins the literal column spacing of the env line (triple-space separators, not collapsed)", () => {
+    const out = formatWhoami(resolved);
+    const envLine = out.split("\n").find((l) => l.startsWith("env:"));
+    expect(envLine).toBe("env: Work (local) [work-local]   pane: w1:p1   tab: api-refactor-a   workspace: repo");
   });
 
   it("tells an unbound session how to bind", () => {
