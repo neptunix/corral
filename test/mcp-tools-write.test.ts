@@ -92,7 +92,28 @@ describe("bindHandler", () => {
     const c = stub({ whoami: async () => unbound, boards: async () => closedBoards, attach: async (a) => { calls.push(a); } });
     const out = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "board", taskId: "t_done001" });
     expect(calls).toHaveLength(0);
-    expect(out.toLowerCase()).toContain("no open card");
+    // Names the real cause (closed column) rather than the generic "no open card" — that wording is
+    // reserved for a genuinely nonexistent id, asserted distinctly below.
+    expect(out.toLowerCase()).toContain("closed column");
+    expect(out.toLowerCase()).not.toContain("no open card");
+  });
+
+  it("distinguishes a closed-column card from a genuinely nonexistent id with a different message", async () => {
+    // The two causes must not share wording: a correct id for a closed-column card sends the caller
+    // to the corral UI, while a nonexistent id sends them back to the no-argument picker — conflating
+    // them (as a single "no open card" message did before this test existed) leaves the closed-column
+    // caller hunting for a typo that was never there.
+    const closedBoards: Board[] = [{
+      id: "board", label: "Board",
+      columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
+      tasks: [{ id: "t_done001", title: "Shipped", description: "", status: "done", priority: null, repo: null, sessions: [], createdAt: 1, updatedAt: 1 }],
+    }];
+    const c = stub({ whoami: async () => unbound, boards: async () => closedBoards });
+    const closedOut = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "board", taskId: "t_done001" });
+    const missingOut = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "board", taskId: "t_nope001" });
+    expect(closedOut).not.toBe(missingOut);
+    expect(missingOut.toLowerCase()).toContain("no open card");
+    expect(closedOut.toLowerCase()).toContain("closed column");
   });
 
   it("refuses to attach a taskId that does not match any open card, and never reaches attach", async () => {
@@ -233,6 +254,33 @@ describe("closeHandler", () => {
     });
     const out = await closeHandler({ client: c, identity: idOf(c) }, {});
     expect(calls).toEqual([null]);
+    expect(out.toLowerCase()).toContain("resume");
+  });
+
+  it("REGRESSION: self-close on a card with two same-pane links sends the LIVE link's sessionId, not the stale one's", async () => {
+    // server/api.ts's isSessionBound comment documents this state as intended: a same-pane `/new`
+    // leaves a stale detached link (old uuid) alongside the freshly-appended live link (new uuid),
+    // both keyed "work-local:w1:p1". A lookup keyed on `key` alone (`find((s) => s.key === key)`)
+    // returns whichever is stored first — here the stale one — and sending ITS sessionId as an
+    // authoritative sid makes the server's ownsBySession check compare the live row's uuid against
+    // the wrong link, 409-ing "pane now belongs to a different session" on the caller's OWN pane.
+    // Resolving self via the card list's own `self` flag instead of `key` picks the right sibling.
+    const calls: (string | null)[] = [];
+    const c = stub({
+      whoami: async () => ({
+        ...bound,
+        task: {
+          ...boundTask,
+          sessions: [
+            { name: "alpha-old", key: "work-local:w1:p1", sessionId: SID_B, status: "idle", detached: true, ctxPct: null, self: false },
+            { name: "alpha", key: "work-local:w1:p1", sessionId: SID, status: "working", detached: false, ctxPct: 41, self: true },
+          ],
+        },
+      }),
+      closeSession: async (a) => { calls.push(a.sessionId); },
+    });
+    const out = await closeHandler({ client: c, identity: idOf(c) }, {});
+    expect(calls).toEqual([SID]);
     expect(out.toLowerCase()).toContain("resume");
   });
 

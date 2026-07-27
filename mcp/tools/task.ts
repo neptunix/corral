@@ -65,9 +65,18 @@ export function bindHandler(deps: TaskDeps, args: BindArgs): Promise<string> {
     // formatTaskPicker (the no-argument listing above) hides closed-column cards, so the explicit-id
     // path must refuse the same set — otherwise "no open cards to bind to" is a lie in one direction
     // (an id pair for a done-column card binds fine) and this message would be a lie in the other.
-    const closed = board === undefined ? new Set<string>() : closedColumnIds(board.columns);
-    if (task === undefined || closed.has(task.status)) {
+    if (task === undefined) {
       return `no open card ${args.boardId}/${args.taskId} — call corral_task_bind with no arguments to list open cards`;
+    }
+    // Distinct from "does not exist at all": a correct id for a card that just happens to sit in a
+    // closed column would otherwise get the same "no open card" wording, sending the caller hunting
+    // for a typo that isn't there — and formatTaskPicker won't show the card either, since it hides
+    // closed columns too. Name the real cause and point at the actual remedy instead.
+    // (`board` is guaranteed defined here — `task` only resolves via `board?.tasks.find` above — the
+    // fallback is for the type checker, not reachable in practice.)
+    const closed = board === undefined ? new Set<string>() : closedColumnIds(board.columns);
+    if (closed.has(task.status)) {
+      return `${args.boardId}/${args.taskId} is in a closed column; reopen it from the corral UI first`;
     }
 
     await deps.client.attach({

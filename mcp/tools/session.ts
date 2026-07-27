@@ -82,13 +82,24 @@ export function closeHandler(deps: SessionDeps, args: CloseArgs): Promise<string
     // the card list carries it — pass it as sid so the server resolves the exact link, not just the
     // pane. Self defers the pane kill so this response outruns the pane's death (spec §5.4).
     //
-    // Always the LINK's stored id (cardSid), never the live row's (me.session.sessionId), even for
-    // self: an explicit sid is authoritative in resolveLinkIndex with NO paneId fallback (server/
-    // session-binding.ts). While a fresh link's sessionId is still null — the window before the
-    // reconciler backfills it, or any time a backfill write fails — the live UUID matches nothing and
-    // a self-close 404s "session not linked" while the session stays alive. Falling back to null here
+    // Always the LINK's stored id, never the live row's (me.session.sessionId), even for self: an
+    // explicit sid is authoritative in resolveLinkIndex with NO paneId fallback (server/session-
+    // binding.ts). While a fresh link's sessionId is still null — the window before the reconciler
+    // backfills it, or any time a backfill write fails — the live UUID matches nothing and a
+    // self-close 404s "session not linked" while the session stays alive. Falling back to null here
     // instead restores the paneId + churn-heal resolution path.
-    const cardSid = me.task?.sessions.find((s) => s.key === key)?.sessionId ?? null;
+    //
+    // Self resolves via the card list's own `self` flag (linkBindsSession, computed server-side in
+    // whoami.ts), NOT by `key`: two links can share a pane on the same card — a stale detached link
+    // left behind by a same-pane `/new` plus the rebound live one (server/api.ts's isSessionBound
+    // comment documents this as intended). `find(key)` returns whichever is stored first, usually
+    // the stale one, and sending ITS sessionId as an authoritative sid no longer matches the live
+    // row — a 409 pane_reused telling the caller its own pane belongs to someone else. Non-self
+    // keeps key-based lookup; its own ambiguity in that same two-link state is pre-existing and out
+    // of scope here (there is no equivalent `self`-shaped disambiguator for an arbitrary target).
+    const cardSid = isSelf
+      ? me.task?.sessions.find((s) => s.self)?.sessionId ?? null
+      : me.task?.sessions.find((s) => s.key === key)?.sessionId ?? null;
     await deps.client.closeSession({
       boardId: card.boardId,
       taskId: card.taskId,
