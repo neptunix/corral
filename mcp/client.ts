@@ -91,6 +91,11 @@ export interface CorralClient {
 
 const OkSchema = z.object({ ok: z.boolean() });
 const SpawnResultSchema = z.object({ env: z.string(), paneId: z.string(), name: z.string() });
+// Checked against server/api.ts's attach route (POST .../attach): every code path through it ends
+// in either an error response (thrown as CorralError before this schema ever runs) or the literal
+// `c.json({ ok: true })` — there is no branch that returns a task. `OkSchema.or(TaskSchema)` was
+// therefore validating a shape the route can never produce, for a parsed value this client already
+// discards (`attach` returns `Promise<void>`). Simplified to the one shape that's actually possible.
 
 export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralClient {
   const base = baseUrl.replace(/\/+$/, "");
@@ -117,7 +122,7 @@ export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralC
         fetchFn,
         `${base}/api/boards/${seg(a.boardId)}/tasks/${seg(a.taskId)}/attach`,
         post({ env: a.env, paneId: a.paneId, name: a.name }),
-        OkSchema.or(TaskSchema),
+        OkSchema,
       );
     },
     spawn: (a) =>

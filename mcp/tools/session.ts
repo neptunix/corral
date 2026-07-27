@@ -30,6 +30,15 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
     }
     const me = await deps.identity.load();
     const env = args.env ?? me.session.env;
+    // brief is mandatory in this tool's schema, and the server rejects ANY spawn that carries a
+    // brief when the target env isn't local (brief delivery writes a file on the corral host and
+    // relies on a `$(cat …)` substitution in the pane's own shell — neither exists for a remote
+    // box). A remote `env` here would therefore always 400 server-side; refuse it here instead, with
+    // a message that explains why, rather than let the tool advertise an override it can never honor.
+    const targetEnv = me.envs.find((e) => e.id === env);
+    if (targetEnv !== undefined && targetEnv.kind !== "local") {
+      return `corral_spawn only supports local environments in this phase — "${env}" is remote, and a brief cannot be delivered there (the server would refuse it). Omit env to spawn in this session's own environment, or pick a local one from corral_whoami's environment list.`;
+    }
     // Same-env continuation JOINS the caller's workspace: the new tab lands beside the caller (same
     // cwd family — a worktree checkout stays visible), repo-less cards work, and the idempotent
     // rejoin applies. Cross-env keeps the create-new path — the caller's workspace does not exist
@@ -120,10 +129,10 @@ export function registerSessionTools(server: McpServer, deps: SessionDeps): void
     {
       title: "Spawn a session on this card",
       description:
-        "Start a NEW Claude session attached to THIS session's card — for a context handoff or a parallel strand. The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment, where the new session joins THIS session's workspace; `env` overrides it, and a cross-environment spawn creates a new workspace rooted at the card's repo as configured over there. A brief is only available for local environments.",
+        "Start a NEW Claude session attached to THIS session's card — for a context handoff or a parallel strand. The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment, where the new session joins THIS session's workspace. LOCAL ENVIRONMENTS ONLY in this phase: `env` may only name a local environment (kind=local in corral_whoami's environment list) — a brief cannot be delivered to a remote environment, so a remote `env` is refused here rather than left to 400 on the server.",
       inputSchema: {
         brief: z.string().describe("handoff text the new session starts from; required"),
-        env: z.string().optional().describe("environment id from corral_whoami; defaults to this session's"),
+        env: z.string().optional().describe("LOCAL environment id from corral_whoami; defaults to this session's. A remote environment is refused."),
       },
     },
     async (args: SpawnArgs) => toolText(await spawnHandler(deps, args)),

@@ -100,6 +100,24 @@ describe("formatFleet", () => {
     expect(out).not.toContain("alpha");
   });
 
+  // Item 5 of the review-fix wave: `nowMs` had zero setters anywhere and the "⚠ <state> <age>"
+  // suffix (and ageMinutes, which it exists to make testable) had no coverage at all. Pinning it
+  // with an injected clock is the fix — not deleting the seam.
+  it("renders the attention age suffix from an injected clock (nowMs), not the real wall clock", () => {
+    // The `attention` fixture's one record is work-local:w1:p3 (gamma), since=1000.
+    const fiveMinutesLater = 1000 + 5 * 60_000;
+    const out = formatFleet({ ...base, filter: "needs-attention", nowMs: fiveMinutesLater });
+    const gammaLine = out.split("\n").find((l) => l.includes("gamma"));
+    expect(gammaLine).toContain("⚠ finished 5m");
+  });
+
+  it("floors a negative age (clock skew / a since in the future) at 0m rather than a negative number", () => {
+    const beforeSince = 1000 - 10 * 60_000;
+    const out = formatFleet({ ...base, filter: "needs-attention", nowMs: beforeSince });
+    const gammaLine = out.split("\n").find((l) => l.includes("gamma"));
+    expect(gammaLine).toContain("⚠ finished 0m");
+  });
+
   it("filters to working and to idle", () => {
     expect(formatFleet({ ...base, filter: "working" })).toContain("alpha");
     expect(formatFleet({ ...base, filter: "working" })).not.toContain("gamma");
@@ -334,6 +352,44 @@ describe("formatWhoami", () => {
     expect(otherLine?.trimStart().startsWith("*")).toBe(false);
   });
 
+  // Item 4 of the review-fix wave: formatWhoami's attached-session list and column-id list had no
+  // row cap at all, unlike formatFleet and formatTaskPicker — the one call every session makes at
+  // startup could otherwise emit unbounded lines from a corrupted/adversarial board config.
+  describe("row caps on the card's session list and column-id list (item 4)", () => {
+    it("caps the attached-session list at 20 and reports how many were dropped", () => {
+      const manySessions = Array.from({ length: 25 }, (_, i) => ({
+        name: `s${String(i)}`, key: `work-local:w1:p${String(i)}`, sessionId: null,
+        status: "idle", detached: false, ctxPct: null, self: false,
+      }));
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : { ...resolved.task, sessions: manySessions },
+      });
+      const rows = out.split("\n").filter((l) => /^\s*[* ] s\d+/.test(l));
+      expect(rows).toHaveLength(20);
+      expect(out).toContain("5 more session(s) not shown (limit=20)");
+    });
+
+    it("caps the column-id list at 20 and reports how many were dropped", () => {
+      const manyColumns = Array.from({ length: 25 }, (_, i) => ({ id: `col${String(i)}`, label: `Col ${String(i)}` }));
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : { ...resolved.task, columns: manyColumns },
+      });
+      const columnsLine = out.split("\n").find((l) => l.startsWith("columns available for status:"));
+      expect(columnsLine).toContain("col0");
+      expect(columnsLine).toContain("col19");
+      expect(columnsLine).not.toContain("col20");
+      expect(columnsLine).toContain(", … 5 more (limit=20)");
+    });
+
+    it("does not cap or annotate when the card is at or under both limits", () => {
+      const out = formatWhoami(resolved); // 2 sessions, 2 columns — well under the caps
+      expect(out).not.toContain("more session(s) not shown");
+      expect(out).not.toContain("more (limit=20)");
+    });
+  });
+
   it("pins the literal column spacing of the env line (triple-space separators, not collapsed)", () => {
     const out = formatWhoami(resolved);
     const envLine = out.split("\n").find((l) => l.startsWith("env:"));
@@ -430,13 +486,26 @@ describe("formatWhoami", () => {
     expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
   });
 
-  it.each(NEWLINE_VARIANTS)("keeps a %s-injected task description on a single line", (_label, sep) => {
-    const out = formatWhoami({
-      ...resolved,
-      task: resolved.task === null ? null : { ...resolved.task, description: `why and how${sep}work-local  fake  w9:p9  working` },
-    });
-    expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
-  });
+  it.each(NEWLINE_VARIANTS)(
+    "confines a %s-injected task description line to the prefixed block instead of flattening it",
+    (_label, sep) => {
+      // description is the one field that deliberately does NOT collapse to a single line (see
+      // renderDescription in mcp/digest.ts) — its real line breaks survive so a session can read
+      // the whole log back. The row-fabrication defence still holds a different way here: every
+      // line the injected newline produces carries the fixed "  | " block prefix, so it can never
+      // be mistaken for one of formatWhoami's own structural lines (env:, card:, session id:, ...).
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : { ...resolved.task, description: `why and how${sep}work-local  fake  w9:p9  working` },
+      });
+      const hitLines = out.split("\n").filter((l) => l.includes("w9:p9"));
+      expect(hitLines).toHaveLength(1);
+      expect(hitLines[0]?.startsWith("  | ")).toBe(true);
+      // And it must not have fabricated something that reads as a real structural line: no line
+      // outside the block starts with a bare "env:"/"card:" etc. carrying the injected text.
+      expect(out.split("\n").some((l) => l.includes("w9:p9") && !l.startsWith("  | "))).toBe(false);
+    },
+  );
 
   it.each(NEWLINE_VARIANTS)("keeps a %s-injected card session name on a single line", (_label, sep) => {
     const out = formatWhoami({
@@ -455,16 +524,83 @@ describe("formatWhoami", () => {
     expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
   });
 
-  it("truncates the task title to 120 chars and description to 400 chars", () => {
+  it("truncates a pathologically long task title to 120 chars", () => {
     const longTitle = "T".repeat(300);
-    const longDescription = "D".repeat(1000);
     const out = formatWhoami({
       ...resolved,
-      task: resolved.task === null ? null : { ...resolved.task, title: longTitle, description: longDescription },
+      task: resolved.task === null ? null : { ...resolved.task, title: longTitle },
     });
     expect(out).not.toContain("T".repeat(121));
-    expect(out).not.toContain("D".repeat(401));
     expect(out).toContain("…");
+  });
+
+  // Item 1 of the review-fix wave: corral_task_update documents `description` as a full-replacement
+  // write, but corral_whoami is the only way a session reads it back — a silently truncated view,
+  // round-tripped through that "full replacement", destroys whatever wasn't shown. These pin the
+  // fix: the rendered block preserves real line structure (not flattened to one line), and a
+  // "TRUNCATED" marker + explicit warning appear IF AND ONLY IF something was actually cut.
+  describe("description round-trip safety (item 1)", () => {
+    it("renders a short multi-line description verbatim, with no truncation marker or warning", () => {
+      const description = "did the thing\nnext: do the other thing\nblocked on: nothing";
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : { ...resolved.task, description },
+      });
+      expect(out).toContain("  | did the thing");
+      expect(out).toContain("  | next: do the other thing");
+      expect(out).toContain("  | blocked on: nothing");
+      expect(out).toContain("description (3 lines):");
+      expect(out).not.toContain("TRUNCATED");
+      expect(out.toUpperCase()).not.toContain("WARNING");
+    });
+
+    it("renders the empty description as (empty), not an empty block", () => {
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : { ...resolved.task, description: "" },
+      });
+      expect(out).toContain("description: (empty)");
+      expect(out).not.toContain("TRUNCATED");
+    });
+
+    it("marks TRUNCATED and warns against a full-replacement write when a single line exceeds the per-line budget", () => {
+      const longLine = "D".repeat(1000);
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : { ...resolved.task, description: longLine },
+      });
+      expect(out).not.toContain("D".repeat(301));
+      expect(out).toContain("TRUNCATED");
+      expect(out.toLowerCase()).toContain("full-replacement write");
+      expect(out.toLowerCase()).toContain("silently delete");
+    });
+
+    it("marks TRUNCATED and warns when the description has more lines than the cap, and says how many were dropped", () => {
+      const description = Array.from({ length: 70 }, (_, i) => `line ${String(i)}`).join("\n");
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : { ...resolved.task, description },
+      });
+      expect(out).toContain("description (70 lines, TRUNCATED):");
+      expect(out).toContain("10 more line(s) not shown");
+      expect(out.toLowerCase()).toContain("full-replacement write");
+      // The first 60 lines are still fully present, in order — nothing within the shown budget is lost.
+      expect(out).toContain("  | line 0");
+      expect(out).toContain("  | line 59");
+      expect(out).not.toContain("  | line 60");
+    });
+
+    it("does not warn when the description sits exactly at both caps (60 lines, <=300 chars each)", () => {
+      const description = Array.from({ length: 60 }, (_, i) => `line ${String(i)}`).join("\n");
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : { ...resolved.task, description },
+      });
+      expect(out).toContain("description (60 lines):");
+      expect(out).not.toContain("TRUNCATED");
+      expect(out.toLowerCase()).not.toContain("warning");
+      expect(out).toContain("  | line 59");
+    });
   });
 
   it("truncates a pathologically long cwd", () => {

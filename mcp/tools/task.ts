@@ -133,10 +133,12 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
     {
       title: "Update this session's card",
       description:
-        "Update the card THIS session is bound to. Use `status` for the coarse board state (it must be one of the column ids corral_whoami reports) and `description` as the running progress log. Cannot target another card — there is no task id argument.",
+        "Update the card THIS session is bound to. Use `status` for the coarse board state (it must be one of the column ids corral_whoami reports) and `description` as the running progress log. Cannot target another card — there is no task id argument. WARNING: `description` is a full-replacement write, but corral_whoami — the only way this tool surfaces the current value back to a session — renders it bounded (at most 60 lines, 300 chars each); if corral_whoami showed a 'TRUNCATED' description, replacing it wholesale from that view WILL silently delete content you never saw. Append to or edit around what you can see, or accept the loss deliberately — do not round-trip a truncated view as if it were complete.",
       inputSchema: {
         title: z.string().optional(),
-        description: z.string().optional().describe("full replacement body; the progress log lives here"),
+        description: z.string().optional().describe(
+          "full replacement body; the progress log lives here. This OVERWRITES the whole field — corral_whoami's rendering of it is bounded and may be truncated, so a blind read-then-write can destroy content outside what was shown.",
+        ),
         status: z.string().optional().describe("a column id from corral_whoami's task.columns"),
         priority: z.enum(PRIORITIES).nullable().optional().describe("null clears the priority"),
       },

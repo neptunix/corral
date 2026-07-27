@@ -19,10 +19,36 @@ const TASK_PICKER_ROW_LIMIT = 50;
 // Exported: mcp/tools/task.ts echoes a card title back into a confirmation/refusal string outside
 // this module's own formatters, so it needs the same budget this module uses internally.
 export const TASK_TITLE_MAX = 120;
-const TASK_DESCRIPTION_MAX = 400;
+// `description` is the field corral_task_update documents as "the running progress log", written
+// with FULL-REPLACEMENT semantics — a session that reads a mangled or silently-cut view of it back
+// and then does the documented full replacement destroys whatever it could not see. That composes
+// badly with the one-line-per-row invariant this module otherwise enforces everywhere (`emit`,
+// above): the invariant is what stops one session's text impersonating another row in a TABLE — it
+// has no such job here, because `description` is rendered as its own clearly-delimited, non-tabular
+// block (see the `DESCRIPTION_LINE_PREFIX` handling in formatWhoami), never as a row. So this field
+// keeps its real line structure — bounded by LINE COUNT (`TASK_DESCRIPTION_MAX_LINES`) and a
+// per-line character budget (`TASK_DESCRIPTION_LINE_MAX`) instead of being flattened to one line and
+// cut at a few hundred characters. Whenever either bound actually cuts something, the rendered block
+// carries an explicit "TRUNCATED" marker and a warning that a full-replacement write from this view
+// would delete unseen content — so a caller is either shown the whole thing, or unmistakably told it
+// isn't. See corral_task_update's `.describe()` in mcp/tools/task.ts, which no longer promises a
+// blanket-safe round trip for this reason.
+const TASK_DESCRIPTION_MAX_LINES = 60;
+const TASK_DESCRIPTION_LINE_MAX = 300;
+// Every line of a rendered description is prefixed with this literal, fixed string — never derived
+// from task-authored text — so no amount of caller-controlled content can produce a raw line that
+// lacks it. That is what keeps an embedded "env:" / "card:" / "session id:" look-alike line INSIDE
+// the quoted block instead of being mistaken for one of formatWhoami's real structural lines.
+const DESCRIPTION_LINE_PREFIX = "  | ";
 // Shared cap for the smaller single-line identity fields (cwd, statusline account, env error text)
 // that aren't task prose but still carry their own truncation budget.
 const IDENTITY_FIELD_MAX = 200;
+// Row caps for formatWhoami's two caller-shaped lists (attached sessions, column ids): both are
+// bounded by a live board/task config, same defense-in-depth reasoning as formatFleet's `limit` and
+// formatTaskPicker's TASK_PICKER_ROW_LIMIT — neither list has a caller-supplied argument to clamp,
+// so the cap here is a fixed module constant.
+const WHOAMI_SESSIONS_MAX = 20;
+const WHOAMI_COLUMNS_MAX = 20;
 
 export function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}…`;
@@ -63,11 +89,15 @@ export function oneLine(s: string): string {
  * it, an embedded newline in any interpolated value could fabricate an extra rendered line that
  * impersonates a distinct row or escapes the untrusted-output framing (design spec §7).
  *
- * The only fields still processed individually (recap/title/description/cwd/account/env-error, via
- * their own `oneLine(...)` + `truncate(..., N)` calls before they're embedded) are the ones with
- * their OWN character budget — that cap must be measured against the collapsed text, not the raw
- * text, which requires collapsing before the string is embedded. `emit`'s sweep is a no-op on top
- * of already-collapsed text; it exists to catch everything else without being asked to.
+ * The only fields still processed individually (recap/title/cwd/account/env-error, via their own
+ * `oneLine(...)` + `truncate(..., N)` calls before they're embedded) are the ones with their OWN
+ * character budget — that cap must be measured against the collapsed text, not the raw text, which
+ * requires collapsing before the string is embedded. `emit`'s sweep is a no-op on top of
+ * already-collapsed text; it exists to catch everything else without being asked to. `description`
+ * gets the same treatment PER LINE rather than as one flattened field — see
+ * `TASK_DESCRIPTION_MAX_LINES` above and formatWhoami's rendering of it below — because it is the
+ * one field whose full-replacement semantics make silent flattening a data-loss bug, not just a
+ * cosmetic one.
  *
  * Every formatter below has exactly one `return` statement, and it is always `return emit(...)` —
  * no branch bypasses the sweep, including empty-result messages (see `formatFleet`'s and
@@ -222,6 +252,44 @@ export function formatTaskPicker(boards: readonly Board[]): string {
   return emit(parts);
 }
 
+/**
+ * Renders `description` as its own delimited, non-tabular block that preserves real line breaks
+ * instead of flattening them — see the block comment on `TASK_DESCRIPTION_MAX_LINES` above for why.
+ * Every line pushed here — including the header and the "TRUNCATED"/dropped-count/warning lines —
+ * is a literal produced by THIS function, never task-authored text handed through unprefixed; the
+ * per-line `DESCRIPTION_LINE_PREFIX` is what keeps a caller-crafted look-alike line (e.g. one that
+ * reads "env: fake  w9:p9  working") unambiguously INSIDE the quoted block rather than indistinguish-
+ * able from one of formatWhoami's real structural lines above it.
+ */
+function renderDescription(raw: string): string[] {
+  if (raw === "") return ["description: (empty)"];
+  // Split on the exact set of line-terminating characters `oneLine` collapses elsewhere in this
+  // module — the one field where that structure is kept rather than swept away.
+  const allLines = raw.split(/\r\n|[\r\n\u2028\u2029]/);
+  const shownLines = allLines.slice(0, TASK_DESCRIPTION_MAX_LINES);
+  const droppedLines = allLines.length - shownLines.length;
+  let lineCut = false;
+  const rendered = shownLines.map((line) => {
+    // Each split segment already carries no terminator of its own, so this oneLine call is a
+    // no-op — kept only for the same reason every other individually-budgeted field calls it:
+    // truncate's character budget must be measured against the collapsed text, not raw text.
+    const collapsed = oneLine(line);
+    const cut = truncate(collapsed, TASK_DESCRIPTION_LINE_MAX);
+    if (cut !== collapsed) lineCut = true;
+    return `${DESCRIPTION_LINE_PREFIX}${cut}`;
+  });
+  const truncated = droppedLines > 0 || lineCut;
+  const header = `description (${String(allLines.length)} line${allLines.length === 1 ? "" : "s"}${truncated ? ", TRUNCATED" : ""}):`;
+  const out = [header, ...rendered];
+  if (droppedLines > 0) out.push(`${DESCRIPTION_LINE_PREFIX}… ${String(droppedLines)} more line(s) not shown`);
+  if (truncated) {
+    out.push(
+      "WARNING: the description block above is truncated — it is NOT the full stored value. corral_task_update's description is a full-replacement write: doing that write from this partial view will silently delete the content you cannot see here.",
+    );
+  }
+  return out;
+}
+
 /** The whoami rendering. Compact but complete — this is the one call every session makes at start. */
 export function formatWhoami(w: WhoamiResolved): string {
   const s = w.session;
@@ -243,19 +311,29 @@ export function formatWhoami(w: WhoamiResolved): string {
     lines.push("card: none — this session is not bound to a task. Use corral_task_bind to bind it.");
   } else {
     const t = w.task;
-    // title/description carry their own truncation budget too — same reasoning as cwd/account.
+    // title carries its own truncation budget too — same reasoning as cwd/account. description gets
+    // renderDescription's own line-bounded treatment instead (see that function's comment).
     const title = truncate(oneLine(t.title), TASK_TITLE_MAX);
-    const description = t.description === "" ? "(empty)" : truncate(oneLine(t.description), TASK_DESCRIPTION_MAX);
+    const shownColumns = t.columns.slice(0, WHOAMI_COLUMNS_MAX);
+    const columnsDropped = t.columns.length - shownColumns.length;
+    const columnsLine = `columns available for status: ${shownColumns.map((c) => c.id).join(", ")}${
+      columnsDropped > 0 ? `, … ${String(columnsDropped)} more (limit=${String(WHOAMI_COLUMNS_MAX)})` : ""
+    }`;
+    const shownSessions = t.sessions.slice(0, WHOAMI_SESSIONS_MAX);
+    const sessionsDropped = t.sessions.length - shownSessions.length;
     lines.push(
       `card: ${t.boardId}/${t.taskId}  ${t.priority ?? "--"}  ${t.status}  ${title}`,
-      `columns available for status: ${t.columns.map((c) => c.id).join(", ")}`,
-      `description: ${description}`,
+      columnsLine,
+      ...renderDescription(t.description),
       "sessions on this card:",
-      ...t.sessions.map((cs) => {
+      ...shownSessions.map((cs) => {
         const ctx = cs.ctxPct === null ? "—" : `${String(Math.round(cs.ctxPct))}%`;
         return `  ${cs.self ? "*" : " "} ${cs.name}  ${cs.key}  ${cs.status}  ctx ${ctx}`;
       }),
     );
+    if (sessionsDropped > 0) {
+      lines.push(`  … ${String(sessionsDropped)} more session(s) not shown (limit=${String(WHOAMI_SESSIONS_MAX)})`);
+    }
   }
   lines.push(`environments: ${w.envs.map((e) => `${e.id}${e.reachable ? "" : " (unreachable)"}`).join(", ")}`);
   lines.push(

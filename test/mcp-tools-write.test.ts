@@ -20,7 +20,10 @@ const bound: WhoamiResponse = {
   resolved: true,
   session: {
     env: "work-local", envLabel: "Work (local)", paneId: "w1:p1", tabId: "tab1",
-    tabLabel: "alpha", workspaceId: "ws1", workspaceLabel: "repo",
+    // tabLabel and sessionName are DELIBERATELY DIFFERENT strings here (they used to be the same,
+    // which made an attach payload assertion unable to tell which one bindHandler actually sent —
+    // see the "attaches ..." tests below, item 2 of the review-fix wave).
+    tabLabel: "alpha-tab-label", workspaceId: "ws1", workspaceLabel: "repo",
     sessionId: SID, sessionName: "alpha", cwd: "/repo", status: "working", model: "Opus",
     ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null,
   },
@@ -65,11 +68,30 @@ describe("bindHandler", () => {
     expect(out.toLowerCase()).toContain("already");
   });
 
-  it("attaches with both ids present", async () => {
-    const calls: unknown[] = [];
+  it("attaches with the full expected payload, using the session's real name (sessionName set)", async () => {
+    // Item 2 of the review-fix wave: the old version of this test captured `a` but asserted only
+    // `toHaveLength(1)` — env, paneId, and name (the fallback task.ts:87-88 is specifically about)
+    // went completely unchecked. Asserting the whole payload against a fixture where tabLabel and
+    // sessionName differ is what makes this test able to catch a regression in either direction.
+    const calls: { boardId: string; taskId: string; env: string; paneId: string; name: string }[] = [];
     const c = stub({ whoami: async () => unbound, attach: async (a) => { calls.push(a); } });
     const out = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "board", taskId: "t_aaaaaaa" });
-    expect(calls).toHaveLength(1);
+    expect(calls).toEqual([{ boardId: "board", taskId: "t_aaaaaaa", env: "work-local", paneId: "w1:p1", name: "alpha" }]);
+    expect(out.toLowerCase()).toContain("bound");
+  });
+
+  it("falls back to tabLabel when sessionName is blank (empty string, not null) — never attaches a blank name", async () => {
+    // task.ts:87-88's `nonEmpty(...) ?? tabLabel`: a plain `me.session.sessionName ?? tabLabel`
+    // would NOT catch an empty string (only null/undefined), so this specifically exercises the ""
+    // branch — the exact case `nonEmpty` exists for. corral renders a detached card as "⚠ {name}",
+    // so a blank name reaching the server would be a visible bug, not just an internal one.
+    const calls: { boardId: string; taskId: string; env: string; paneId: string; name: string }[] = [];
+    const c = stub({
+      whoami: async () => ({ ...unbound, session: { ...unbound.session, sessionName: "" } }),
+      attach: async (a) => { calls.push(a); },
+    });
+    const out = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "board", taskId: "t_aaaaaaa" });
+    expect(calls).toEqual([{ boardId: "board", taskId: "t_aaaaaaa", env: "work-local", paneId: "w1:p1", name: "alpha-tab-label" }]);
     expect(out.toLowerCase()).toContain("bound");
   });
 
@@ -210,6 +232,21 @@ describe("spawnHandler", () => {
     expect(seen).toEqual(["ws1", undefined]);
   });
 
+  it("REGRESSION: omits targetWorkspaceId same-env when the caller's own workspaceId is empty", async () => {
+    // Item 3 of the review-fix wave: session.ts:37's guard is `env === me.session.env &&
+    // me.session.workspaceId !== ""` — every other fixture in this suite has workspaceId: "ws1",
+    // so the `!== ""` half of that condition never ran anywhere. The most common real spawn call
+    // sends `targetWorkspaceId: ""` in exactly this state, and the server 400s on it — this pins
+    // the guard so a regression there is caught here, not in production.
+    const seen: (string | undefined)[] = [];
+    const c = stub({
+      whoami: async () => ({ ...bound, session: { ...bound.session, workspaceId: "" } }),
+      spawn: async (a) => { seen.push(a.targetWorkspaceId); return { env: a.env, paneId: "w1:p2", name: "t-b" }; },
+    });
+    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
+    expect(seen).toEqual([undefined]);
+  });
+
   it("requires a brief", async () => {
     const c = stub({});
     expect((await spawnHandler({ client: c, identity: idOf(c) }, { brief: "  " })).toLowerCase())
@@ -220,6 +257,32 @@ describe("spawnHandler", () => {
     const c = stub({ spawn: async () => { throw new CorralError("spawn_error", 'no path configured for repo "repo" in env personal-local'); } });
     const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local" });
     expect(out).toContain("no path configured for repo");
+  });
+
+  it("refuses to spawn into a known remote environment instead of letting the server 400 (item 7)", async () => {
+    // brief is mandatory in corral_spawn's schema, and the server always rejects a brief targeting a
+    // non-local env — so a remote `env` here would otherwise ALWAYS 400. Refusing it up front (once
+    // corral_whoami's env list identifies it as remote) is strictly more useful than a generic HTTP
+    // error, and never reaches deps.client.spawn at all.
+    const calls: string[] = [];
+    const c = stub({
+      whoami: async () => ({ ...bound, envs: [...bound.envs, { id: "prod-remote", label: "Prod (remote)", kind: "remote", reachable: true }] }),
+      spawn: async (a) => { calls.push(a.env); return { env: a.env, paneId: "w1:p2", name: "t-b" }; },
+    });
+    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "prod-remote" });
+    expect(calls).toHaveLength(0);
+    expect(out.toLowerCase()).toContain("local");
+  });
+
+  it("still spawns into a known LOCAL non-default environment (the remote guard is kind-specific, not env-specific)", async () => {
+    const calls: string[] = [];
+    const c = stub({
+      whoami: async () => ({ ...bound, envs: [...bound.envs, { id: "personal-local", label: "Personal (local)", kind: "local", reachable: true }] }),
+      spawn: async (a) => { calls.push(a.env); return { env: a.env, paneId: "w1:p2", name: "t-b" }; },
+    });
+    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local" });
+    expect(calls).toEqual(["personal-local"]);
+    expect(out).toContain("personal-local");
   });
 });
 
