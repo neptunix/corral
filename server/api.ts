@@ -30,6 +30,7 @@ import type { Storage } from "./storage.ts";
 import { readLastActivity, readSessionCwd } from "./transcript.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { writeUploadFile } from "./uploads.ts";
+import { buildWhoami, resolveSelf } from "./whoami.ts";
 import { PANE_RE } from "./ws-attach-guard.ts";
 
 const BID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -39,6 +40,9 @@ const TID_RE = /^t_[A-Za-z0-9_-]{7}$/;
 const WS_RE = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$/;
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const LAST_ACTIVE_TTL_MS = 60_000;
+// How long a ?deferred=1 close waits after responding before killing the pane. Long enough for the
+// HTTP response to flush to the MCP client, short enough that the operator sees the pane die "now".
+const CLOSE_DEFER_MS = 150;
 // Spawn tab-name suffixes: a task's Nth spawned session gets tab `${slug}-<letter>` (a human-readable
 // label so a task's sessions are distinguishable). a–z is a soft ceiling; attached sessions don't
 // consume a letter and are unbounded. Revisit if a task ever needs more than 26 spawned sessions.
@@ -200,6 +204,7 @@ export function createApi(opts: {
   lastActivity?: (env: HerdrEnv, sessionId: string) => Promise<number | null>;
   sessionCwd?: (env: HerdrEnv, sessionId: string) => Promise<string | null>;
   closePaneFn?: (env: HerdrEnv, paneId: string) => Promise<void>;
+  closeDeferMs?: number; // injectable so the deferred-close ordering is testable without real waits
   spawnTimeoutMs?: number; // injectable so the timeout-cleanup path is testable without a 60s wait
   allowedOrigins?: readonly string[]; // Origin allowlist for the file-upload route (default WS_ALLOWED_ORIGINS)
   uploadRoot?: string; // drop-upload temp root (injectable so tests write to a scratch dir)
@@ -209,6 +214,7 @@ export function createApi(opts: {
   const lastActivity = opts.lastActivity ?? readLastActivity;
   const sessionCwd = opts.sessionCwd ?? readSessionCwd;
   const closePaneFn = opts.closePaneFn ?? closePane;
+  const closeDeferMs = opts.closeDeferMs ?? CLOSE_DEFER_MS;
   const spawnTimeoutMs = opts.spawnTimeoutMs ?? SPAWN_TIMEOUT_MS;
   const allowedOrigins = opts.allowedOrigins ?? WS_ALLOWED_ORIGINS;
   const uploadRoot = opts.uploadRoot ?? UPLOAD_ROOT;
@@ -257,6 +263,36 @@ export function createApi(opts: {
     }
     return c.json(opts.poller.getSnapshot());
   });
+
+  // Identity for an MCP client running inside a herdr pane. The caller supplies only hints
+  // (paneId/cwd/socket); the authoritative data is the poller snapshot plus the trusted env config.
+  // SECURITY: `socket` is used ONLY to disambiguate which configured environment the caller sits in.
+  // It is NEVER used to route a herdr call — routing always keys on the resolved env id from the
+  // startup config, so a forged value can at worst fail to resolve (spec §4).
+  app.get("/api/whoami", (c) => {
+    const paneId = c.req.query("paneId");
+    if (paneId === undefined || !PANE_RE.test(paneId)) {
+      return c.json({ error: { code: "validation", message: "paneId required" } }, 400);
+    }
+    const resolution = resolveSelf({
+      snapshot: opts.poller.getSnapshot(),
+      envs: opts.envs,
+      paneId,
+      cwd: c.req.query("cwd") ?? "",
+      socket: c.req.query("socket") ?? null,
+    });
+    return c.json(buildWhoami({
+      resolution,
+      envs: opts.envs,
+      snapshot: opts.poller.getSnapshot(),
+      boards: opts.storage === undefined ? [] : opts.storage.getAllBoards(),
+    }));
+  });
+
+  // Attention records for the fleet digest. The bare GET /api/state returns a plain Snapshot with no
+  // attention (it rides only the ?board= branch and the SSE frames), so rather than change that shape
+  // attention gets its own read-only route.
+  app.get("/api/attention", (c) => c.json(opts.poller.getAttention()));
 
   app.get("/api/stream", (c) =>
     streamSSE(c, async (stream) => {
@@ -724,6 +760,18 @@ export function createApi(opts: {
     const ownsByTab = (linkSid === null || linkSid === "") && liveRow.tabId === link.tabId && liveRow.workspaceId === link.workspaceId;
     if (!ownsBySession && !ownsByTab) {
       return c.json({ error: { code: "pane_reused", message: "pane now belongs to a different session" } }, 409);
+    }
+    // §5.4 (MCP design): a SELF-close must deliver its response before the pane dies — killing the
+    // caller's own pane also kills the MCP process making this request. With ?deferred=1 the route
+    // runs EVERY guard above, responds, and only then closes the pane on a short unref'd timer.
+    // Post-response failures are logged only; the zombie reaper collects any straggler tab.
+    if (c.req.query("deferred") === "1") {
+      setTimeout(() => {
+        closePaneFn(env, paneId).catch((err: unknown) => {
+          console.warn(`[close] deferred close of ${env.id}:${paneId} failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      }, closeDeferMs).unref();
+      return c.json({ ok: true, scheduled: true });
     }
     try {
       await closePaneFn(env, paneId);
