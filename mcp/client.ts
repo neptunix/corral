@@ -61,6 +61,15 @@ function post(body: unknown): RequestInit {
   return { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) };
 }
 
+// Every id interpolated into a REST path is model- or caller-supplied text, not a value this module
+// controls — a "/" or "?" inside it must stay INSIDE its own path segment rather than being able to
+// splice in extra path components or reopen the query string. encodeURIComponent (not encodeURI)
+// is required here specifically because it also escapes "/" and "?"; the ids themselves never
+// legitimately contain either, so this is a no-op for every real board/task/env/pane id.
+function seg(id: string): string {
+  return encodeURIComponent(id);
+}
+
 export interface TaskPatch {
   readonly title?: string;
   readonly description?: string;
@@ -98,14 +107,14 @@ export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralC
     patchTask: (a) =>
       request(
         fetchFn,
-        `${base}/api/boards/${a.boardId}/tasks/${a.taskId}`,
+        `${base}/api/boards/${seg(a.boardId)}/tasks/${seg(a.taskId)}`,
         { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify(a.patch) },
         TaskSchema,
       ),
     attach: async (a) => {
       await request(
         fetchFn,
-        `${base}/api/boards/${a.boardId}/tasks/${a.taskId}/attach`,
+        `${base}/api/boards/${seg(a.boardId)}/tasks/${seg(a.taskId)}/attach`,
         post({ env: a.env, paneId: a.paneId, name: a.name }),
         OkSchema.or(TaskSchema),
       );
@@ -113,7 +122,7 @@ export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralC
     spawn: (a) =>
       request(
         fetchFn,
-        `${base}/api/boards/${a.boardId}/tasks/${a.taskId}/spawn`,
+        `${base}/api/boards/${seg(a.boardId)}/tasks/${seg(a.taskId)}/spawn`,
         post({
           env: a.env,
           brief: a.brief,
@@ -129,7 +138,7 @@ export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralC
       const qs = q === "" ? "" : `?${q}`;
       await request(
         fetchFn,
-        `${base}/api/boards/${a.boardId}/tasks/${a.taskId}/sessions/${a.env}/${encodeURIComponent(a.paneId)}/close${qs}`,
+        `${base}/api/boards/${seg(a.boardId)}/tasks/${seg(a.taskId)}/sessions/${seg(a.env)}/${seg(a.paneId)}/close${qs}`,
         post({}),
         OkSchema,
       );

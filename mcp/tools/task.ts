@@ -2,9 +2,24 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import type { CorralClient, TaskPatch } from "../client.ts";
-import { formatTaskPicker } from "../digest.ts";
+import { formatTaskPicker, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
 import type { Identity } from "../identity.ts";
 import { runTool, toolText } from "./reply.ts";
+
+// Same "" vs undefined/null normalization as identity.ts's presentOrNull, but over `string | null`
+// (sessionName's shape) rather than `string | undefined` (env vars) — a blank sessionName must
+// still fall through to tabLabel, and plain `??` lets an empty string slip past.
+function nonEmpty(v: string | null): string | null {
+  return v === null || v === "" ? null : v;
+}
+
+/** A card title is caller-supplied free text (any session on the card can set it via
+ * corral_task_update) — echoing it into a confirmation/refusal string must go through the same
+ * firewall mcp/digest.ts applies to every rendered field, or one session can smuggle an unbounded,
+ * newline-carrying string into another session's tool output. */
+function safeTitle(title: string): string {
+  return truncate(oneLine(title), TASK_TITLE_MAX);
+}
 
 export interface TaskDeps {
   readonly client: CorralClient;
@@ -30,7 +45,7 @@ export function bindHandler(deps: TaskDeps, args: BindArgs): Promise<string> {
   return runTool(async () => {
     const me = await deps.identity.load(true);
     if (me.task !== null) {
-      return `this session is already bound to ${me.task.boardId}/${me.task.taskId} ("${me.task.title}"). Rebinding is not available; detach from the corral UI first if that is what you want.`;
+      return `this session is already bound to ${me.task.boardId}/${me.task.taskId} ("${safeTitle(me.task.title)}"). Rebinding is not available; detach from the corral UI first if that is what you want.`;
     }
     if (args.boardId === undefined && args.taskId === undefined) {
       return formatTaskPicker(await deps.client.boards());
@@ -38,13 +53,23 @@ export function bindHandler(deps: TaskDeps, args: BindArgs): Promise<string> {
     if (args.boardId === undefined) return "boardId is required alongside taskId — call with no arguments to list open cards";
     if (args.taskId === undefined) return "taskId is required alongside boardId — call with no arguments to list open cards";
 
+    // Validate the pair against the real board list BEFORE it ever reaches an HTTP call: a model-
+    // supplied taskId is untrusted text, not a value this module is entitled to route on, and a
+    // typo'd id is a far more useful message than a 404 (or worse — see mcp/client.ts's `seg`).
+    const boards = await deps.client.boards();
+    const board = boards.find((b) => b.id === args.boardId);
+    const task = board?.tasks.find((t) => t.id === args.taskId);
+    if (task === undefined) {
+      return `no open card ${args.boardId}/${args.taskId} — call corral_task_bind with no arguments to list open cards`;
+    }
+
     await deps.client.attach({
       boardId: args.boardId,
       taskId: args.taskId,
       env: me.session.env,
       paneId: me.session.paneId,
       // Never empty: corral renders a detached card as "⚠ {name}", and a blank name reads as a bug.
-      name: me.session.sessionName ?? me.session.tabLabel,
+      name: nonEmpty(me.session.sessionName) ?? me.session.tabLabel,
     });
     return `bound this session to ${args.boardId}/${args.taskId}`;
   });
@@ -66,7 +91,7 @@ export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string>
     };
     if (Object.keys(patch).length === 0) return "nothing to update — pass at least one of title, description, status, priority";
     const task = await deps.client.patchTask({ boardId: card.boardId, taskId: card.taskId, patch });
-    return `updated ${card.boardId}/${card.taskId}: status=${task.status} priority=${task.priority ?? "none"} title="${task.title}"`;
+    return `updated ${card.boardId}/${card.taskId}: status=${task.status} priority=${task.priority ?? "none"} title="${safeTitle(task.title)}"`;
   });
 }
 

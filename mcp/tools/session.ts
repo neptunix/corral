@@ -22,10 +22,12 @@ export interface CloseArgs {
 
 export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string> {
   return runTool(async () => {
+    // requireCard() first: an unbound session with a blank brief is more usefully told to bind
+    // (which it must do regardless of what the brief says) than told about the brief.
+    const card = await deps.identity.requireCard();
     if (args.brief.trim() === "") {
       return "a brief is required — write the handoff text the new session should start from";
     }
-    const card = await deps.identity.requireCard();
     const me = await deps.identity.load();
     const env = args.env ?? me.session.env;
     // Same-env continuation JOINS the caller's workspace: the new tab lands beside the caller (same

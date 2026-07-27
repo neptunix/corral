@@ -152,6 +152,23 @@ describe("corral client", () => {
     expect(result).toEqual({ env: "work-local", paneId: "w2:p3", name: "task-a" });
   });
 
+  it("encodes a crafted taskId so it cannot splice extra path segments or reopen the query string", async () => {
+    // A taskId containing "/" and "?" could otherwise make the interpolated path resolve to a
+    // DIFFERENT route (e.g. .../close instead of .../attach) with the rest swallowed into the
+    // query string — the exact defect this test guards against.
+    const urls: string[] = [];
+    const client = createClient("http://127.0.0.1:8787", async (input) => {
+      urls.push(urlOf(input));
+      return jsonResponse({ ok: true });
+    });
+    const evilTaskId = "t_abcdefg/sessions/work-local/w1:p9/close?x=";
+    await client.attach({ boardId: "board", taskId: evilTaskId, env: "work-local", paneId: "w1:p1", name: "n" });
+    const url = new URL(urls[0] ?? "");
+    expect(url.pathname).toBe(`/api/boards/board/tasks/${encodeURIComponent(evilTaskId)}/attach`);
+    expect(url.pathname.endsWith("/attach")).toBe(true);
+    expect(url.searchParams.toString()).toBe("");
+  });
+
   it("throws bad_response when the body is not valid JSON", async () => {
     const client = createClient("http://127.0.0.1:8787", async () =>
       new Response("not json", { status: 200, headers: { "Content-Type": "text/plain" } }));

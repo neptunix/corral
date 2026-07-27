@@ -15,7 +15,9 @@ export type FleetFilter = (typeof FLEET_FILTERS)[number];
 // formatTaskPicker takes no caller-supplied limit, so its row cap is a fixed module constant
 // (matching corral_fleet's max-50 clamp) rather than a parameter.
 const TASK_PICKER_ROW_LIMIT = 50;
-const TASK_TITLE_MAX = 120;
+// Exported: mcp/tools/task.ts echoes a card title back into a confirmation/refusal string outside
+// this module's own formatters, so it needs the same budget this module uses internally.
+export const TASK_TITLE_MAX = 120;
 const TASK_DESCRIPTION_MAX = 400;
 // Shared cap for the smaller single-line identity fields (cwd, statusline account, env error text)
 // that aren't task prose but still carry their own truncation budget.
@@ -37,7 +39,11 @@ export function truncate(text: string, max: number): string {
  * and collapsing it would reintroduce the same kind of unintended reformatting for no security
  * benefit.
  */
-function oneLine(s: string): string {
+// Exported for the same reason as TASK_TITLE_MAX above: any tool reply that interpolates
+// caller-supplied text (a card title, a session name, ...) OUTSIDE this module's own formatters
+// must still go through the same line-terminator sweep, or it reopens the leak class this module
+// exists to close (see the block comment on `emit` below).
+export function oneLine(s: string): string {
   return s.replace(/[\r\n\u2028\u2029]+/g, " ");
 }
 

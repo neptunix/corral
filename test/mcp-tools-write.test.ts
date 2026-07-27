@@ -78,6 +78,18 @@ describe("bindHandler", () => {
     const out = await bindHandler({ client: c, identity: idOf(c) }, { taskId: "t_aaaaaaa" });
     expect(out.toLowerCase()).toContain("boardid");
   });
+
+  it("refuses to attach a taskId that does not match any open card, and never reaches attach", async () => {
+    // A "/" and "?" carrying taskId is exactly the shape that, unencoded, could splice a different
+    // route into the request (mcp/client.ts's `seg`) — this proves it's refused up front by
+    // existence check, regardless of what the client-level encoding does.
+    const calls: unknown[] = [];
+    const evilTaskId = "t_aaaaaaa/sessions/work-local/w1:p9/close?x=";
+    const c = stub({ whoami: async () => unbound, attach: async (a) => { calls.push(a); } });
+    const out = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "board", taskId: evilTaskId });
+    expect(calls).toHaveLength(0);
+    expect(out.toLowerCase()).toContain("no open card");
+  });
 });
 
 describe("updateHandler", () => {
@@ -188,6 +200,27 @@ describe("closeHandler", () => {
     // The bound fixture's card list is empty, so any non-self target is off-card.
     const calls: string[] = [];
     const c = stub({ closeSession: async (a) => { calls.push(a.paneId); } });
+    const out = await closeHandler({ client: c, identity: idOf(c) }, { target: "work-local:w9:p9" });
+    expect(calls).toHaveLength(0);
+    expect(out.toLowerCase()).toContain("refus");
+    expect(out).toContain("card");
+  });
+
+  it("refuses a target absent from a NON-EMPTY card session list", async () => {
+    // Distinct from the test above: the card list here is non-empty (one real sibling), so this
+    // kills a mutant that approximates membership as "the card has any sessions at all" instead of
+    // actually matching the target key against the list.
+    const calls: string[] = [];
+    const c = stub({
+      whoami: async () => ({
+        ...bound,
+        task: {
+          ...boundTask,
+          sessions: [{ name: "t-b", key: "work-local:w1:p2", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false }],
+        },
+      }),
+      closeSession: async (a) => { calls.push(a.paneId); },
+    });
     const out = await closeHandler({ client: c, identity: idOf(c) }, { target: "work-local:w9:p9" });
     expect(calls).toHaveLength(0);
     expect(out.toLowerCase()).toContain("refus");
