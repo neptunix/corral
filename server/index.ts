@@ -1,10 +1,11 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 
-import { BOARD_DATA_DIR, HOST, PORT, UPLOAD_ROOT, WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED } from "../config.ts";
+import { BOARD_DATA_DIR, BRIEF_ROOT, HOST, PORT, UPLOAD_ROOT, WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED } from "../config.ts";
 import { ENVIRONMENTS } from "../environments.ts";
 import { createApi } from "./api.ts";
 import { createAttentionStore } from "./attention-store.ts";
+import { sweepBriefRoot } from "./brief.ts";
 import { createGit } from "./git.ts";
 import { closePane, listTabs, listWorkspaces, readPane, workspaceClose } from "./herdr.ts";
 import { assertLoopback } from "./host-guard.ts";
@@ -35,6 +36,7 @@ void (async () => {
   await git.ensureRepo();
   git.start();
   await sweepUploadRoot(UPLOAD_ROOT); // clear last run's dropped files (bounded disk use, no GC)
+  await sweepBriefRoot(BRIEF_ROOT); // same contract for MCP spawn briefs
 
   // recap sweep is live by default (RECAP_ENABLED=true, 60s interval); set RECAP_ENABLED=false to disable
   const attention = createAttentionStore({ dataDir: BOARD_DATA_DIR, read: readPane });
