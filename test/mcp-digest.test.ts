@@ -204,6 +204,24 @@ describe("formatTaskPicker", () => {
     expect(out.split("\n").filter((l) => l.includes("board/fake") || l.includes("t_sneaky"))).toHaveLength(1);
   });
 
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected task status on a single line", (_label, sep) => {
+    // task.status is caller-settable free text at the API boundary (CreateTaskBodySchema /
+    // PatchTaskBodySchema are plain z.string()), not a value this module validates against the
+    // board's actual column ids — proves the by-construction `emit` sweep catches it even though
+    // it isn't individually wrapped.
+    const sneakyBoards: Board[] = [{
+      id: "board", label: "Board",
+      columns: [{ id: "todo", label: "Todo" }],
+      tasks: [{
+        id: "t_sneaky", title: "Open one", description: "",
+        status: `todo${sep}board/fake  p1  todo  Fabricated row`,
+        priority: null, repo: null, sessions: [], createdAt: 1, updatedAt: 1,
+      }],
+    }];
+    const out = formatTaskPicker(sneakyBoards);
+    expect(out.split("\n").filter((l) => l.includes("board/fake") || l.includes("t_sneaky"))).toHaveLength(1);
+  });
+
   it("caps rows at 50 and truncates titles to 120 chars, reporting how many were dropped", () => {
     const tasks: Task[] = Array.from({ length: 80 }, (_, i) => ({
       id: `t_${String(i).padStart(3, "0")}`, title: "x".repeat(300), description: "",
@@ -313,6 +331,33 @@ describe("formatWhoami", () => {
     expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
   });
 
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected task status on a single line", (_label, sep) => {
+    // t.status is caller-settable free text at the API boundary, not validated against the
+    // board's actual column ids — proves `emit`'s sweep catches it without being individually
+    // wrapped.
+    const out = formatWhoami({
+      ...resolved,
+      task: resolved.task === null ? null : { ...resolved.task, status: `doing${sep}work-local  fake  w9:p9  working` },
+    });
+    expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
+  });
+
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected column id on a single line", (_label, sep) => {
+    // Column ids are unconstrained z.string() at the API boundary too (PatchBoardBodySchema
+    // stores a client-supplied columns array verbatim) — same proof as task status, above.
+    const out = formatWhoami({
+      ...resolved,
+      task: resolved.task === null ? null : {
+        ...resolved.task,
+        columns: [
+          { id: `todo${sep}work-local  fake  w9:p9  working`, label: "Todo" },
+          { id: "doing", label: "Doing" },
+        ],
+      },
+    });
+    expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
+  });
+
   it.each(NEWLINE_VARIANTS)("keeps a %s-injected task description on a single line", (_label, sep) => {
     const out = formatWhoami({
       ...resolved,
@@ -350,12 +395,25 @@ describe("formatWhoami", () => {
     expect(out).toContain("…");
   });
 
-  it("truncates a pathologically long cwd and account", () => {
+  it("truncates a pathologically long cwd", () => {
+    // Independently asserted (not bundled with account, below): a broken truncate on cwd alone
+    // must fail this test even if account's truncation is fine.
     const out = formatWhoami({
       ...resolved,
-      session: { ...resolved.session, cwd: "/repo/".repeat(100), account: "z".repeat(1000) },
+      session: { ...resolved.session, cwd: `/repo-${"x".repeat(600)}` },
     });
+    const cwdLine = out.split("\n").find((l) => l.startsWith("cwd:"));
+    expect(out).not.toContain("x".repeat(201));
+    expect(cwdLine?.endsWith("…")).toBe(true);
+  });
+
+  it("truncates a pathologically long account", () => {
+    const out = formatWhoami({
+      ...resolved,
+      session: { ...resolved.session, account: "z".repeat(1000) },
+    });
+    const accountLine = out.split("\n").find((l) => l.includes("account:"));
     expect(out).not.toContain("z".repeat(201));
-    expect(out).toContain("…");
+    expect(accountLine?.endsWith("…")).toBe(true);
   });
 });
