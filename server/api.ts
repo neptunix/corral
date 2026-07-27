@@ -15,8 +15,11 @@ import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 
-import { READ_CACHE_TTL_MS, SPAWN_TIMEOUT_MS, UPLOAD_ROOT, WS_ALLOWED_ORIGINS } from "../config.ts";
+import {
+  BRIEF_MAX_BYTES, BRIEF_ROOT, READ_CACHE_TTL_MS, SPAWN_TIMEOUT_MS, UPLOAD_ROOT, WS_ALLOWED_ORIGINS,
+} from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
+import { briefByteLength, composeBrief, writeBrief } from "./brief.ts";
 import { syncClaudeThemeBase, ThemeModeSchema } from "./claude-theme.ts";
 import { closePane, listWorkspaces, readPane, type ReadFn } from "./herdr.ts";
 import { isLoopbackHost } from "./host-guard.ts";
@@ -208,6 +211,7 @@ export function createApi(opts: {
   spawnTimeoutMs?: number; // injectable so the timeout-cleanup path is testable without a 60s wait
   allowedOrigins?: readonly string[]; // Origin allowlist for the file-upload route (default WS_ALLOWED_ORIGINS)
   uploadRoot?: string; // drop-upload temp root (injectable so tests write to a scratch dir)
+  briefRoot?: string; // spawn-brief root (injectable so tests write to a scratch dir)
 }): Hono {
   const read = opts.read ?? readPane;
   const listWs = opts.listWorkspaces ?? listWorkspaces;
@@ -218,6 +222,7 @@ export function createApi(opts: {
   const spawnTimeoutMs = opts.spawnTimeoutMs ?? SPAWN_TIMEOUT_MS;
   const allowedOrigins = opts.allowedOrigins ?? WS_ALLOWED_ORIGINS;
   const uploadRoot = opts.uploadRoot ?? UPLOAD_ROOT;
+  const briefRoot = opts.briefRoot ?? BRIEF_ROOT;
   // Last-active timestamps (transcript-derived); caches `null` too (no transcript). Bounded + TTL'd.
   const laCache = createTtlCache<number | null>({ ttlMs: LAST_ACTIVE_TTL_MS });
   // #4: coalesce sub-second /read bursts (each is a herdr/SSH round-trip). Success-only; keyed by the
@@ -870,6 +875,7 @@ export function createApi(opts: {
       env: z.string(),
       targetWorkspaceId: z.string().nullable().optional(),
       repo: z.string().nullable().optional(), // repo to root a NEW space at (config key); ignored when joining
+      brief: z.string().min(1).optional(),    // initial prompt, delivered via file indirection
     }).safeParse(body);
     if (!parsed.success) return c.json({ error: { code: "validation", message: "env required" } }, 400);
 
@@ -917,6 +923,28 @@ export function createApi(opts: {
     if (sessionSuffix === undefined) {
       return c.json({ error: { code: "session_cap", message: "task already has 26 spawned sessions (a–z) — attach or remove one first" } }, 409);
     }
+    // Brief delivery is local-only: the file is written on the corral host, and the `$(cat …)`
+    // substitution runs in the pane's shell — on a remote box that path would not exist. Mirrors the
+    // uploads restriction. Both guards run BEFORE any spawn work so a refusal creates nothing.
+    const brief = parsed.data.brief;
+    let briefPath: string | undefined;
+    if (brief !== undefined) {
+      if (targetEnv.kind !== "local") {
+        return c.json({ error: { code: "remote_brief_unsupported", message: "a spawn brief is available for local environments only" } }, 400);
+      }
+      const composed = composeBrief(brief);
+      if (briefByteLength(composed) > BRIEF_MAX_BYTES) {
+        return c.json({ error: { code: "too_large", message: `brief exceeds ${String(BRIEF_MAX_BYTES)} bytes` } }, 413);
+      }
+      try {
+        briefPath = await writeBrief(briefRoot, composed);
+      } catch (err) {
+        return c.json({ error: { code: "brief_write_failed", message: err instanceof Error ? err.message : String(err) } }, 500);
+      }
+      // Audit line, mirroring the upload route (server/api.ts ~408): coordinates and size only —
+      // never contents. A brief is agent-authored text entering a fresh session; leave a trace.
+      console.warn(`[brief] board=${bid} task=${tid} env=${targetEnv.id} bytes=${String(briefByteLength(composed))} path=${briefPath}`);
+    }
     const spawnTimerHandle = { id: setTimeout(() => { /* replaced below */ }, 0) };
     clearTimeout(spawnTimerHandle.id);
     const spawnTimeoutPromise = new Promise<never>((_, rej) => {
@@ -929,6 +957,7 @@ export function createApi(opts: {
       repo: newSpaceRepo, assignedPaneIds,
       spawnCommand: targetEnv.spawnCommand,
       targetWorkspaceId, repoPath,
+      ...(briefPath === undefined ? {} : { briefPath }),
     });
     try {
       const result = await Promise.race([spawnPromise, spawnTimeoutPromise]);
