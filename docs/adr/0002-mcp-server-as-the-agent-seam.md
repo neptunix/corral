@@ -96,7 +96,7 @@ that fights the existing auto-clear.
 - **MCP HTTP transport inside the existing server.** No extra process and direct
   access to in-memory state, but it cannot identify its caller: identity would
   have to be smuggled through per-session header substitution, which is fragile
-  and dependent on harness behaviour. Identity was the point.
+  and dependent on harness behavior. Identity was the point.
 - **An MCP server calling herdr directly, bypassing corral.** Works without the
   corral server running, but discards every enrichment corral maintains —
   session UUIDs, recaps, statusline data, attention state, card bindings — which

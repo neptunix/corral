@@ -279,8 +279,9 @@ export function createApi(opts: {
     if (paneId === undefined || !PANE_RE.test(paneId)) {
       return c.json({ error: { code: "validation", message: "paneId required" } }, 400);
     }
+    const snapshot = opts.poller.getSnapshot();
     const resolution = resolveSelf({
-      snapshot: opts.poller.getSnapshot(),
+      snapshot,
       envs: opts.envs,
       paneId,
       cwd: c.req.query("cwd") ?? "",
@@ -289,7 +290,7 @@ export function createApi(opts: {
     return c.json(buildWhoami({
       resolution,
       envs: opts.envs,
-      snapshot: opts.poller.getSnapshot(),
+      snapshot,
       boards: opts.storage === undefined ? [] : opts.storage.getAllBoards(),
     }));
   });

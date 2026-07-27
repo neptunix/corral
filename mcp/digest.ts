@@ -1,3 +1,4 @@
+import { linkBindsSession } from "../server/session-binding.ts";
 import type { Board } from "../shared/board-schema.ts";
 import { closedColumnIds } from "../shared/board-schema.ts";
 import type { AttentionMap, SessionRow, Snapshot } from "../shared/schema.ts";
@@ -85,14 +86,16 @@ function ageMinutes(sinceMs: number, nowMs: number): string {
   return `${String(Math.max(0, Math.round((nowMs - sinceMs) / 60000)))}m`;
 }
 
+// Delegates to the canonical binding rule (server/session-binding.ts) instead of re-encoding it: a
+// link WITHOUT a sessionId claims its pane, a link WITH one claims its session — NEVER both. A
+// fourth local re-encoding of this rule (this function, pre-fix) dropped the "no sessionId" guard
+// on the paneId arm, so a link with a stable sessionId still claimed whatever session now occupied
+// its stored pane after a same-pane `/new`. See linkBindsSession's own comment for the full rationale.
 function cardFor(boards: readonly Board[], r: SessionRow): string {
   for (const board of boards) {
     for (const task of board.tasks) {
-      const hit = task.sessions.some(
-        (l) =>
-          l.env === r.env &&
-          (l.paneId === r.paneId || (l.sessionId !== null && l.sessionId !== "" && l.sessionId === r.sessionId)),
-      );
+      const hit = task.sessions.some((l) =>
+        linkBindsSession(l, { env: r.env, paneId: r.paneId, liveSessionId: r.sessionId }));
       if (hit) return `[${board.id}/${task.id}]`;
     }
   }

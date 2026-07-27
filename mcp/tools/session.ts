@@ -81,13 +81,20 @@ export function closeHandler(deps: SessionDeps, args: CloseArgs): Promise<string
     // A spawned target's UUID was unknown at spawn time (Claude registers after launch), but by now
     // the card list carries it — pass it as sid so the server resolves the exact link, not just the
     // pane. Self defers the pane kill so this response outruns the pane's death (spec §5.4).
+    //
+    // Always the LINK's stored id (cardSid), never the live row's (me.session.sessionId), even for
+    // self: an explicit sid is authoritative in resolveLinkIndex with NO paneId fallback (server/
+    // session-binding.ts). While a fresh link's sessionId is still null — the window before the
+    // reconciler backfills it, or any time a backfill write fails — the live UUID matches nothing and
+    // a self-close 404s "session not linked" while the session stays alive. Falling back to null here
+    // instead restores the paneId + churn-heal resolution path.
     const cardSid = me.task?.sessions.find((s) => s.key === key)?.sessionId ?? null;
     await deps.client.closeSession({
       boardId: card.boardId,
       taskId: card.taskId,
       env,
       paneId,
-      sessionId: isSelf ? me.session.sessionId : cardSid,
+      sessionId: cardSid,
       deferred: isSelf,
     });
     return isSelf

@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import { closedColumnIds } from "../../shared/board-schema.ts";
 import type { CorralClient, TaskPatch } from "../client.ts";
 import { formatTaskPicker, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
 import type { Identity } from "../identity.ts";
@@ -13,12 +14,14 @@ function nonEmpty(v: string | null): string | null {
   return v === null || v === "" ? null : v;
 }
 
-/** A card title is caller-supplied free text (any session on the card can set it via
- * corral_task_update) — echoing it into a confirmation/refusal string must go through the same
- * firewall mcp/digest.ts applies to every rendered field, or one session can smuggle an unbounded,
- * newline-carrying string into another session's tool output. */
-function safeTitle(title: string): string {
-  return truncate(oneLine(title), TASK_TITLE_MAX);
+/** A card title, its status, or a column id is caller-supplied free text — any session on the
+ * board can set a title/status via corral_task_update, and column ids are an unconstrained
+ * z.string() settable via the API's PatchBoardBodySchema. Echoing any of them into a
+ * confirmation/refusal string must go through the same firewall mcp/digest.ts applies to every
+ * rendered field, or one session can smuggle an unbounded, newline-carrying string into another
+ * session's tool output. One idiom for all three rather than a per-field one-off. */
+function safeText(text: string): string {
+  return truncate(oneLine(text), TASK_TITLE_MAX);
 }
 
 export interface TaskDeps {
@@ -45,7 +48,7 @@ export function bindHandler(deps: TaskDeps, args: BindArgs): Promise<string> {
   return runTool(async () => {
     const me = await deps.identity.load(true);
     if (me.task !== null) {
-      return `this session is already bound to ${me.task.boardId}/${me.task.taskId} ("${safeTitle(me.task.title)}"). Rebinding is not available; detach from the corral UI first if that is what you want.`;
+      return `this session is already bound to ${me.task.boardId}/${me.task.taskId} ("${safeText(me.task.title)}"). Rebinding is not available; detach from the corral UI first if that is what you want.`;
     }
     if (args.boardId === undefined && args.taskId === undefined) {
       return formatTaskPicker(await deps.client.boards());
@@ -59,7 +62,11 @@ export function bindHandler(deps: TaskDeps, args: BindArgs): Promise<string> {
     const boards = await deps.client.boards();
     const board = boards.find((b) => b.id === args.boardId);
     const task = board?.tasks.find((t) => t.id === args.taskId);
-    if (task === undefined) {
+    // formatTaskPicker (the no-argument listing above) hides closed-column cards, so the explicit-id
+    // path must refuse the same set — otherwise "no open cards to bind to" is a lie in one direction
+    // (an id pair for a done-column card binds fine) and this message would be a lie in the other.
+    const closed = board === undefined ? new Set<string>() : closedColumnIds(board.columns);
+    if (task === undefined || closed.has(task.status)) {
       return `no open card ${args.boardId}/${args.taskId} — call corral_task_bind with no arguments to list open cards`;
     }
 
@@ -81,7 +88,9 @@ export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string>
     const me = await deps.identity.load();
     const columns = me.task === null ? [] : me.task.columns.map((c) => c.id);
     if (args.status !== undefined && !columns.includes(args.status)) {
-      return `"${args.status}" is not a column on this board. Valid status values: ${columns.join(", ")}`;
+      // args.status and each column id are compared raw above (a real validation against the real
+      // column ids), but firewalled here — this text is what gets echoed back into the reply.
+      return `"${safeText(args.status)}" is not a column on this board. Valid status values: ${columns.map(safeText).join(", ")}`;
     }
     const patch: TaskPatch = {
       ...(args.title === undefined ? {} : { title: args.title }),
@@ -91,7 +100,7 @@ export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string>
     };
     if (Object.keys(patch).length === 0) return "nothing to update — pass at least one of title, description, status, priority";
     const task = await deps.client.patchTask({ boardId: card.boardId, taskId: card.taskId, patch });
-    return `updated ${card.boardId}/${card.taskId}: status=${task.status} priority=${task.priority ?? "none"} title="${safeTitle(task.title)}"`;
+    return `updated ${card.boardId}/${card.taskId}: status=${safeText(task.status)} priority=${task.priority ?? "none"} title="${safeText(task.title)}"`;
   });
 }
 

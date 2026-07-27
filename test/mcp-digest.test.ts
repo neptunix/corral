@@ -1,4 +1,4 @@
-import type { Board, Task } from "@shared/board-schema.ts";
+import type { Board, SessionLink, Task } from "@shared/board-schema.ts";
 import type { AttentionMap, SessionRow, Snapshot, StatuslineData } from "@shared/schema";
 import type { WhoamiResolved } from "@shared/whoami-schema.ts";
 import { describe, expect, it } from "vitest";
@@ -38,6 +38,25 @@ function row(over: Partial<SessionRow>): SessionRow {
     tab: "api-refactor-a", workspace: "repo", sessionId: null,
     recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, ...over,
   };
+}
+
+function link(over: Partial<SessionLink>): SessionLink {
+  return {
+    env: "work-local", paneId: "w1:p1", tabId: "t1", tabLabel: "alpha",
+    workspaceId: "ws1", workspaceLabel: "repo", name: "alpha", cwdSnapshot: "/repo",
+    sessionId: null, ...over,
+  };
+}
+
+function boardWithCard(sessions: SessionLink[]): Board[] {
+  return [{
+    id: "board", label: "Board",
+    columns: [{ id: "todo", label: "Todo" }],
+    tasks: [{
+      id: "t_card01", title: "Card", description: "", status: "todo", priority: null, repo: null,
+      sessions, createdAt: 1, updatedAt: 1,
+    }],
+  }];
 }
 
 const snapshot: Snapshot = {
@@ -160,6 +179,37 @@ describe("formatFleet", () => {
     });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [sneaky] }, filter: "all" });
     expect(out.split("\n").filter((l) => l.includes("w9:p9") || l.includes("w1:p6"))).toHaveLength(1);
+  });
+
+  // cardFor delegates to the canonical linkBindsSession predicate (server/session-binding.ts)
+  // instead of re-encoding the link<->session binding rule a fourth time. Every prior version of
+  // this test suite passed `boards: []`, so the `[board/task]` branch never ran at all — these
+  // three cases are what would have caught the divergence.
+  describe("cardFor (the [board/task] label)", () => {
+    it("labels a row via a session-id-less link matching by pane", () => {
+      const boards = boardWithCard([link({ paneId: "w1:p1", sessionId: null })]);
+      const solo = row({ paneId: "w1:p1", sessionId: null });
+      const out = formatFleet({ ...base, boards, snapshot: { envs: {}, sessions: [solo] }, filter: "all" });
+      expect(out).toContain("[board/t_card01]");
+    });
+
+    it("labels a row via a link with a sessionId matching by sessionId, even at a different pane", () => {
+      const boards = boardWithCard([link({ paneId: "w1:stale", sessionId: "AAAA" })]);
+      const solo = row({ paneId: "w1:p1", sessionId: "AAAA" });
+      const out = formatFleet({ ...base, boards, snapshot: { envs: {}, sessions: [solo] }, filter: "all" });
+      expect(out).toContain("[board/t_card01]");
+    });
+
+    it("REGRESSION: a link with a sessionId does not claim a different session now occupying its stored pane", () => {
+      // The exact /new-window shape: the link is {paneId: w1:p1, sessionId: A}; the live row at
+      // w1:p1 is now session B. Canonically B is unassigned — a paneId-only match (the pre-fix bug)
+      // would wrongly label it with the stale link's card instead.
+      const boards = boardWithCard([link({ paneId: "w1:p1", sessionId: "AAAA" })]);
+      const solo = row({ paneId: "w1:p1", sessionId: "BBBB" });
+      const out = formatFleet({ ...base, boards, snapshot: { envs: {}, sessions: [solo] }, filter: "all" });
+      expect(out).toContain("[unassigned]");
+      expect(out).not.toContain("[board/t_card01]");
+    });
   });
 
   it("stays bounded when the fleet is far larger than the caps", () => {
