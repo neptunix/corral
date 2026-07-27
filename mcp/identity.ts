@@ -9,16 +9,26 @@ export interface HerdrContext {
   readonly cwd: string;
 }
 
+// Empty string and absent are the same "not set" signal for every herdr env var read below —
+// normalize both to null so callers never have to special-case "" separately from undefined.
+function presentOrNull(v: string | undefined): string | null {
+  return v === undefined || v === "" ? null : v;
+}
+
 /**
  * The caller's own coordinates, taken from the environment herdr sets in every pane. This process is
  * a child of the Claude process, which runs in the pane, so these are inherited rather than guessed.
  * Returns null when not running inside herdr — the entry point then advertises no tools at all.
+ *
+ * A whitespace-only pane id (e.g. "   ") is forwarded as-is rather than treated as absent: it is
+ * not our job to decide what counts as a valid pane id, only whether one was set at all. The
+ * server resolves it (or reports it unresolvable) same as any other pane id it doesn't recognize.
  */
 export function readHerdrEnv(env: NodeJS.ProcessEnv, cwd: string): HerdrContext | null {
-  if (env.HERDR_ENV === undefined) return null;
-  const paneId = env.HERDR_PANE_ID;
-  if (paneId === undefined || paneId === "") return null;
-  return { paneId, socket: env.HERDR_SOCKET_PATH ?? null, cwd };
+  if (presentOrNull(env.HERDR_ENV) === null) return null;
+  const paneId = presentOrNull(env.HERDR_PANE_ID);
+  if (paneId === null) return null;
+  return { paneId, socket: presentOrNull(env.HERDR_SOCKET_PATH), cwd };
 }
 
 export interface Identity {

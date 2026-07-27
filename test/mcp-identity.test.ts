@@ -53,6 +53,22 @@ describe("readHerdrEnv", () => {
   it("treats a missing socket as null rather than failing", () => {
     expect(readHerdrEnv({ HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" }, "/repo")?.socket).toBeNull();
   });
+
+  it("treats an empty HERDR_ENV as absent", () => {
+    expect(readHerdrEnv({ HERDR_ENV: "", HERDR_PANE_ID: "w1:p1" }, "/repo")).toBeNull();
+  });
+
+  it("treats an empty HERDR_SOCKET_PATH as absent, not a literal empty string", () => {
+    expect(readHerdrEnv({ HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1", HERDR_SOCKET_PATH: "" }, "/repo")).toEqual({
+      paneId: "w1:p1", socket: null, cwd: "/repo",
+    });
+  });
+
+  it("forwards a whitespace-only pane id as-is, letting the server decide", () => {
+    expect(readHerdrEnv({ HERDR_ENV: "1", HERDR_PANE_ID: "   " }, "/repo")).toEqual({
+      paneId: "   ", socket: null, cwd: "/repo",
+    });
+  });
 });
 
 describe("createIdentity", () => {
@@ -77,6 +93,22 @@ describe("createIdentity", () => {
   it("throws the server's reason when unresolved", async () => {
     const id = createIdentity(client({ resolved: false, reason: "pane w1:p1 is ambiguous across environments: a, b", envs: [] }), ctx);
     await expect(id.load()).rejects.toThrow(/ambiguous/);
+  });
+
+  it("does not cache a failed load, so a later load retries the client", async () => {
+    let calls = 0;
+    const stub: CorralClient = {
+      ...client(resolvedBody),
+      whoami: async () => {
+        calls += 1;
+        if (calls === 1) return { resolved: false, reason: "not yet resolvable", envs: [] };
+        return resolvedBody;
+      },
+    };
+    const id = createIdentity(stub, ctx);
+    await expect(id.load()).rejects.toThrow(/not yet resolvable/);
+    await expect(id.load()).resolves.toEqual(resolvedBody);
+    expect(calls).toBe(2);
   });
 
   it("returns the card coordinates when bound", async () => {
