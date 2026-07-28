@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { PORT } from "../config.ts";
 import { createClient } from "./client.ts";
 import { createIdentity, readHerdrEnv } from "./identity.ts";
+import { ORIENTATION } from "./orientation.ts";
 import { registerFleetTool } from "./tools/fleet.ts";
 import { registerSelfTool } from "./tools/self.ts";
 import { registerSessionTools } from "./tools/session.ts";
@@ -17,12 +18,18 @@ import { registerTaskTools } from "./tools/task.ts";
 // (which also uses config.ts) listened on 8787 as normal.
 const BASE_URL = process.env.CORRAL_URL ?? `http://127.0.0.1:${String(PORT)}`;
 
-const server = new McpServer({ name: "corral", version: "0.1.0" });
 const ctx = readHerdrEnv(process.env, process.cwd());
+
+// `instructions` must be decided before the server is constructed, and it is gated on the SAME
+// condition as tool registration: inside herdr a session gets both, outside it gets neither.
+const server = new McpServer(
+  { name: "corral", version: "0.1.0" },
+  ctx === null ? {} : { instructions: ORIENTATION },
+);
 
 if (ctx === null) {
   // Installed at user scope, so every session connects — but a session outside herdr has no pane to
-  // be, so it gets an EMPTY tool list and pays no schema cost beyond the connection itself.
+  // be, so it declares no tool capability at all and pays nothing beyond the connection itself.
   console.warn("[corral-mcp] not running inside herdr (HERDR_ENV/HERDR_PANE_ID unset) — no tools exposed");
 } else {
   const client = createClient(BASE_URL);

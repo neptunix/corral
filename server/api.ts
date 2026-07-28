@@ -22,7 +22,7 @@ import {
 import type { HerdrEnv } from "../environments.ts";
 import { briefByteLength, cleanupBrief, composeBrief, writeBrief } from "./brief.ts";
 import { syncClaudeThemeBase, ThemeModeSchema } from "./claude-theme.ts";
-import { closePane, listWorkspaces, readPane, type ReadFn } from "./herdr.ts";
+import { closePane, listWorkspaces, paneIdentity, readPane, type ReadFn } from "./herdr.ts";
 import { isLoopbackHost } from "./host-guard.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
@@ -34,7 +34,8 @@ import type { Storage } from "./storage.ts";
 import { readLastActivity, readSessionCwd } from "./transcript.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { writeUploadFile } from "./uploads.ts";
-import { buildWhoami, resolveSelf } from "./whoami.ts";
+import type { PaneIdentity } from "./whoami.ts";
+import { buildWhoami, resolveSelf, resolveSelfViaPane } from "./whoami.ts";
 import { PANE_RE } from "./ws-attach-guard.ts";
 
 const BID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -208,6 +209,9 @@ export function createApi(opts: {
   lastActivity?: (env: HerdrEnv, sessionId: string) => Promise<number | null>;
   sessionCwd?: (env: HerdrEnv, sessionId: string) => Promise<string | null>;
   closePaneFn?: (env: HerdrEnv, paneId: string) => Promise<void>;
+  // Pane-level identity lookup, used only when the snapshot cannot resolve the caller (see the
+  // whoami route). Injectable so the fallback is testable without a live herdr.
+  paneIdentityFn?: (env: HerdrEnv, paneId: string) => Promise<PaneIdentity | null>;
   closeDeferMs?: number; // injectable so the deferred-close ordering is testable without real waits
   spawnTimeoutMs?: number; // injectable so the timeout-cleanup path is testable without a 60s wait
   allowedOrigins?: readonly string[]; // Origin allowlist for the file-upload route (default WS_ALLOWED_ORIGINS)
@@ -220,6 +224,7 @@ export function createApi(opts: {
   const lastActivity = opts.lastActivity ?? readLastActivity;
   const sessionCwd = opts.sessionCwd ?? readSessionCwd;
   const closePaneFn = opts.closePaneFn ?? closePane;
+  const paneLookup = opts.paneIdentityFn ?? paneIdentity;
   const closeDeferMs = opts.closeDeferMs ?? CLOSE_DEFER_MS;
   const spawnTimeoutMs = opts.spawnTimeoutMs ?? SPAWN_TIMEOUT_MS;
   const allowedOrigins = opts.allowedOrigins ?? WS_ALLOWED_ORIGINS;
@@ -294,17 +299,28 @@ export function createApi(opts: {
       return { snapshot, resolution: resolveSelf({ snapshot, envs: opts.envs, paneId, cwd, socket }) };
     };
 
+    // The caller is asking about a pane that, by definition, it is sitting in RIGHT NOW, so an
+    // unresolved answer almost always means corral has not caught up rather than that the pane is
+    // bogus. Two escalating recoveries, both only on the miss path:
+    //
+    //   1. Re-poll the local environments. The cheap poll runs every 30s by default, so the snapshot
+    //      routinely predates a pane created seconds ago — and a spawned session is told to call this
+    //      tool as its very first action. Each refresh shares that environment's interval guard, so
+    //      it collapses into a tick already running rather than racing it.
+    //   2. Ask herdr about the PANE directly. The snapshot only holds panes with a registered Claude
+    //      agent, so re-polling cannot help a pane whose Claude is still booting. paneIdentity sees
+    //      it anyway, and the synthesized row resolves the card immediately — metrics fill in later.
+    //
+    // Each runs at most once, so the worst case is one extra poll plus one pane lookup per request.
     let { snapshot, resolution } = resolve();
-    // The caller is asking about a pane that, by definition, it is sitting in RIGHT NOW — so an
-    // unresolved answer usually means the snapshot simply predates that pane rather than that the
-    // pane is bogus. That is the common case, not the edge one: the cheap poll runs every 30s by
-    // default, a spawned session is told to call this tool as its very first action, and a human
-    // opening a fresh tab does the same. Re-poll the local environments once and re-resolve before
-    // giving up. Bounded and self-limiting — it only runs on the miss path, each environment's
-    // refresh shares that environment's interval guard, and the retry happens at most once.
     if (!resolution.ok) {
       await Promise.all(opts.envs.filter((e) => e.kind === "local").map((e) => opts.poller.refreshEnv(e.id)));
       ({ snapshot, resolution } = resolve());
+    }
+    // Only a not_found escalates: an ambiguous match already found real rows, and replacing them
+    // with a synthesized one would silently drop the caller's metrics AND hide the ambiguity.
+    if (!resolution.ok && resolution.code === "not_found") {
+      resolution = await resolveSelfViaPane({ envs: opts.envs, paneId, socket, lookup: paneLookup });
     }
     return c.json(buildWhoami({
       resolution,

@@ -43,6 +43,18 @@ async function request<T>(
   try {
     body = await res.json();
   } catch {
+    // A 404 whose body is not even JSON is the version-skew signature, and it is not exotic: the
+    // corral server is a long-running process, while this MCP process restarts with every Claude
+    // session. `git pull` therefore routinely leaves a new MCP talking to a server that predates
+    // these routes, and Hono answers an unknown path with plain text. "non-JSON body (HTTP 404)"
+    // told the operator nothing about that; a real 404 from a route that DOES exist (unknown board,
+    // unknown pane) carries a JSON error body and never reaches this branch.
+    if (res.status === 404) {
+      throw new CorralError(
+        "server_too_old",
+        `the corral server at ${url} does not have this route — it is probably running an older version than this MCP server. Restart corral to pick up the MCP routes.`,
+      );
+    }
     throw new CorralError("bad_response", `corral returned a non-JSON body (HTTP ${String(res.status)})`);
   }
   if (!res.ok) {

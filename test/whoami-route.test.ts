@@ -82,21 +82,130 @@ describe("GET /api/whoami and /api/attention", () => {
     expect(refreshed).toContain("work-local");
   });
 
-  it("re-polls at most once, then reports the pane unresolved with a retryable reason", async () => {
+  // Re-polling cannot help a pane whose Claude has not registered with herdr yet: the snapshot is
+  // built from `herdr agent list`, so such a pane is invisible there no matter how fresh the poll.
+  // That is the exact state a spawned session is in when its brief tells it to call corral_whoami
+  // first. The route must fall back to asking herdr about the pane itself.
+  describe("pane-level fallback (no agent registered yet)", () => {
+    const emptySnap: Snapshot = { envs: snap.envs, sessions: [] };
+    const paneOnly: Poller = { ...poller, getSnapshot: () => emptySnap };
+    const pane = {
+      paneId: "w1:p1", tabId: "tab1", tabLabel: "api-refactor-a",
+      workspaceId: "ws1", workspaceLabel: "repo", cwd: "/repo",
+    };
+
+    it("resolves from the pane, with metrics absent rather than the session missing", async () => {
+      const app = createApi({
+        poller: paneOnly, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
+        paneIdentityFn: (_e, id) => Promise.resolve(id === "w1:p1" ? pane : null),
+      });
+      const parsed = WhoamiResponseSchema.parse(
+        await (await app.request("/api/whoami?paneId=w1%3Ap1&cwd=%2Frepo")).json(),
+      );
+      if (!parsed.resolved) throw new Error("expected the pane fallback to resolve");
+      expect(parsed.session.paneId).toBe("w1:p1");
+      expect(parsed.session.tabLabel).toBe("api-refactor-a");
+      expect(parsed.session.cwd).toBe("/repo");
+      // Not yet known — and that is the point: absent metrics beat an absent session.
+      expect(parsed.session.sessionId).toBeNull();
+      expect(parsed.session.model).toBeNull();
+      expect(parsed.session.ctxPct).toBeNull();
+      expect(parsed.session.status).toBe("starting");
+    });
+
+    // The payoff: a spawned session finds the card it was spawned onto without waiting for herdr,
+    // because a link with no session id binds on env + paneId alone.
+    it("finds the card from a session-less link", async () => {
+      const app = createApi({
+        poller: paneOnly, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
+        paneIdentityFn: () => Promise.resolve(pane),
+      });
+      await app.request("/api/boards", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: "Test" }),
+      });
+      const { id: tid } = await (await app.request("/api/boards/test/tasks", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Refactor the API", status: "todo" }),
+      })).json() as { id: string };
+      await app.request(`/api/boards/test/tasks/${tid}/attach`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ env: "work-local", paneId: "w1:p1", name: "api-refactor-a" }),
+      });
+
+      const parsed = WhoamiResponseSchema.parse(
+        await (await app.request("/api/whoami?paneId=w1%3Ap1&cwd=%2Frepo")).json(),
+      );
+      if (!parsed.resolved) throw new Error("expected resolved");
+      expect(parsed.task?.taskId).toBe(tid);
+      expect(parsed.task?.columns.length).toBeGreaterThan(0);
+      expect(parsed.task?.sessions.filter((s) => s.self)).toHaveLength(1);
+    });
+
+    it("is not consulted when the snapshot already resolves the caller", async () => {
+      let calls = 0;
+      const app = createApi({
+        poller, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
+        paneIdentityFn: () => { calls += 1; return Promise.resolve(pane); },
+      });
+      const res = await app.request("/api/whoami?paneId=w1%3Ap1&cwd=%2Frepo");
+      expect(res.status).toBe(200);
+      expect(calls).toBe(0);
+    });
+
+    it("reports a pane herdr does not know as genuinely absent", async () => {
+      const app = createApi({
+        poller: paneOnly, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
+        paneIdentityFn: () => Promise.resolve(null),
+      });
+      const body = await (await app.request("/api/whoami?paneId=w9%3Ap9")).json() as WhoamiResponse;
+      expect(body.resolved).toBe(false);
+      if (body.resolved) throw new Error("unreachable");
+      expect(body.reason).toContain("no pane w9:p9");
+    });
+  });
+
+  it("re-polls once per local environment and no more — the miss path stays bounded", async () => {
     let calls = 0;
     const empty: Poller = {
       ...poller,
       getSnapshot: () => ({ envs: snap.envs, sessions: [] }),
       refreshEnv: async () => { calls += 1; },
     };
-    const app = createApi({ poller: empty, envs: ENVIRONMENTS, storage: createStorage(tmpDir) });
+    const app = createApi({
+      poller: empty, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
+      paneIdentityFn: () => Promise.resolve(null),
+    });
     const body = await (await app.request("/api/whoami?paneId=w9%3Ap9&cwd=%2Frepo")).json() as WhoamiResponse;
     expect(body.resolved).toBe(false);
-    if (body.resolved) throw new Error("unreachable");
-    // Says "try again" rather than reading as permanent misconfiguration.
-    expect(body.reason).toContain("retry");
-    // One refresh per LOCAL environment, and no second round — the miss path must stay bounded.
     expect(calls).toBe(ENVIRONMENTS.filter((e) => e.kind === "local").length);
+  });
+
+  // An ambiguous match already found real rows. Escalating it to the pane lookup would replace them
+  // with a synthesized, metric-less row AND swallow the ambiguity the operator needs to see.
+  it("does not escalate an ambiguous match to the pane lookup", async () => {
+    const dup = "dup:p1";
+    const twoEnvs = ENVIRONMENTS.filter((e) => e.kind === "local").slice(0, 2);
+    if (twoEnvs.length < 2) return; // fixture has a single local env — nothing to disambiguate
+    const base = snap.sessions[0];
+    if (base === undefined) throw new Error("fixture must carry a session row");
+    let calls = 0;
+    const ambiguous: Poller = {
+      ...poller,
+      getSnapshot: () => ({
+        envs: snap.envs,
+        sessions: twoEnvs.map((e) => ({ ...base, env: e.id, paneId: dup, cwd: "/other" })),
+      }),
+    };
+    const app = createApi({
+      poller: ambiguous, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
+      paneIdentityFn: () => { calls += 1; return Promise.resolve(null); },
+    });
+    const body = await (await app.request(`/api/whoami?paneId=${encodeURIComponent(dup)}&cwd=%2Frepo`)).json() as WhoamiResponse;
+    expect(body.resolved).toBe(false);
+    if (body.resolved) throw new Error("unreachable");
+    expect(body.reason).toContain("ambiguous");
+    expect(calls).toBe(0);
   });
 
   it("distinguishes a missing paneId from a malformed one", async () => {

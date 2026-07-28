@@ -11,7 +11,10 @@ type LocalEnv = Extract<HerdrEnv, { kind: "local" }>;
 
 export type SelfResolution =
   | { readonly ok: true; readonly env: HerdrEnv; readonly row: SessionRow }
-  | { readonly ok: false; readonly reason: string };
+  // `code` separates "corral has never heard of this pane" from "it matched more than one
+  // environment". Only the former is worth escalating to a pane-level lookup; escalating an
+  // ambiguous match would throw away a real row (with its metrics) in favour of a synthesized one.
+  | { readonly ok: false; readonly code: "not_found" | "ambiguous"; readonly reason: string };
 
 interface Candidate {
   readonly env: LocalEnv;
@@ -56,13 +59,13 @@ export function resolveSelf(input: {
   const only = sole(candidates);
   if (only !== undefined) return { ok: true, env: only.env, row: only.row };
   if (candidates.length === 0) {
-    // Name the transient cause. The route already re-polls once before this is returned, so reaching
-    // here means the pane really was absent from a fresh listing — but a pane created in the last
-    // second still loses that race, and a flat "no live session" reads as permanent misconfiguration
-    // and stops a just-spawned session from simply trying again.
+    // Not terminal: the route escalates a not_found to a pane-level lookup, which sees panes this
+    // snapshot cannot (it is built from `herdr agent list`, so it holds only panes with a registered
+    // agent). This reason is what a direct caller of resolveSelf sees.
     return {
       ok: false,
-      reason: `no live session at pane ${paneId} in any local environment — if this pane was just created, retry in a few seconds`,
+      code: "not_found",
+      reason: `no registered Claude agent at pane ${paneId} in any local environment`,
     };
   }
 
@@ -78,7 +81,83 @@ export function resolveSelf(input: {
   if (byCwd !== undefined) return { ok: true, env: byCwd.env, row: byCwd.row };
 
   const ids = candidates.map((c) => c.env.id).join(", ");
-  return { ok: false, reason: `pane ${paneId} is ambiguous across environments: ${ids}` };
+  return { ok: false, code: "ambiguous", reason: `pane ${paneId} is ambiguous across environments: ${ids}` };
+}
+
+export interface PaneIdentity {
+  readonly paneId: string;
+  readonly tabId: string;
+  readonly tabLabel: string;
+  readonly workspaceId: string;
+  readonly workspaceLabel: string;
+  readonly cwd: string;
+}
+
+/** Status reported for a pane that exists but has no Claude agent registered on it yet. */
+export const STARTING_STATUS = "starting";
+
+/**
+ * Fallback identity for a pane that herdr has not registered an agent on yet.
+ *
+ * `resolveSelf` above can only match panes present in the poller snapshot, which is built from
+ * `herdr agent list` — so it is blind to a pane whose Claude is still booting. That is precisely the
+ * moment a spawned session calls corral_whoami, because its brief tells it to do that first. Rather
+ * than tell a live session it does not exist, ask herdr about the PANE directly and synthesize the
+ * row from it.
+ *
+ * The synthesized row carries `sessionId: null` and no statusline, which the payload schema already
+ * models (`formatWhoami` renders "session id: not registered yet") — so metrics simply appear on a
+ * later call. Everything that does not depend on the agent works immediately, including the CARD:
+ * `linkBindsSession` matches a session-less link on env + paneId, so a spawned session finds the card
+ * it was spawned onto without waiting for herdr at all.
+ *
+ * Environments are tried in socket-match order and the first hit wins: a pane id is unique within one
+ * herdr session, and the socket is what says which session the caller sits in.
+ */
+export async function resolveSelfViaPane(input: {
+  readonly envs: readonly HerdrEnv[];
+  readonly paneId: string;
+  readonly socket: string | null;
+  readonly lookup: (env: HerdrEnv, paneId: string) => Promise<PaneIdentity | null>;
+}): Promise<SelfResolution> {
+  const { envs, paneId, socket, lookup } = input;
+  const locals = envs.filter(isLocal);
+  const want = socket === null ? null : expandTilde(socket);
+  const ordered = want === null ? locals : [
+    ...locals.filter((e) => e.socket !== undefined && expandTilde(e.socket) === want),
+    ...locals.filter((e) => !(e.socket !== undefined && expandTilde(e.socket) === want)),
+  ];
+
+  for (const env of ordered) {
+    const pane = await lookup(env, paneId);
+    if (pane === null) continue;
+    return {
+      ok: true,
+      env,
+      row: {
+        env: env.id,
+        paneId: pane.paneId,
+        status: STARTING_STATUS,
+        agent: "claude",
+        cwd: pane.cwd,
+        tab: pane.tabLabel,
+        workspace: pane.workspaceLabel,
+        tabId: pane.tabId,
+        workspaceId: pane.workspaceId,
+        sessionId: null,
+        recap: null,
+        recapAt: null,
+        recapStatus: null,
+        statusline: null,
+        statuslineStatus: null,
+      },
+    };
+  }
+  return {
+    ok: false,
+    code: "not_found",
+    reason: `no pane ${paneId} in any local environment — this session does not appear to be running under corral`,
+  };
 }
 
 function envList(envs: readonly HerdrEnv[], snapshot: Snapshot): WhoamiEnv[] {

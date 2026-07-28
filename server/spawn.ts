@@ -2,6 +2,7 @@ import type { SessionRow } from "@shared/schema";
 import { quote } from "shell-quote";
 
 import type { HerdrEnv } from "../environments.ts";
+import { BRIEF_FALLBACK } from "./brief.ts";
 import type { ExecFn } from "./herdr.ts";
 import {
   listPanes, paneGet, paneRun, tabClose, tabCreate, tabRename, workspaceClose, workspaceCreate,
@@ -66,11 +67,15 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
   const command = opts.resumeSessionId !== undefined
     ? `${spawnCommand} --resume ${opts.resumeSessionId}`
     : opts.briefPath !== undefined
-      // `rm -f` runs INSIDE the same substitution, so the file is deleted by the shell that just
-      // read it — deletion follows the read causally instead of racing it on a timer. `rm` prints
-      // nothing, so the substitution still expands to exactly the brief's contents. The server-side
-      // unlink (server/api.ts) stays on as the backstop for a pane that never runs the command.
-      ? `${spawnCommand} "$(cat ${quote([opts.briefPath])}; rm -f ${quote([opts.briefPath])})"`
+      // Three things happen inside the ONE substitution, in order:
+      //   cat   — read the brief, which is what becomes the session's first message.
+      //   ||    — if that read fails, substitute a message saying so. Without it the expansion is
+      //           the empty string and the pane silently launches with no brief at all.
+      //   rm -f — delete the file, caused by the read rather than racing it on a timer. `rm` prints
+      //           nothing, so it does not contribute to the expansion.
+      // The server-side unlink (server/api.ts) remains only as a backstop for a pane that never
+      // runs this command at all.
+      ? `${spawnCommand} "$(cat ${quote([opts.briefPath])} || printf '%s' ${quote([BRIEF_FALLBACK])}; rm -f ${quote([opts.briefPath])})"`
       : spawnCommand;
   const sessionSuffix = opts.sessionSuffix ?? "a";
   const targetWorkspaceId = opts.targetWorkspaceId ?? null;

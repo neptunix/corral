@@ -2,6 +2,7 @@ import type { SessionRow } from "@shared/schema";
 import { describe, expect, it } from "vitest";
 
 import { getEnv } from "../environments.ts";
+import { BRIEF_FALLBACK } from "../server/brief.ts";
 import { spawnSession } from "../server/spawn.ts";
 
 const env = getEnv("work-local");
@@ -39,7 +40,9 @@ describe("spawn with a brief", () => {
       env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
       spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
     });
-    expect(ran).toEqual(['claude "$(cat /data/briefs/abc123.md; rm -f /data/briefs/abc123.md)"']);
+    expect(ran).toEqual([
+      `claude "$(cat /data/briefs/abc123.md || printf '%s' '${BRIEF_FALLBACK}'; rm -f /data/briefs/abc123.md)"`,
+    ]);
   });
 
   // The regression this pins: deletion must be CAUSED by the read, not scheduled alongside it. The
@@ -54,9 +57,28 @@ describe("spawn with a brief", () => {
       spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
     });
     const cmd = ran[0] ?? "";
-    expect(cmd).toMatch(/\$\(cat \S+; rm -f \S+\)/);
     // Both tokens inside the one substitution, so the rm cannot run before the cat.
     expect(cmd.indexOf("cat ")).toBeLessThan(cmd.indexOf("rm -f "));
+    expect(cmd).toContain("; rm -f ");
+  });
+
+  // Without the `||` branch, `$(cat <missing>)` expands to the EMPTY STRING — the pane would launch
+  // `claude ""` and start with no brief while corral_spawn had already reported success. The whole
+  // handoff would be lost with nothing anywhere saying so.
+  it("substitutes a self-describing message if the brief cannot be read", async () => {
+    const { ran, stubs } = harness();
+    await spawnSession({
+      env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
+      spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
+    });
+    const cmd = ran[0] ?? "";
+    expect(cmd).toContain("||");
+    expect(cmd).toContain(BRIEF_FALLBACK);
+    // The fallback must be reachable only when cat fails, i.e. between the read and the delete.
+    expect(cmd.indexOf("||")).toBeGreaterThan(cmd.indexOf("cat "));
+    expect(cmd.indexOf("||")).toBeLessThan(cmd.indexOf("rm -f "));
+    // Single-quoted, so nothing inside it can be interpreted by the shell.
+    expect(cmd).toContain(`printf '%s' '${BRIEF_FALLBACK}'`);
   });
 
   // The launched command only ever embeds `briefPath` (a short, server-generated file path) — never
@@ -91,9 +113,8 @@ describe("spawn with a brief", () => {
     });
     // shell-quote wraps the path in double quotes and backslash-escapes `$` and `` ` `` so the
     // command substitution and backticks cannot be interpreted by the shell that runs `cat`.
-    expect(ran[0]).toBe(
-      "claude \"$(cat \"/data/briefs/a;b\\$(c)\\`d\\`e'f.md\"; rm -f \"/data/briefs/a;b\\$(c)\\`d\\`e'f.md\")\"",
-    );
+    const q = "\"/data/briefs/a;b\\$(c)\\`d\\`e'f.md\"";
+    expect(ran[0]).toBe(`claude "$(cat ${q} || printf '%s' '${BRIEF_FALLBACK}'; rm -f ${q})"`);
     // The hostile substrings must never appear raw/unescaped — that would mean the shell could
     // execute `c` (via `$(c)` or backticks) or terminate the `cat` command early via `;`.
     expect(ran[0]).not.toContain("cat /data/briefs/a;b$(c)");

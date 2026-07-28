@@ -9,6 +9,17 @@ import { writeAtomic } from "./atomic-store.ts";
 export const BRIEF_PREAMBLE =
   "Before you start: call the corral_whoami tool to read your session identity and assigned card.";
 
+/**
+ * What the new session receives if the shell could not read the brief file.
+ *
+ * `$(cat <missing>)` expands to the EMPTY STRING, so without this the pane would launch with no
+ * first message at all while corral_spawn had already reported success — a handoff lost silently.
+ * This turns that into a state the session can report. Kept free of apostrophes: it is embedded in
+ * a single-quoted shell word.
+ */
+export const BRIEF_FALLBACK =
+  "corral could not deliver your brief (the handoff file was unreadable). Call corral_whoami to read your card, then tell the operator the brief was lost.";
+
 /** Preamble + blank line + the brief verbatim. */
 export function composeBrief(brief: string): string {
   return `${BRIEF_PREAMBLE}\n\n${brief}`;

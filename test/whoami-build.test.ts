@@ -52,7 +52,7 @@ const board: Board = {
 describe("buildWhoami", () => {
   it("passes an unresolved resolution through, still carrying the env list", () => {
     const out = buildWhoami({
-      resolution: { ok: false, reason: "no live session at pane w9:p9 in any local environment" },
+      resolution: { ok: false, code: "not_found", reason: "no live session at pane w9:p9 in any local environment" },
       envs: ENVIRONMENTS, snapshot, boards: [board],
     });
     if (out.resolved) throw new Error("expected unresolved");
