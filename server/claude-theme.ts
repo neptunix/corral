@@ -18,6 +18,9 @@ const THEME_FILE = "corral.json";
 //   - Never creates files: a dir without a corral theme is skipped, not populated.
 //   - Missing/corrupt files are skipped, not fatal — theme sync is best-effort cosmetics, so a bad
 //     file must never crash the request or clobber a user's edited theme.
+//   - A file whose `base` already matches `mode` is left untouched — the write itself is what
+//     triggers Claude Code's hot-reload, so skipping it means a no-op sync never touches a
+//     running session's TUI (relevant now that the web ThemeProvider syncs on every mount).
 // Returns the number of files actually updated.
 export async function syncClaudeThemeBase(dirs: readonly string[], mode: ThemeMode): Promise<number> {
   let updated = 0;
@@ -37,6 +40,7 @@ export async function syncClaudeThemeBase(dirs: readonly string[], mode: ThemeMo
     }
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
     const next: Record<string, unknown> = { ...parsed };
+    if (next.base === mode) continue; // already in sync — skip the write and the hot-reload signal
     next.base = mode;
     await fs.writeFile(file, `${JSON.stringify(next, null, 2)}\n`, "utf8");
     updated++;

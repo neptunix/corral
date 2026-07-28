@@ -49,6 +49,18 @@ describe("syncClaudeThemeBase", () => {
     }
   });
 
+  it("skips writing (and doesn't count) when base already matches mode", async () => {
+    const file = await writeTheme(root, { name: "Corral", base: "dark" });
+    const before = await fs.stat(file);
+
+    const updated = await syncClaudeThemeBase([root], "dark");
+
+    expect(updated).toBe(0);
+    const after = await fs.stat(file);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
+    expect(JSON.parse(await fs.readFile(file, "utf8"))).toEqual({ name: "Corral", base: "dark" });
+  });
+
   it("skips a dir with no theme file (never creates one)", async () => {
     const updated = await syncClaudeThemeBase([root], "light");
 
