@@ -183,6 +183,7 @@ the copy command differs (`cp` vs `scp` + `ssh`). Into each config dir:
 | `corral-status-capture.sh` | `scripts/corral-status-capture.sh` | always (it writes the metrics file) |
 | `statusline-command.sh` | `scripts/statusline-command.sh` | only if you have **no** statusline script of your own |
 | `themes/corral.json` | `themes/corral.json` | only for the optional theme |
+| `skills/corral/` | `skills/corral/` | recommended with the [MCP server](#mcp-server); only on the machine running corral |
 
 **Local** (default `~/.claude`; repeat for each extra dir such as `~/.claude-work`):
 
@@ -192,6 +193,7 @@ cp scripts/corral-status-capture.sh "$D/corral-status-capture.sh"
 cp scripts/statusline-command.sh    "$D/statusline-command.sh"    # skip if you have your own
 chmod +x "$D/corral-status-capture.sh" "$D/statusline-command.sh"
 mkdir -p "$D/themes" && cp themes/corral.json "$D/themes/corral.json"   # optional theme
+mkdir -p "$D/skills" && cp -R skills/corral "$D/skills/corral"          # recommended with the MCP server
 echo "corral-status/" >> "$D/.gitignore"    # if the config dir is version-controlled
 ```
 
@@ -284,6 +286,15 @@ Register it only in config dirs **on the machine running corral**. The MCP proce
 corral server over that machine's loopback, so a session on a remote environment has nothing to
 reach — its tools would report `unreachable`.
 
+**The Claude integration is a prerequisite here, not just for recaps.** corral discovers sessions by
+running `herdr agent list`, which comes in two halves. herdr itself reports each pane's coordinates
+and agent status — enough for `corral_whoami` to identify the caller and find its card. But the
+*Claude session UUID* is contributed by the integration (herdr labels it `source: "herdr:claude"`),
+and that UUID is the key corral uses to find a session's transcript and its statusline file. So
+without `herdr integration install claude`, `corral_whoami` reports `session id: not registered yet`
+permanently and leaves `model`, `ctx` and `cost` empty — which removes exactly the signal a session
+watches to notice its own context pressure and hand off in time.
+
 It resolves that address from **its own** environment (`CORRAL_URL`, else
 `http://127.0.0.1:$HERDR_DASH_PORT`), and it inherits the pane's shell, not the corral server's. So
 if you run corral on a non-default port, either export `HERDR_DASH_PORT` where Claude starts or pin
@@ -313,6 +324,31 @@ all, and that pane is always brand-new. `corral_spawn` and `corral_session_close
 carry `readOnlyHint`. Those are hints for the harness, not enforcement — nothing in the server
 requires confirmation. The actual control is the operator's Claude Code permission configuration:
 simply don't allowlist the two destructive tools, same as any other destructive tool call.
+
+### Teaching a session what corral is
+
+A tool description explains its own tool. None of them can carry the vocabulary they all assume —
+board, card, link, detached — or the orderings that span several tools, and getting one of those
+wrong loses work: a handoff that closes the session before writing the card arrives empty. Two
+pieces cover that, and they are not alternatives.
+
+**Automatic, nothing to install.** The server sends a short orientation as MCP `instructions`, which
+the client puts in the session's context before it does anything. That is what makes a *spawned*
+session work at all: it learns that `corral_whoami` exists in time to call it. Like the tools, this
+is sent only inside herdr, so a non-herdr session pays nothing.
+
+**Recommended, and you should install it.** The orientation is deliberately minimal — it is context
+cost in every corral session, so it carries only the vocabulary and the hazardous orderings. The
+skill carries the rest: the workflows, how to write a brief worth handing over, what the tools do
+*not* expose, and what each failure means. A session without it works from the summary alone and will
+get the details wrong. Copy it into each config dir you registered the server in (see
+[the helper-file table](#installing-the-claude-helper-files-per-config-dir)):
+
+```bash
+mkdir -p ~/.claude/skills && cp -R skills/corral ~/.claude/skills/corral
+```
+
+It loads only when a session actually reaches for corral, so it costs nothing the rest of the time.
 
 ## Architecture (short version)
 
