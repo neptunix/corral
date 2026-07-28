@@ -15,10 +15,14 @@ import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 
-import { READ_CACHE_TTL_MS, SPAWN_TIMEOUT_MS, UPLOAD_ROOT, WS_ALLOWED_ORIGINS } from "../config.ts";
+import {
+  BRIEF_CLEANUP_DELAY_MS, BRIEF_MAX_BYTES, BRIEF_ROOT, READ_CACHE_TTL_MS, SPAWN_TIMEOUT_MS,
+  UPLOAD_ROOT, WS_ALLOWED_ORIGINS,
+} from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
+import { briefByteLength, cleanupBrief, composeBrief, writeBrief } from "./brief.ts";
 import { syncClaudeThemeBase, ThemeModeSchema } from "./claude-theme.ts";
-import { closePane, listWorkspaces, readPane, type ReadFn } from "./herdr.ts";
+import { closePane, listWorkspaces, paneIdentity, readPane, type ReadFn } from "./herdr.ts";
 import { isLoopbackHost } from "./host-guard.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
@@ -30,6 +34,8 @@ import type { Storage } from "./storage.ts";
 import { readLastActivity, readSessionCwd } from "./transcript.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { writeUploadFile } from "./uploads.ts";
+import type { PaneIdentity } from "./whoami.ts";
+import { buildWhoami, resolveSelf, resolveSelfViaPane } from "./whoami.ts";
 import { PANE_RE } from "./ws-attach-guard.ts";
 
 const BID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -39,6 +45,9 @@ const TID_RE = /^t_[A-Za-z0-9_-]{7}$/;
 const WS_RE = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$/;
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const LAST_ACTIVE_TTL_MS = 60_000;
+// How long a ?deferred=1 close waits after responding before killing the pane. Long enough for the
+// HTTP response to flush to the MCP client, short enough that the operator sees the pane die "now".
+const CLOSE_DEFER_MS = 150;
 // Spawn tab-name suffixes: a task's Nth spawned session gets tab `${slug}-<letter>` (a human-readable
 // label so a task's sessions are distinguishable). a–z is a soft ceiling; attached sessions don't
 // consume a letter and are unbounded. Revisit if a task ever needs more than 26 spawned sessions.
@@ -200,18 +209,28 @@ export function createApi(opts: {
   lastActivity?: (env: HerdrEnv, sessionId: string) => Promise<number | null>;
   sessionCwd?: (env: HerdrEnv, sessionId: string) => Promise<string | null>;
   closePaneFn?: (env: HerdrEnv, paneId: string) => Promise<void>;
+  // Pane-level identity lookup, used only when the snapshot cannot resolve the caller (see the
+  // whoami route). Injectable so the fallback is testable without a live herdr.
+  paneIdentityFn?: (env: HerdrEnv, paneId: string) => Promise<PaneIdentity | null>;
+  closeDeferMs?: number; // injectable so the deferred-close ordering is testable without real waits
   spawnTimeoutMs?: number; // injectable so the timeout-cleanup path is testable without a 60s wait
   allowedOrigins?: readonly string[]; // Origin allowlist for the file-upload route (default WS_ALLOWED_ORIGINS)
   uploadRoot?: string; // drop-upload temp root (injectable so tests write to a scratch dir)
+  briefRoot?: string; // spawn-brief root (injectable so tests write to a scratch dir)
+  briefCleanupDelayMs?: number; // injectable so the post-spawn brief unlink is testable without a real wait
 }): Hono {
   const read = opts.read ?? readPane;
   const listWs = opts.listWorkspaces ?? listWorkspaces;
   const lastActivity = opts.lastActivity ?? readLastActivity;
   const sessionCwd = opts.sessionCwd ?? readSessionCwd;
   const closePaneFn = opts.closePaneFn ?? closePane;
+  const paneLookup = opts.paneIdentityFn ?? paneIdentity;
+  const closeDeferMs = opts.closeDeferMs ?? CLOSE_DEFER_MS;
   const spawnTimeoutMs = opts.spawnTimeoutMs ?? SPAWN_TIMEOUT_MS;
   const allowedOrigins = opts.allowedOrigins ?? WS_ALLOWED_ORIGINS;
   const uploadRoot = opts.uploadRoot ?? UPLOAD_ROOT;
+  const briefRoot = opts.briefRoot ?? BRIEF_ROOT;
+  const briefCleanupDelayMs = opts.briefCleanupDelayMs ?? BRIEF_CLEANUP_DELAY_MS;
   // Last-active timestamps (transcript-derived); caches `null` too (no transcript). Bounded + TTL'd.
   const laCache = createTtlCache<number | null>({ ttlMs: LAST_ACTIVE_TTL_MS });
   // #4: coalesce sub-second /read bursts (each is a herdr/SSH round-trip). Success-only; keyed by the
@@ -257,6 +276,64 @@ export function createApi(opts: {
     }
     return c.json(opts.poller.getSnapshot());
   });
+
+  // Identity for an MCP client running inside a herdr pane. The caller supplies only hints
+  // (paneId/cwd/socket); the authoritative data is the poller snapshot plus the trusted env config.
+  // SECURITY: `socket` is used ONLY to disambiguate which configured environment the caller sits in.
+  // It is NEVER used to route a herdr call — routing always keys on the resolved env id from the
+  // startup config, so a forged value can at worst fail to resolve (spec §4).
+  app.get("/api/whoami", async (c) => {
+    const paneId = c.req.query("paneId");
+    if (paneId === undefined) {
+      return c.json({ error: { code: "validation", message: "paneId required" } }, 400);
+    }
+    // Distinct from absent: a value that cannot be a pane id is a caller bug, and "paneId required"
+    // sent someone looking for a missing parameter they had in fact supplied.
+    if (!PANE_RE.test(paneId)) {
+      return c.json({ error: { code: "validation", message: "malformed paneId" } }, 400);
+    }
+    const cwd = c.req.query("cwd") ?? "";
+    const socket = c.req.query("socket") ?? null;
+    const resolve = (): { snapshot: Snapshot; resolution: ReturnType<typeof resolveSelf> } => {
+      const snapshot = opts.poller.getSnapshot();
+      return { snapshot, resolution: resolveSelf({ snapshot, envs: opts.envs, paneId, cwd, socket }) };
+    };
+
+    // The caller is asking about a pane that, by definition, it is sitting in RIGHT NOW, so an
+    // unresolved answer almost always means corral has not caught up rather than that the pane is
+    // bogus. Two escalating recoveries, both only on the miss path:
+    //
+    //   1. Re-poll the local environments. The cheap poll runs every 30s by default, so the snapshot
+    //      routinely predates a pane created seconds ago — and a spawned session is told to call this
+    //      tool as its very first action. Each refresh shares that environment's interval guard, so
+    //      it collapses into a tick already running rather than racing it.
+    //   2. Ask herdr about the PANE directly. The snapshot only holds panes with a registered Claude
+    //      agent, so re-polling cannot help a pane whose Claude is still booting. paneIdentity sees
+    //      it anyway, and the synthesized row resolves the card immediately — metrics fill in later.
+    //
+    // Each runs at most once, so the worst case is one extra poll plus one pane lookup per request.
+    let { snapshot, resolution } = resolve();
+    if (!resolution.ok) {
+      await Promise.all(opts.envs.filter((e) => e.kind === "local").map((e) => opts.poller.refreshEnv(e.id)));
+      ({ snapshot, resolution } = resolve());
+    }
+    // Only a not_found escalates: an ambiguous match already found real rows, and replacing them
+    // with a synthesized one would silently drop the caller's metrics AND hide the ambiguity.
+    if (!resolution.ok && resolution.code === "not_found") {
+      resolution = await resolveSelfViaPane({ envs: opts.envs, paneId, socket, lookup: paneLookup });
+    }
+    return c.json(buildWhoami({
+      resolution,
+      envs: opts.envs,
+      snapshot,
+      boards: opts.storage === undefined ? [] : opts.storage.getAllBoards(),
+    }));
+  });
+
+  // Attention records for the fleet digest. The bare GET /api/state returns a plain Snapshot with no
+  // attention (it rides only the ?board= branch and the SSE frames), so rather than change that shape
+  // attention gets its own read-only route.
+  app.get("/api/attention", (c) => c.json(opts.poller.getAttention()));
 
   app.get("/api/stream", (c) =>
     streamSSE(c, async (stream) => {
@@ -725,6 +802,18 @@ export function createApi(opts: {
     if (!ownsBySession && !ownsByTab) {
       return c.json({ error: { code: "pane_reused", message: "pane now belongs to a different session" } }, 409);
     }
+    // §5.4 (MCP design): a SELF-close must deliver its response before the pane dies — killing the
+    // caller's own pane also kills the MCP process making this request. With ?deferred=1 the route
+    // runs EVERY guard above, responds, and only then closes the pane on a short unref'd timer.
+    // Post-response failures are logged only; the zombie reaper collects any straggler tab.
+    if (c.req.query("deferred") === "1") {
+      setTimeout(() => {
+        closePaneFn(env, paneId).catch((err: unknown) => {
+          console.warn(`[close] deferred close of ${env.id}:${paneId} failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      }, closeDeferMs).unref();
+      return c.json({ ok: true, scheduled: true });
+    }
     try {
       await closePaneFn(env, paneId);
     } catch (err) {
@@ -822,6 +911,7 @@ export function createApi(opts: {
       env: z.string(),
       targetWorkspaceId: z.string().nullable().optional(),
       repo: z.string().nullable().optional(), // repo to root a NEW space at (config key); ignored when joining
+      brief: z.string().min(1).optional(),    // initial prompt, delivered via file indirection
     }).safeParse(body);
     if (!parsed.success) return c.json({ error: { code: "validation", message: "env required" } }, 400);
 
@@ -869,6 +959,28 @@ export function createApi(opts: {
     if (sessionSuffix === undefined) {
       return c.json({ error: { code: "session_cap", message: "task already has 26 spawned sessions (a–z) — attach or remove one first" } }, 409);
     }
+    // Brief delivery is local-only: the file is written on the corral host, and the `$(cat …)`
+    // substitution runs in the pane's shell — on a remote box that path would not exist. Mirrors the
+    // uploads restriction. Both guards run BEFORE any spawn work so a refusal creates nothing.
+    const brief = parsed.data.brief;
+    let briefPath: string | undefined;
+    if (brief !== undefined) {
+      if (targetEnv.kind !== "local") {
+        return c.json({ error: { code: "remote_brief_unsupported", message: "a spawn brief is available for local environments only" } }, 400);
+      }
+      const composed = composeBrief(brief);
+      if (briefByteLength(composed) > BRIEF_MAX_BYTES) {
+        return c.json({ error: { code: "too_large", message: `brief exceeds ${String(BRIEF_MAX_BYTES)} bytes` } }, 413);
+      }
+      try {
+        briefPath = await writeBrief(briefRoot, composed);
+      } catch (err) {
+        return c.json({ error: { code: "brief_write_failed", message: err instanceof Error ? err.message : String(err) } }, 500);
+      }
+      // Audit line, mirroring the upload route (server/api.ts ~408): coordinates and size only —
+      // never contents. A brief is agent-authored text entering a fresh session; leave a trace.
+      console.warn(`[brief] board=${bid} task=${tid} env=${targetEnv.id} bytes=${String(briefByteLength(composed))} path=${briefPath}`);
+    }
     const spawnTimerHandle = { id: setTimeout(() => { /* replaced below */ }, 0) };
     clearTimeout(spawnTimerHandle.id);
     const spawnTimeoutPromise = new Promise<never>((_, rej) => {
@@ -881,7 +993,21 @@ export function createApi(opts: {
       repo: newSpaceRepo, assignedPaneIds,
       spawnCommand: targetEnv.spawnCommand,
       targetWorkspaceId, repoPath,
+      ...(briefPath === undefined ? {} : { briefPath }),
     });
+    // Unlink the brief once THIS spawn attempt is done — a brief's on-disk lifetime is one spawn, not
+    // one server run. Chained off `spawnPromise` itself (not the race below): a timed-out spawn keeps
+    // running in the background, and its eventual settlement — success or failure — is exactly when
+    // the launch command has been sent, so that is what must gate the delete, not the route's response.
+    // This is only the BACKSTOP: the launch command deletes the brief itself once it has read it
+    // (server/spawn.ts), so this fires on a pane that never ran the command. The delay is deliberate
+    // and generous; see config.ts BRIEF_CLEANUP_DELAY_MS.
+    if (briefPath !== undefined) {
+      const bp = briefPath;
+      void spawnPromise.finally(() => {
+        setTimeout(() => { void cleanupBrief(bp); }, briefCleanupDelayMs).unref();
+      }).catch(() => undefined);
+    }
     try {
       const result = await Promise.race([spawnPromise, spawnTimeoutPromise]);
       const link: SessionLink = {

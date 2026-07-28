@@ -7,7 +7,6 @@ import { paneRun, paneGet, tabCreate, workspaceCreate, tabClose, tabRename, list
 const env = ENVIRONMENTS[0]!;
 
 function makeExec(stdout: string): ExecFn {
-  // eslint-disable-next-line @typescript-eslint/require-await
   return async (_file, args) => {
     // capture the args to verify
     (makeExec as unknown as { lastArgs: readonly string[] }).lastArgs = args;

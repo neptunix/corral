@@ -1,6 +1,8 @@
 import type { SessionRow } from "@shared/schema";
+import { quote } from "shell-quote";
 
 import type { HerdrEnv } from "../environments.ts";
+import { BRIEF_FALLBACK } from "./brief.ts";
 import type { ExecFn } from "./herdr.ts";
 import {
   listPanes, paneGet, paneRun, tabClose, tabCreate, tabRename, workspaceClose, workspaceCreate,
@@ -22,6 +24,11 @@ export interface SpawnOpts {
   // Part A/B: which command to send, and where to land.
   readonly spawnCommand?: string;                 // default "claude"
   readonly resumeSessionId?: string;   // when set: run `${spawnCommand} --resume <uuid>` and force the tab cwd
+  // Absolute path to a brief file on the pane's own host. When set (and not resuming), the launch
+  // command reads it through the pane's shell, so the brief's bytes never enter a command string —
+  // only this server-generated, shell-quoted path does. Local environments only (the route enforces
+  // that): the file lives on the corral host, and `cat` would otherwise run on a remote box.
+  readonly briefPath?: string;
   readonly sessionSuffix?: string;                // tab suffix a|b|c for a task's Nth session (default "a")
   readonly targetWorkspaceId?: string | null;     // null/absent = create a new workspace
   readonly repoPath?: string | null;              // resolved env.repos[repo]; required to create
@@ -59,7 +66,17 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
   const spawnCommand = opts.spawnCommand ?? "claude";
   const command = opts.resumeSessionId !== undefined
     ? `${spawnCommand} --resume ${opts.resumeSessionId}`
-    : spawnCommand;
+    : opts.briefPath !== undefined
+      // Three things happen inside the ONE substitution, in order:
+      //   cat   — read the brief, which is what becomes the session's first message.
+      //   ||    — if that read fails, substitute a message saying so. Without it the expansion is
+      //           the empty string and the pane silently launches with no brief at all.
+      //   rm -f — delete the file, caused by the read rather than racing it on a timer. `rm` prints
+      //           nothing, so it does not contribute to the expansion.
+      // The server-side unlink (server/api.ts) remains only as a backstop for a pane that never
+      // runs this command at all.
+      ? `${spawnCommand} "$(cat ${quote([opts.briefPath])} || printf '%s' ${quote([BRIEF_FALLBACK])}; rm -f ${quote([opts.briefPath])})"`
+      : spawnCommand;
   const sessionSuffix = opts.sessionSuffix ?? "a";
   const targetWorkspaceId = opts.targetWorkspaceId ?? null;
   const repoPath = opts.repoPath ?? null;

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 
 import {
-  ATTENTION_MIN_WORK_MS, CHEAP_INTERVAL_MS, intFromEnv,
+  ATTENTION_MIN_WORK_MS, BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, CORRAL_HOME, intFromEnv,
   RECAP_ENABLED, RECAP_INTERVAL_MS, RECAP_TAIL_BYTES,
   RECAP_READ_TIMEOUT_MS, RECAP_CONTENT_MAX,
   TAB_RENAME_ENABLED,
@@ -57,5 +57,17 @@ describe("TAB_RENAME_ENABLED", () => {
   it("defaults to true when the env var is unset", () => {
     // The test runner does not set TAB_RENAME_ENABLED, so the imported default must be true.
     expect(TAB_RENAME_ENABLED).toBe(true);
+  });
+});
+
+describe("BRIEF_ROOT", () => {
+  // Regression guard: BRIEF_ROOT used to live under CORRAL_HOME, which BOARD_DATA_DIR defaults to and
+  // which server/git.ts `git add -A`s on an interval — a spawn brief written there gets permanently
+  // committed to the board-data repo's history. It MUST live outside both, like UPLOAD_ROOT.
+  it("does not live inside CORRAL_HOME", () => {
+    expect(BRIEF_ROOT.startsWith(CORRAL_HOME)).toBe(false);
+  });
+  it("does not live inside BOARD_DATA_DIR (what server/git.ts actually commits)", () => {
+    expect(BRIEF_ROOT.startsWith(BOARD_DATA_DIR)).toBe(false);
   });
 });

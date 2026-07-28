@@ -23,6 +23,8 @@ function fakePoller() {
     onSnapshot: (cb) => { subs.add(cb); return () => { subs.delete(cb); }; },
     // eslint-disable-next-line @typescript-eslint/no-empty-function
     pollOnce: async () => {},
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  refreshEnv: async () => {},
     // eslint-disable-next-line @typescript-eslint/no-empty-function
     runClaudeSweepOnce: async () => {},
     // eslint-disable-next-line @typescript-eslint/no-empty-function

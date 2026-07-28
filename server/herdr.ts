@@ -312,6 +312,42 @@ export async function workspaceCreate(
   return { workspaceId: id, rootTabId: r.root_pane?.tab_id, rootPaneId: r.root_pane?.pane_id };
 }
 
+/**
+ * A pane's own coordinates and labels, independent of whether an AGENT is registered on it.
+ *
+ * `listSessions` above is built from `herdr agent list`, so it only ever sees panes herdr has already
+ * registered a Claude agent on — on this machine, 11 of 13 panes. A pane created seconds ago is real,
+ * occupied, and invisible there, which is exactly the state a just-spawned session asks about when it
+ * calls corral_whoami as its first action. This is the identity path's fallback for that window.
+ *
+ * Returns null when the pane does not exist (or the environment cannot answer) rather than throwing:
+ * every caller is already on a miss path and wants to try the next environment, not to fail.
+ */
+export async function paneIdentity(
+  env: HerdrEnv, paneId: string, exec?: ExecFn,
+): Promise<{ paneId: string; tabId: string; tabLabel: string; workspaceId: string; workspaceLabel: string; cwd: string } | null> {
+  let pane: { paneId: string; tabId: string; workspaceId: string; cwd: string };
+  try {
+    pane = await paneGet(env, paneId, exec);
+  } catch {
+    return null;
+  }
+  // Labels are cosmetic here, so a failure to read them must not sink the resolution that matters.
+  // `listSessions` uses the same "?" placeholder for an unknown id.
+  const labels = await Promise.all([
+    herdrJson(env, ["tab", "list"], exec).then((r) => TabListSchema.safeParse(r)).catch(() => undefined),
+    herdrJson(env, ["workspace", "list"], exec).then((r) => WorkspaceListSchema.safeParse(r)).catch(() => undefined),
+  ]);
+  const [tabs, spaces] = labels;
+  const tabLabel = tabs?.success === true
+    ? tabs.data.result.tabs.find((t) => t.tab_id === pane.tabId)?.label ?? "?"
+    : "?";
+  const workspaceLabel = spaces?.success === true
+    ? spaces.data.result.workspaces.find((w) => w.workspace_id === pane.workspaceId)?.label ?? "?"
+    : "?";
+  return { ...pane, tabLabel, workspaceLabel };
+}
+
 export async function listPanes(
   env: HerdrEnv, workspaceId: string, exec?: ExecFn,
 ): Promise<{ paneId: string; cwd: string }[]> {

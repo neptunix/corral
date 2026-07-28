@@ -5,7 +5,7 @@ import type { HerdrEnv } from "../environments.ts";
 import type { AttentionStore } from "./attention-store.ts";
 import { listSessions, tabRename as tabRenameHerdr } from "./herdr.ts";
 import { createRecapCache, type RecapCache } from "./recap.ts";
-import { guardedInterval, makeGuarded } from "./scheduler.ts";
+import { makeGuarded, runGuarded } from "./scheduler.ts";
 import { createStatuslineCache, type StatuslineCache } from "./statusline-cache.ts";
 import { readStatusline } from "./statusline.ts";
 import { computeRenames } from "./tab-namer.ts";
@@ -24,6 +24,14 @@ export interface Poller {
   getAttention(): AttentionMap;
   onSnapshot(cb: (s: Snapshot) => void): () => void;
   pollOnce(): Promise<void>;
+  /**
+   * Re-poll ONE environment now, off the interval. Shares that environment's interval guard, so a
+   * refresh that lands mid-tick collapses into the tick already running instead of racing it.
+   * Exists for the identity path: a pane created seconds ago is not in the snapshot until the next
+   * cheap poll (30s by default), and `GET /api/whoami` cannot answer "which session am I" from a
+   * snapshot that predates the caller's own pane. Unknown env id resolves without polling.
+   */
+  refreshEnv(envId: string): Promise<void>;
   runClaudeSweepOnce(): Promise<void>;
   start(): void;
   stop(): void;
@@ -197,8 +205,14 @@ export function createPoller(opts: {
 
   let stops: (() => void)[] = [];
   let started = false;
+  // One guard per environment, built once and shared by BOTH the interval below and refreshEnv —
+  // see runGuarded's comment for why they must not each make their own.
+  const envTicks = new Map<string, () => Promise<void>>(
+    opts.envs.map((e) => [e.id, makeGuarded(() => pollEnv(e))]),
+  );
   return {
     getSnapshot: () => snapshot,
+    refreshEnv: async (envId) => { await envTicks.get(envId)?.(); },
     getAttention: () => attention?.getMap() ?? {},
     onSnapshot(cb) { subs.add(cb); return () => { subs.delete(cb); }; },
     async pollOnce() {
@@ -211,7 +225,7 @@ export function createPoller(opts: {
     runClaudeSweepOnce: () => claudeSweep(),
     start() {
       started = true;
-      const listStops = opts.envs.map((e) => guardedInterval(() => pollEnv(e), intervalMs));
+      const listStops = opts.envs.map((e) => runGuarded(envTicks.get(e.id) ?? makeGuarded(() => pollEnv(e)), intervalMs));
       let sweepStop = noop;
       if (RECAP_ENABLED || STATUSLINE_ENABLED) {
         // One shared guard across the immediate kick, the delayed kick, and the interval so they never

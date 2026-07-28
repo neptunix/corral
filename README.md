@@ -183,6 +183,7 @@ the copy command differs (`cp` vs `scp` + `ssh`). Into each config dir:
 | `corral-status-capture.sh` | `scripts/corral-status-capture.sh` | always (it writes the metrics file) |
 | `statusline-command.sh` | `scripts/statusline-command.sh` | only if you have **no** statusline script of your own |
 | `themes/corral.json` | `themes/corral.json` | only for the optional theme |
+| `skills/corral/` | `skills/corral/` | recommended with the [MCP server](#mcp-server); only on the machine running corral |
 
 **Local** (default `~/.claude`; repeat for each extra dir such as `~/.claude-work`):
 
@@ -192,6 +193,7 @@ cp scripts/corral-status-capture.sh "$D/corral-status-capture.sh"
 cp scripts/statusline-command.sh    "$D/statusline-command.sh"    # skip if you have your own
 chmod +x "$D/corral-status-capture.sh" "$D/statusline-command.sh"
 mkdir -p "$D/themes" && cp themes/corral.json "$D/themes/corral.json"   # optional theme
+mkdir -p "$D/skills" && cp -R skills/corral "$D/skills/corral"          # recommended with the MCP server
 echo "corral-status/" >> "$D/.gitignore"    # if the config dir is version-controlled
 ```
 
@@ -255,7 +257,98 @@ must run ≥10 min for its finish to count) · `CORRAL_HOME` (`~/.corral`) ·
 WebSocket attach: `WS_MAX_CONCURRENT` (3) · `WS_RATE_PER_WINDOW` (10) / `WS_RATE_WINDOW_MS`
 (10000) · `WS_HEARTBEAT_MS` (30000) · `WS_KILL_GRACE_MS` (2000) · `WS_PROBE_GRACE_MS` (2000).
 
+[MCP server](#mcp-server): `CORRAL_URL` (defaults to `http://127.0.0.1:$HERDR_DASH_PORT` — read by
+the MCP process, see the note there) · `BRIEF_MAX_BYTES` (16384) · `BRIEF_CLEANUP_DELAY_MS` (600000
+— backstop only; a brief is normally deleted by the launch command that reads it).
+
 For deeper live scrollback set `pane_history = true` in `~/.config/herdr/config.toml`.
+
+## MCP server
+
+corral also ships an MCP server (`mcp/index.ts`) so a Claude session running inside a herdr pane
+can see its own assignment and drive its own lifecycle instead of an operator retyping it by hand
+— see [ADR 0002](docs/adr/0002-mcp-server-as-the-agent-seam.md) for why. Register it with absolute
+paths, so it resolves from whatever directory a session happens to start in:
+
+```bash
+claude mcp add --scope user corral -- /path/to/corral/node_modules/.bin/tsx /path/to/corral/mcp/index.ts
+```
+
+**Once per Claude config dir, not once per machine.** `--scope user` writes into the config dir
+that is active when you run it, so a session started under a different one simply has no corral
+tools — no error, just nothing there. If you run the split-account setup above, repeat it for each:
+
+```bash
+CLAUDE_CONFIG_DIR=~/.claude-work claude mcp add --scope user corral -- /path/to/corral/node_modules/.bin/tsx /path/to/corral/mcp/index.ts
+```
+
+Register it only in config dirs **on the machine running corral**. The MCP process talks to the
+corral server over that machine's loopback, so a session on a remote environment has nothing to
+reach — its tools would report `unreachable`.
+
+**The Claude integration is a prerequisite here, not just for recaps.** corral discovers sessions by
+running `herdr agent list`, which comes in two halves. herdr itself reports each pane's coordinates
+and agent status — enough for `corral_whoami` to identify the caller and find its card. But the
+*Claude session UUID* is contributed by the integration (herdr labels it `source: "herdr:claude"`),
+and that UUID is the key corral uses to find a session's transcript and its statusline file. So
+without `herdr integration install claude`, `corral_whoami` reports `session id: not registered yet`
+permanently and leaves `model`, `ctx` and `cost` empty — which removes exactly the signal a session
+watches to notice its own context pressure and hand off in time.
+
+It resolves that address from **its own** environment (`CORRAL_URL`, else
+`http://127.0.0.1:$HERDR_DASH_PORT`), and it inherits the pane's shell, not the corral server's. So
+if you run corral on a non-default port, either export `HERDR_DASH_PORT` where Claude starts or pin
+it at registration with `--env CORRAL_URL=http://127.0.0.1:<port>` — otherwise every tool reports
+`unreachable` against port 8787 while the server is running perfectly well somewhere else.
+
+The six tools:
+
+- `corral_whoami` — this session's pane/tab/workspace, Claude session id, model/context/cost, and its bound task card; call it first.
+- `corral_fleet` — one bounded line per session across every environment, for cross-session triage.
+- `corral_task_bind` — link this session to an existing task card (no card creation).
+- `corral_task_update` — update the bound card's title, description, status, or priority.
+- `corral_spawn` — start a new session on this session's card, with a brief as its first message.
+- `corral_session_close` — stop this session or one on the same card; suspend, not destroy.
+
+The server registers **no tools outside herdr** — launched with `HERDR_ENV`/`HERDR_PANE_ID` unset,
+it connects but declares no tool capability at all, so a non-herdr session sees no corral tools and
+pays nothing for the connection. (Because the capability is absent rather than empty, a `tools/list`
+sent anyway comes back `Method not found` — expected, not a fault.) Installing it at user scope is
+therefore safe for any non-herdr session too. A spawn brief is available for **local environments only**, and the audit
+trail it leaves records coordinates and size, never contents. A same-environment spawn **joins the
+caller's own workspace** (a new tab beside it); a cross-environment spawn **roots a new workspace**
+at that environment's configured repo path instead. Phase 1 has no path to write into another
+*existing* session's pane — the spawn brief is the only agent-authored text that reaches a pane at
+all, and that pane is always brand-new. `corral_spawn` and `corral_session_close` carry MCP's
+`destructiveHint` annotation (and say so in their descriptions); `corral_whoami` and `corral_fleet`
+carry `readOnlyHint`. Those are hints for the harness, not enforcement — nothing in the server
+requires confirmation. The actual control is the operator's Claude Code permission configuration:
+simply don't allowlist the two destructive tools, same as any other destructive tool call.
+
+### Teaching a session what corral is
+
+A tool description explains its own tool. None of them can carry the vocabulary they all assume —
+board, card, link, detached — or the orderings that span several tools, and getting one of those
+wrong loses work: a handoff that closes the session before writing the card arrives empty. Two
+pieces cover that, and they are not alternatives.
+
+**Automatic, nothing to install.** The server sends a short orientation as MCP `instructions`, which
+the client puts in the session's context before it does anything. That is what makes a *spawned*
+session work at all: it learns that `corral_whoami` exists in time to call it. Like the tools, this
+is sent only inside herdr, so a non-herdr session pays nothing.
+
+**Recommended, and you should install it.** The orientation is deliberately minimal — it is context
+cost in every corral session, so it carries only the vocabulary and the hazardous orderings. The
+skill carries the rest: the workflows, how to write a brief worth handing over, what the tools do
+*not* expose, and what each failure means. A session without it works from the summary alone and will
+get the details wrong. Copy it into each config dir you registered the server in (see
+[the helper-file table](#installing-the-claude-helper-files-per-config-dir)):
+
+```bash
+mkdir -p ~/.claude/skills && cp -R skills/corral ~/.claude/skills/corral
+```
+
+It loads only when a session actually reaches for corral, so it costs nothing the rest of the time.
 
 ## Architecture (short version)
 

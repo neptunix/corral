@@ -1,0 +1,181 @@
+import type { WhoamiResponse } from "@shared/whoami-schema.ts";
+import { describe, expect, it } from "vitest";
+
+import type { CorralClient } from "../mcp/client.ts";
+import { CorralError } from "../mcp/client.ts";
+import { createIdentity } from "../mcp/identity.ts";
+import { fleetHandler } from "../mcp/tools/fleet.ts";
+import { whoamiHandler } from "../mcp/tools/self.ts";
+
+const resolved: WhoamiResponse = {
+  resolved: true,
+  session: {
+    env: "work-local", envLabel: "Work (local)", paneId: "w1:p1", tabId: "tab1",
+    tabLabel: "alpha", workspaceId: "ws1", workspaceLabel: "repo",
+    sessionId: "11111111-2222-3333-4444-555555555555", sessionName: "alpha",
+    cwd: "/repo", status: "working", model: "Opus",
+    ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null,
+  },
+  task: null,
+  envs: [{ id: "work-local", label: "Work (local)", kind: "local", reachable: true }],
+};
+
+function stub(over: Partial<CorralClient>): CorralClient {
+  return {
+    whoami: async () => resolved,
+    attention: async () => ({}),
+    state: async () => ({ envs: {}, sessions: [] }),
+    boards: async () => [],
+    patchTask: async () => { throw new Error("unused"); },
+    attach: async () => undefined,
+    spawn: async () => ({ env: "work-local", paneId: "w1:p2", name: "n" }),
+    closeSession: async () => undefined,
+    ...over,
+  };
+}
+const ctx = { paneId: "w1:p1", socket: null, cwd: "/repo" };
+
+describe("whoamiHandler", () => {
+  it("renders identity and tells an unbound session how to bind", async () => {
+    const out = await whoamiHandler(createIdentity(stub({}), ctx));
+    expect(out).toContain("w1:p1");
+    expect(out).toContain("ctx: 41%");
+    expect(out).toContain("corral_task_bind");
+  });
+
+  it("reports an unresolved identity as text rather than throwing", async () => {
+    const client = stub({ whoami: async () => ({ resolved: false, reason: "no live session at pane w1:p1 in any local environment", envs: [] }) });
+    const out = await whoamiHandler(createIdentity(client, ctx));
+    expect(out).toContain("no live session");
+  });
+
+  it("reports an unreachable corral as text", async () => {
+    const client = stub({ whoami: async () => { throw new CorralError("unreachable", "corral is not reachable"); } });
+    expect(await whoamiHandler(createIdentity(client, ctx))).toContain("not reachable");
+  });
+});
+
+describe("fleetHandler", () => {
+  it("defaults to all, applies the hard limit, and includes the untrusted-output note", async () => {
+    const client = stub({
+      state: async () => ({
+        envs: { "work-local": { reachable: true } },
+        sessions: Array.from({ length: 60 }, (_, i) => ({
+          env: "work-local", paneId: `w1:p${String(i)}`, status: "idle", agent: "claude", cwd: "/r",
+          tab: `s${String(i)}`, workspace: "w", sessionId: null,
+          recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        })),
+      }),
+    });
+    const out = await fleetHandler(client, {});
+    expect(out).toContain("more matched but were not shown");
+    expect(out.toLowerCase()).toContain("untrusted");
+  });
+
+  it("clamps limit to the hard maximum of 50", async () => {
+    const client = stub({
+      state: async () => ({
+        envs: { "work-local": { reachable: true } },
+        sessions: Array.from({ length: 60 }, (_, i) => ({
+          env: "work-local", paneId: `w1:p${String(i)}`, status: "idle", agent: "claude", cwd: "/r",
+          tab: `s${String(i)}`, workspace: "w", sessionId: null,
+          recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        })),
+      }),
+    });
+    const out = await fleetHandler(client, { limit: 9999 });
+    expect(out).toContain("10 more matched"); // 60 sessions minus the 50 hard cap — proves the clamp
+  });
+
+  it("reports an unreachable corral as text", async () => {
+    const client = stub({ state: async () => { throw new CorralError("unreachable", "corral is not reachable"); } });
+    expect(await fleetHandler(client, {})).toContain("not reachable");
+  });
+});
+
+// Self-review coverage: the brief's given tests prove the max-50 clamp but don't pin down the
+// three arg defaults individually or exercise every FLEET_FILTERS member — these tests close that gap.
+describe("fleetHandler defaults and filters", () => {
+  const mixed = {
+    envs: { "work-local": { reachable: true } },
+    sessions: [
+      { env: "work-local", paneId: "w1:p1", status: "working", agent: "claude", cwd: "/r", tab: "s1", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null },
+      { env: "work-local", paneId: "w1:p2", status: "idle", agent: "claude", cwd: "/r", tab: "s2", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null },
+      { env: "work-local", paneId: "w1:p3", status: "blocked", agent: "claude", cwd: "/r", tab: "s3", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null },
+      { env: "work-local", paneId: "w1:p4", status: "done", agent: "claude", cwd: "/r", tab: "s4", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null },
+    ],
+  };
+
+  it("defaults filter to all — every status is included when the arg is omitted", async () => {
+    const client = stub({ state: async () => mixed });
+    const out = await fleetHandler(client, {});
+    expect(out).toContain("w1:p1");
+    expect(out).toContain("w1:p2");
+    expect(out).toContain("w1:p3");
+    expect(out).toContain("w1:p4");
+  });
+
+  it("filter=working returns only the working session", async () => {
+    const client = stub({ state: async () => mixed });
+    const out = await fleetHandler(client, { filter: "working" });
+    expect(out).toContain("w1:p1");
+    expect(out).not.toContain("w1:p2");
+    expect(out).not.toContain("w1:p3");
+    expect(out).not.toContain("w1:p4");
+  });
+
+  it("filter=idle returns idle and done sessions", async () => {
+    const client = stub({ state: async () => mixed });
+    const out = await fleetHandler(client, { filter: "idle" });
+    expect(out).not.toContain("w1:p1");
+    expect(out).toContain("w1:p2");
+    expect(out).not.toContain("w1:p3");
+    expect(out).toContain("w1:p4");
+  });
+
+  it("filter=needs-attention returns blocked sessions and attention-map hits", async () => {
+    const client = stub({
+      state: async () => mixed,
+      attention: async () => ({
+        "work-local:w1:p4": { state: "finished", since: Date.now(), sessionName: "s4", lastLines: "", captured: true },
+      }),
+    });
+    const out = await fleetHandler(client, { filter: "needs-attention" });
+    expect(out).not.toContain("w1:p1");
+    expect(out).not.toContain("w1:p2");
+    expect(out).toContain("w1:p3"); // live blocked
+    expect(out).toContain("w1:p4"); // attention-map "finished" record
+  });
+
+  it("defaults limit to 20 — dropping exactly the remainder of a 25-session match", async () => {
+    const client = stub({
+      state: async () => ({
+        envs: { "work-local": { reachable: true } },
+        sessions: Array.from({ length: 25 }, (_, i) => ({
+          env: "work-local", paneId: `w1:p${String(i)}`, status: "idle", agent: "claude", cwd: "/r",
+          tab: `s${String(i)}`, workspace: "w", sessionId: null,
+          recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        })),
+      }),
+    });
+    const out = await fleetHandler(client, {});
+    expect(out).toContain("5 more matched"); // 25 sessions minus the default limit of 20
+  });
+
+  it("defaults recapChars to 160 — a longer recap is truncated at that length", async () => {
+    const longRecap = "x".repeat(200);
+    const client = stub({
+      state: async () => ({
+        envs: { "work-local": { reachable: true } },
+        sessions: [{
+          env: "work-local", paneId: "w1:p1", status: "idle", agent: "claude", cwd: "/r",
+          tab: "s1", workspace: "w", sessionId: null,
+          recap: longRecap, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        }],
+      }),
+    });
+    const out = await fleetHandler(client, {});
+    expect(out).toContain(`"${"x".repeat(160)}…"`);
+    expect(out).not.toContain("x".repeat(161));
+  });
+});
