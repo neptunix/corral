@@ -390,6 +390,44 @@ describe("formatWhoami", () => {
     });
   });
 
+  // The length counterpart to the newline sweep. Row COUNT was already capped; the length of the
+  // individual fields inside a row was not, and several of them are caller-writable with no
+  // server-side limit — a session link's `name` is a bare z.string() on the attach body. One
+  // oversized value would otherwise flood the context of every session that renders the card.
+  describe("whole-line length cap", () => {
+    const HUGE = "x".repeat(50000);
+
+    it("bounds a line carrying a pathological session name", () => {
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : {
+          ...resolved.task,
+          sessions: [{ name: HUGE, key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: true }],
+        },
+      });
+      for (const line of out.split("\n")) expect(line.length).toBeLessThanOrEqual(2001);
+      expect(out).toContain("…");
+    });
+
+    it("bounds a line carrying pathological column ids", () => {
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : { ...resolved.task, columns: [{ id: HUGE, label: "C" }] },
+      });
+      for (const line of out.split("\n")) expect(line.length).toBeLessThanOrEqual(2001);
+    });
+
+    it("leaves a legitimate long recap intact — the cap sits above the largest valid row", () => {
+      // recapChars maxes out at 1000, so a full-length recap row must survive uncut.
+      const recap = "r".repeat(1000);
+      const out = formatFleet({
+        snapshot: { envs: {}, sessions: [row({ recap })] },
+        attention: {}, boards: [], filter: "all", env: null, limit: 20, recapChars: 1000, nowMs: 0,
+      });
+      expect(out).toContain(recap);
+    });
+  });
+
   it("pins the literal column spacing of the env line (triple-space separators, not collapsed)", () => {
     const out = formatWhoami(resolved);
     const envLine = out.split("\n").find((l) => l.startsWith("env:"));

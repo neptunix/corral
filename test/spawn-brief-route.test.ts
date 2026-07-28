@@ -18,6 +18,7 @@ const poller: Poller = {
   getAttention: () => ({}),
   onSnapshot: () => () => undefined,
   pollOnce: async () => undefined,
+  refreshEnv: async () => undefined,
   runClaudeSweepOnce: async () => undefined,
   start: () => undefined,
   stop: () => undefined,

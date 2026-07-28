@@ -28,6 +28,7 @@ const poller: Poller = {
   getAttention: () => attention,
   onSnapshot: () => () => undefined,
   pollOnce: async () => undefined,
+  refreshEnv: async () => undefined,
   runClaudeSweepOnce: async () => undefined,
   start: () => undefined,
   stop: () => undefined,
@@ -54,6 +55,57 @@ describe("GET /api/whoami and /api/attention", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as WhoamiResponse;
     expect(body.resolved).toBe(false);
+  });
+
+  // The regression: whoami used to answer purely from the cached snapshot, which the cheap poll
+  // only rebuilds every 30s. A pane created seconds ago is absent from it — and that is the FIRST
+  // thing a spawned session hits, because its brief tells it to call corral_whoami before anything
+  // else. The route must re-poll on the miss and answer from the fresh listing instead of reporting
+  // the caller's own live pane as nonexistent.
+  it("re-polls local environments when the pane is missing, and resolves it on the retry", async () => {
+    let latest: Snapshot = { envs: snap.envs, sessions: [] };
+    const refreshed: string[] = [];
+    const lagging: Poller = {
+      ...poller,
+      getSnapshot: () => latest,
+      refreshEnv: async (envId) => {
+        refreshed.push(envId);
+        latest = snap; // the pane shows up only once the environment is actually re-listed
+      },
+    };
+    const app = createApi({ poller: lagging, envs: ENVIRONMENTS, storage: createStorage(tmpDir) });
+    const parsed = WhoamiResponseSchema.parse(
+      await (await app.request("/api/whoami?paneId=w1%3Ap1&cwd=%2Frepo")).json(),
+    );
+    if (!parsed.resolved) throw new Error("expected the refresh to resolve the pane");
+    expect(parsed.session.paneId).toBe("w1:p1");
+    expect(refreshed).toContain("work-local");
+  });
+
+  it("re-polls at most once, then reports the pane unresolved with a retryable reason", async () => {
+    let calls = 0;
+    const empty: Poller = {
+      ...poller,
+      getSnapshot: () => ({ envs: snap.envs, sessions: [] }),
+      refreshEnv: async () => { calls += 1; },
+    };
+    const app = createApi({ poller: empty, envs: ENVIRONMENTS, storage: createStorage(tmpDir) });
+    const body = await (await app.request("/api/whoami?paneId=w9%3Ap9&cwd=%2Frepo")).json() as WhoamiResponse;
+    expect(body.resolved).toBe(false);
+    if (body.resolved) throw new Error("unreachable");
+    // Says "try again" rather than reading as permanent misconfiguration.
+    expect(body.reason).toContain("retry");
+    // One refresh per LOCAL environment, and no second round — the miss path must stay bounded.
+    expect(calls).toBe(ENVIRONMENTS.filter((e) => e.kind === "local").length);
+  });
+
+  it("distinguishes a missing paneId from a malformed one", async () => {
+    const app = createApi({ poller, envs: ENVIRONMENTS, storage: createStorage(tmpDir) });
+    const bad = await app.request("/api/whoami?paneId=" + encodeURIComponent("w1;rm -rf /"));
+    expect(bad.status).toBe(400);
+    expect(JSON.stringify(await bad.json())).toContain("malformed");
+    const missing = await app.request("/api/whoami");
+    expect(JSON.stringify(await missing.json())).toContain("required");
   });
 
   it("rejects a paneId that fails the pane charset guard", async () => {

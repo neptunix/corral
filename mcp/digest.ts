@@ -19,20 +19,12 @@ const TASK_PICKER_ROW_LIMIT = 50;
 // Exported: mcp/tools/task.ts echoes a card title back into a confirmation/refusal string outside
 // this module's own formatters, so it needs the same budget this module uses internally.
 export const TASK_TITLE_MAX = 120;
-// `description` is the field corral_task_update documents as "the running progress log", written
-// with FULL-REPLACEMENT semantics — a session that reads a mangled or silently-cut view of it back
-// and then does the documented full replacement destroys whatever it could not see. That composes
-// badly with the one-line-per-row invariant this module otherwise enforces everywhere (`emit`,
-// above): the invariant is what stops one session's text impersonating another row in a TABLE — it
-// has no such job here, because `description` is rendered as its own clearly-delimited, non-tabular
-// block (see the `DESCRIPTION_LINE_PREFIX` handling in formatWhoami), never as a row. So this field
-// keeps its real line structure — bounded by LINE COUNT (`TASK_DESCRIPTION_MAX_LINES`) and a
-// per-line character budget (`TASK_DESCRIPTION_LINE_MAX`) instead of being flattened to one line and
-// cut at a few hundred characters. Whenever either bound actually cuts something, the rendered block
-// carries an explicit "TRUNCATED" marker and a warning that a full-replacement write from this view
-// would delete unseen content — so a caller is either shown the whole thing, or unmistakably told it
-// isn't. See corral_task_update's `.describe()` in mcp/tools/task.ts, which no longer promises a
-// blanket-safe round trip for this reason.
+// `description` is corral_task_update's "running progress log" and is a FULL-REPLACEMENT write, so
+// a session that reads a silently-cut view and writes it back destroys what it could not see. It is
+// therefore bounded by line count + per-line width and marked TRUNCATED, rather than flattened to
+// one line like every other field: it renders as its own delimited block (DESCRIPTION_LINE_PREFIX),
+// never as a table row, so the one-line invariant has no row to protect here. A caller is either
+// shown the whole value or told plainly that it isn't.
 const TASK_DESCRIPTION_MAX_LINES = 60;
 const TASK_DESCRIPTION_LINE_MAX = 300;
 // Every line of a rendered description is prefixed with this literal, fixed string — never derived
@@ -49,63 +41,60 @@ const IDENTITY_FIELD_MAX = 200;
 // so the cap here is a fixed module constant.
 const WHOAMI_SESSIONS_MAX = 20;
 const WHOAMI_COLUMNS_MAX = 20;
+// Whole-line ceiling applied by `emit` to EVERY rendered line — the length counterpart to the
+// line-terminator sweep, and structural for the same reason (see `emit`). The per-field budgets
+// above cover the fields someone thought to classify; this covers the ones nobody did. Several are
+// caller-writable with no server-side length limit at all: a session link's `name` (an unbounded
+// `z.string()` on the attach body), a board's column ids, a statusline model or session name. One
+// oversized value there would otherwise flood the context of every session that renders it — the
+// exact outcome this module exists to prevent.
+//
+// Sized above the largest LEGITIMATE line rather than snugly: a fleet row carries a recap the caller
+// may set as long as 1000 characters, plus env/tab/pane/status/model/card columns, so anything near
+// 1000 would silently start cutting valid rows.
+const LINE_MAX = 2000;
 
 export function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}…`;
 }
 
 /**
- * Collapse runs of LINE-TERMINATING characters — `\r`, `\n` (so `\r\n` too), U+2028 LINE
- * SEPARATOR, U+2029 PARAGRAPH SEPARATOR — into a single space. Deliberately narrower than "all
- * whitespace": this module's invariant is "one rendered line per row", so only characters some
- * renderer would treat as ending a line need neutralizing. An earlier version used `/\s+/g` (every
- * whitespace run, including the deliberate multi-space column separators the row templates below
- * use as literal layout) — that silently reformatted every row's column alignment as a side effect
- * of a security fix, which review caught. A tab does not end a line — it only shifts a column — so
- * it is deliberately left uncollapsed: it is not part of the attack this function defends against,
- * and collapsing it would reintroduce the same kind of unintended reformatting for no security
- * benefit.
+ * Collapse runs of LINE-TERMINATING characters — `\r`, `\n` (so `\r\n`), U+2028, U+2029 — into a
+ * single space.
+ *
+ * Line terminators ONLY, never `/\s+/`: the row templates below use multi-space runs as literal
+ * column layout, so collapsing all whitespace would silently reflow every row. A tab shifts a
+ * column rather than ending a line, so it is left alone for the same reason.
+ *
+ * Exported because a tool reply that interpolates caller-supplied text outside this module's
+ * formatters (see mcp/tools/task.ts) must apply the same sweep.
  */
-// Exported for the same reason as TASK_TITLE_MAX above: any tool reply that interpolates
-// caller-supplied text (a card title, a session name, ...) OUTSIDE this module's own formatters
-// must still go through the same line-terminator sweep, or it reopens the leak class this module
-// exists to close (see the block comment on `emit` below).
 export function oneLine(s: string): string {
   return s.replace(/[\r\n\u2028\u2029]+/g, " ");
 }
 
 /**
- * The one-line-per-session invariant, enforced BY CONSTRUCTION rather than by classifying fields.
+ * The one-line-per-row, bounded-length invariant — enforced BY CONSTRUCTION, not by classifying
+ * fields. Every formatter below builds an array of logical lines and returns `emit(...)`, which
+ * sweeps line terminators and applies `LINE_MAX` to each. So any field interpolated into any line,
+ * today or later, is covered without anyone deciding whether it counts as "free text".
  *
- * Three straight review rounds each found one more interpolated field that looked "structural
- * enough" to leave raw — a statusline account string, a herdr cwd, a caller-settable status/column
- * id — and each guess was wrong. Rather than keep extending a list of fields that "deserve"
- * `oneLine`, every formatter below builds its output as an array of logical lines/rows and returns
- * `emit(that array)` instead of `array.join("\n")`. `emit` runs `oneLine` over every element
- * before joining, so ANY field interpolated into ANY line — present today or added tomorrow — is
- * swept unconditionally. There is no cost to this: collapsing line terminators in an id, a Zod
- * enum member, or a numeric string is an identity no-op (none of those ever contain one), so
- * nobody has to reason about which fields are "free text" versus "structural" ever again. Without
- * it, an embedded newline in any interpolated value could fabricate an extra rendered line that
- * impersonates a distinct row or escapes the untrusted-output framing (design spec §7).
+ * That matters because the guess is easy to get wrong: three review rounds each found one more
+ * field left raw because it looked structural (a statusline account, a herdr cwd, a caller-settable
+ * column id). The sweep costs nothing — collapsing terminators in an id or an enum member is a
+ * no-op — and without it an embedded newline could fabricate a row that reads as this module's own
+ * output (design spec §7).
  *
- * The only fields still processed individually (recap/title/cwd/account/env-error, via their own
- * `oneLine(...)` + `truncate(..., N)` calls before they're embedded) are the ones with their OWN
- * character budget — that cap must be measured against the collapsed text, not the raw text, which
- * requires collapsing before the string is embedded. `emit`'s sweep is a no-op on top of
- * already-collapsed text; it exists to catch everything else without being asked to. `description`
- * gets the same treatment PER LINE rather than as one flattened field — see
- * `TASK_DESCRIPTION_MAX_LINES` above and formatWhoami's rendering of it below — because it is the
- * one field whose full-replacement semantics make silent flattening a data-loss bug, not just a
- * cosmetic one.
+ * Fields with their OWN tighter budget (recap, title, cwd, account, env error) still call
+ * `oneLine` + `truncate` before being embedded, because that budget must measure collapsed text.
+ * `description` is bounded per line instead of flattened — see `TASK_DESCRIPTION_MAX_LINES`.
  *
- * Every formatter below has exactly one `return` statement, and it is always `return emit(...)` —
- * no branch bypasses the sweep, including empty-result messages (see `formatFleet`'s and
- * `formatTaskPicker`'s "nothing to show" branches, which push their message onto the same array
- * rather than returning it directly).
+ * Invariant to preserve: every formatter has exactly one `return`, and it is always `emit(...)` —
+ * including the "nothing to show" branches, which push onto the same array rather than returning
+ * early.
  */
 function emit(lines: readonly string[]): string {
-  return lines.map(oneLine).join("\n");
+  return lines.map((l) => truncate(oneLine(l), LINE_MAX)).join("\n");
 }
 
 function rowKey(r: SessionRow): string {

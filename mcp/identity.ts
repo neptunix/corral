@@ -21,7 +21,8 @@ function presentOrNull(v: string | undefined): string | null {
  *
  * A whitespace-only pane id (e.g. "   ") is forwarded as-is rather than treated as absent: it is
  * not our job to decide what counts as a valid pane id, only whether one was set at all. The
- * server resolves it (or reports it unresolvable) same as any other pane id it doesn't recognize.
+ * server owns the shape rule and rejects a value that cannot be one ("malformed paneId"), distinct
+ * from a well-formed id it simply cannot find (an unresolved, retryable answer).
  */
 export function readHerdrEnv(env: NodeJS.ProcessEnv, cwd: string): HerdrContext | null {
   if (presentOrNull(env.HERDR_ENV) === null) return null;

@@ -277,19 +277,35 @@ export function createApi(opts: {
   // SECURITY: `socket` is used ONLY to disambiguate which configured environment the caller sits in.
   // It is NEVER used to route a herdr call — routing always keys on the resolved env id from the
   // startup config, so a forged value can at worst fail to resolve (spec §4).
-  app.get("/api/whoami", (c) => {
+  app.get("/api/whoami", async (c) => {
     const paneId = c.req.query("paneId");
-    if (paneId === undefined || !PANE_RE.test(paneId)) {
+    if (paneId === undefined) {
       return c.json({ error: { code: "validation", message: "paneId required" } }, 400);
     }
-    const snapshot = opts.poller.getSnapshot();
-    const resolution = resolveSelf({
-      snapshot,
-      envs: opts.envs,
-      paneId,
-      cwd: c.req.query("cwd") ?? "",
-      socket: c.req.query("socket") ?? null,
-    });
+    // Distinct from absent: a value that cannot be a pane id is a caller bug, and "paneId required"
+    // sent someone looking for a missing parameter they had in fact supplied.
+    if (!PANE_RE.test(paneId)) {
+      return c.json({ error: { code: "validation", message: "malformed paneId" } }, 400);
+    }
+    const cwd = c.req.query("cwd") ?? "";
+    const socket = c.req.query("socket") ?? null;
+    const resolve = (): { snapshot: Snapshot; resolution: ReturnType<typeof resolveSelf> } => {
+      const snapshot = opts.poller.getSnapshot();
+      return { snapshot, resolution: resolveSelf({ snapshot, envs: opts.envs, paneId, cwd, socket }) };
+    };
+
+    let { snapshot, resolution } = resolve();
+    // The caller is asking about a pane that, by definition, it is sitting in RIGHT NOW — so an
+    // unresolved answer usually means the snapshot simply predates that pane rather than that the
+    // pane is bogus. That is the common case, not the edge one: the cheap poll runs every 30s by
+    // default, a spawned session is told to call this tool as its very first action, and a human
+    // opening a fresh tab does the same. Re-poll the local environments once and re-resolve before
+    // giving up. Bounded and self-limiting — it only runs on the miss path, each environment's
+    // refresh shares that environment's interval guard, and the retry happens at most once.
+    if (!resolution.ok) {
+      await Promise.all(opts.envs.filter((e) => e.kind === "local").map((e) => opts.poller.refreshEnv(e.id)));
+      ({ snapshot, resolution } = resolve());
+    }
     return c.json(buildWhoami({
       resolution,
       envs: opts.envs,
@@ -967,9 +983,9 @@ export function createApi(opts: {
     // one server run. Chained off `spawnPromise` itself (not the race below): a timed-out spawn keeps
     // running in the background, and its eventual settlement — success or failure — is exactly when
     // the launch command has been sent, so that is what must gate the delete, not the route's response.
-    // The delay (not an immediate unlink) is deliberate: `pane run` resolving only means the launch
-    // command was handed to the pane's pty, not that its shell has finished `$(cat <path>)` yet — an
-    // immediate delete would race that read (see config.ts BRIEF_CLEANUP_DELAY_MS).
+    // This is only the BACKSTOP: the launch command deletes the brief itself once it has read it
+    // (server/spawn.ts), so this fires on a pane that never ran the command. The delay is deliberate
+    // and generous; see config.ts BRIEF_CLEANUP_DELAY_MS.
     if (briefPath !== undefined) {
       const bp = briefPath;
       void spawnPromise.finally(() => {

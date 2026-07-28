@@ -45,15 +45,31 @@ Six decisions fix its shape:
    poller snapshot and the trusted startup config. The socket value is used only
    to disambiguate *which configured environment* the caller sits in, never to
    route a call — routing always keys on the resolved id from that config.
+
+   Identity must also resolve *immediately*, which the cached snapshot alone
+   cannot do: the cheap poll runs every 30s, and the caller is by definition
+   asking about a pane that exists right now — often one created seconds ago,
+   since a spawned session is told to call `corral_whoami` before anything else.
+   The route therefore re-polls the local environments once on a miss and
+   re-resolves before answering. Bounded by construction: only on the miss path,
+   at most once per request, and each environment's refresh shares that
+   environment's existing poll guard, so it collapses into a tick already in
+   flight rather than racing it.
 5. **Brief delivery is file indirection, and that is now verified, not
    assumed.** The launch command reads the brief through the pane's own shell
-   (`<spawnCommand> "$(cat <path>)"`) rather than embedding it in a command
-   string, which is exactly what confines a brief to local environments — there
-   is no host to `cat` a file on for a remote pane. This was verified empirically
-   in a live herdr pane before relying on it: the probe session received the
-   file's contents as its first message and stayed interactive, rather than
-   running headless (`claude --help` documents `--print` as the flag for a
-   headless run; this path does not pass it).
+   (`<spawnCommand> "$(cat <path>; rm -f <path>)"`) rather than embedding it in a
+   command string, which is exactly what confines a brief to local environments —
+   there is no host to `cat` a file on for a remote pane. This was verified
+   empirically in a live herdr pane before relying on it: the probe session
+   received the file's contents as its first message and stayed interactive,
+   rather than running headless (`claude --help` documents `--print` as the flag
+   for a headless run; this path does not pass it). The `rm` sits inside the same
+   substitution deliberately: `herdr pane run` returns once the command reaches
+   the pty, not once the shell has run it, so deletion has to be *caused* by the
+   read rather than scheduled near it — a timer short enough to bound disk is
+   also short enough to lose against a slow shell startup and hand the new
+   session an empty brief while the spawn reported success. The server-side
+   unlink remains only as a backstop for a pane that never ran the command.
 6. **Close and rebind are tool-thin policy over state the board already owns,
    not new MCP-side authorization.** `corral_session_close` accepts any target
    attached to the caller's bound card — card membership the board already

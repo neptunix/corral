@@ -61,21 +61,21 @@ export function bindHandler(deps: TaskDeps, args: BindArgs): Promise<string> {
     // typo'd id is a far more useful message than a 404 (or worse — see mcp/client.ts's `seg`).
     const boards = await deps.client.boards();
     const board = boards.find((b) => b.id === args.boardId);
-    const task = board?.tasks.find((t) => t.id === args.taskId);
     // formatTaskPicker (the no-argument listing above) hides closed-column cards, so the explicit-id
     // path must refuse the same set — otherwise "no open cards to bind to" is a lie in one direction
     // (an id pair for a done-column card binds fine) and this message would be a lie in the other.
-    if (task === undefined) {
-      return `no open card ${args.boardId}/${args.taskId} — call corral_task_bind with no arguments to list open cards`;
-    }
+    const notFound = `no open card ${args.boardId}/${args.taskId} — call corral_task_bind with no arguments to list open cards`;
+    // Two early returns rather than one `board?.tasks.find(...)`: narrowing the task does not narrow
+    // the board, so the combined form leaves `board` possibly-undefined for the closed-column check
+    // below and forces an unreachable fallback there.
+    if (board === undefined) return notFound;
+    const task = board.tasks.find((t) => t.id === args.taskId);
+    if (task === undefined) return notFound;
     // Distinct from "does not exist at all": a correct id for a card that just happens to sit in a
     // closed column would otherwise get the same "no open card" wording, sending the caller hunting
     // for a typo that isn't there — and formatTaskPicker won't show the card either, since it hides
     // closed columns too. Name the real cause and point at the actual remedy instead.
-    // (`board` is guaranteed defined here — `task` only resolves via `board?.tasks.find` above — the
-    // fallback is for the type checker, not reachable in practice.)
-    const closed = board === undefined ? new Set<string>() : closedColumnIds(board.columns);
-    if (closed.has(task.status)) {
+    if (closedColumnIds(board.columns).has(task.status)) {
       return `${args.boardId}/${args.taskId} is in a closed column; reopen it from the corral UI first`;
     }
 

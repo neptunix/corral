@@ -39,7 +39,24 @@ describe("spawn with a brief", () => {
       env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
       spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
     });
-    expect(ran).toEqual(['claude "$(cat /data/briefs/abc123.md)"']);
+    expect(ran).toEqual(['claude "$(cat /data/briefs/abc123.md; rm -f /data/briefs/abc123.md)"']);
+  });
+
+  // The regression this pins: deletion must be CAUSED by the read, not scheduled alongside it. The
+  // server's unlink timer is only a backstop for a pane that never runs the command; if the brief's
+  // only deletion were that timer, a shell still sourcing a heavy rc file could lose the race and
+  // `cat` a file that is already gone — which expands to the empty string, so the pane would launch
+  // `claude ""` and start with no brief at all while the spawn had already reported success.
+  it("deletes the brief in the same substitution that reads it", async () => {
+    const { ran, stubs } = harness();
+    await spawnSession({
+      env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
+      spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
+    });
+    const cmd = ran[0] ?? "";
+    expect(cmd).toMatch(/\$\(cat \S+; rm -f \S+\)/);
+    // Both tokens inside the one substitution, so the rm cannot run before the cat.
+    expect(cmd.indexOf("cat ")).toBeLessThan(cmd.indexOf("rm -f "));
   });
 
   // The launched command only ever embeds `briefPath` (a short, server-generated file path) — never
@@ -74,7 +91,9 @@ describe("spawn with a brief", () => {
     });
     // shell-quote wraps the path in double quotes and backslash-escapes `$` and `` ` `` so the
     // command substitution and backticks cannot be interpreted by the shell that runs `cat`.
-    expect(ran[0]).toBe("claude \"$(cat \"/data/briefs/a;b\\$(c)\\`d\\`e'f.md\")\"");
+    expect(ran[0]).toBe(
+      "claude \"$(cat \"/data/briefs/a;b\\$(c)\\`d\\`e'f.md\"; rm -f \"/data/briefs/a;b\\$(c)\\`d\\`e'f.md\")\"",
+    );
     // The hostile substrings must never appear raw/unescaped — that would mean the shell could
     // execute `c` (via `$(c)` or backticks) or terminate the `cat` command early via `;`.
     expect(ran[0]).not.toContain("cat /data/briefs/a;b$(c)");

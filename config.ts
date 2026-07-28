@@ -86,13 +86,14 @@ export const UPLOAD_ROOT = path.join(os.tmpdir(), "corral-uploads");
 export const BRIEF_ROOT = path.join(os.tmpdir(), "corral-briefs");
 // Cap so a runaway brief cannot blow the pane or the spawned session's context window.
 export const BRIEF_MAX_BYTES = intFromEnv("BRIEF_MAX_BYTES", 16384, { min: 1 });
-// Bounded post-spawn delay before a single brief file is unlinked (server/api.ts). `herdr pane run`
-// (server/spawn.ts spawnSession, Step 4) returns once the daemon has been told to inject the launch
-// command into the pane's pty — NOT once the pane's shell has actually executed `$(cat <path>)`. An
-// unlink the instant spawnSession's promise settles would race that shell read, so deletion happens
-// this long afterward instead. Bounds a brief's disk lifetime to one spawn attempt + this grace
-// window, not the life of the server process (previously: one file leaked per spawn, forever).
-export const BRIEF_CLEANUP_DELAY_MS = intFromEnv("BRIEF_CLEANUP_DELAY_MS", 5000, { min: 0 });
+// BACKSTOP delay before the server unlinks a brief (server/api.ts). The normal deletion is the
+// `rm -f` the launch command runs right after its own `$(cat …)` (server/spawn.ts), so on any pane
+// that actually runs the command the file is already gone long before this fires. This timer only
+// catches the pane that never ran it, which is why it is generous: `herdr pane run` returns once the
+// daemon has injected the command into the pty, NOT once the shell has executed it, so a short timer
+// would race a slow shell startup (a heavy rc file is routinely seconds) and delete the brief before
+// it was read — losing the whole handoff while the spawn reported success.
+export const BRIEF_CLEANUP_DELAY_MS = intFromEnv("BRIEF_CLEANUP_DELAY_MS", 600000, { min: 0 });
 
 // SEC-1: WebSockets bypass same-origin policy, so the upgrade must Origin-allowlist. The Vite dev origin
 // is added ONLY outside production — prod serves same-origin from web/dist, and keeping the dev origin in

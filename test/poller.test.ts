@@ -22,6 +22,39 @@ describe("createPoller", () => {
     expect(snap.envs.a).toEqual({ reachable: true, kind: "local", label: "A" });
   });
 
+  it("refreshEnv re-lists only the named env, and ignores an unknown id", async () => {
+    const seen: string[] = [];
+    const list: ListFn = (e) => { seen.push(e.id); return Promise.resolve([row(e.id, `${e.id}-1`)]); };
+    const p = createPoller({ envs: [A, B], list });
+    await p.refreshEnv("a");
+    expect(seen).toEqual(["a"]);
+    expect(p.getSnapshot().sessions.map((s) => s.paneId)).toEqual(["a-1"]);
+    // An id no environment claims must resolve quietly rather than throw or poll everything —
+    // the whoami miss path calls this with whatever env ids the config happens to hold.
+    await p.refreshEnv("nope");
+    expect(seen).toEqual(["a"]);
+  });
+
+  it("refreshEnv shares the interval's guard, so an overlapping call collapses instead of racing", async () => {
+    let inFlight = 0;
+    let maxConcurrent = 0;
+    let release = (): void => undefined;
+    const gate = new Promise<void>((r) => { release = r; });
+    const list: ListFn = async (e) => {
+      inFlight += 1;
+      maxConcurrent = Math.max(maxConcurrent, inFlight);
+      await gate;
+      inFlight -= 1;
+      return [row(e.id, `${e.id}-1`)];
+    };
+    const p = createPoller({ envs: [A], list });
+    const first = p.refreshEnv("a");
+    const second = p.refreshEnv("a"); // lands while the first is still awaiting the gate
+    release();
+    await Promise.all([first, second]);
+    expect(maxConcurrent).toBe(1);
+  });
+
   it("reports env kind in the snapshot (local and remote)", async () => {
     const remote: HerdrEnv = { id: "r", label: "R", kind: "remote", sshHost: "h", socket: "~/s.sock", herdrBin: "~/herdr", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
     const list: ListFn = () => Promise.resolve([]);

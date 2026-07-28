@@ -12,6 +12,7 @@ const remote: HerdrEnv = { id: "e-remote", label: "R", kind: "remote", sshHost: 
 const poller: Poller = {
   getSnapshot: () => ({ envs: {}, sessions: [] }), getAttention: () => ({}),
   onSnapshot: () => () => undefined, pollOnce: () => Promise.resolve(undefined),
+  refreshEnv: () => Promise.resolve(undefined),
   runClaudeSweepOnce: () => Promise.resolve(undefined), start: () => undefined, stop: () => undefined,
 };
 const ORIGIN = "http://localhost:5173";

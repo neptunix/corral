@@ -66,7 +66,11 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
   const command = opts.resumeSessionId !== undefined
     ? `${spawnCommand} --resume ${opts.resumeSessionId}`
     : opts.briefPath !== undefined
-      ? `${spawnCommand} "$(cat ${quote([opts.briefPath])})"`
+      // `rm -f` runs INSIDE the same substitution, so the file is deleted by the shell that just
+      // read it — deletion follows the read causally instead of racing it on a timer. `rm` prints
+      // nothing, so the substitution still expands to exactly the brief's contents. The server-side
+      // unlink (server/api.ts) stays on as the backstop for a pane that never runs the command.
+      ? `${spawnCommand} "$(cat ${quote([opts.briefPath])}; rm -f ${quote([opts.briefPath])})"`
       : spawnCommand;
   const sessionSuffix = opts.sessionSuffix ?? "a";
   const targetWorkspaceId = opts.targetWorkspaceId ?? null;

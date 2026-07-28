@@ -51,6 +51,7 @@ export function registerFleetTool(server: McpServer, client: CorralClient): void
         limit: z.number().int().optional().describe(`max rows, default 20, hard maximum ${String(LIMIT_MAX)}`),
         recapChars: z.number().int().optional().describe("recap truncation length, default 160"),
       },
+      annotations: { readOnlyHint: true },
     },
     async (args: FleetArgs) => toolText(await fleetHandler(client, args)),
   );

@@ -129,11 +129,15 @@ export function registerSessionTools(server: McpServer, deps: SessionDeps): void
     {
       title: "Spawn a session on this card",
       description:
-        "Start a NEW Claude session attached to THIS session's card — for a context handoff or a parallel strand. The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment, where the new session joins THIS session's workspace. LOCAL ENVIRONMENTS ONLY in this phase: `env` may only name a local environment (kind=local in corral_whoami's environment list) — a brief cannot be delivered to a remote environment, so a remote `env` is refused here rather than left to 400 on the server.",
+        "Start a NEW Claude session attached to THIS session's card — for a context handoff or a parallel strand. The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment, where the new session joins THIS session's workspace. LOCAL ENVIRONMENTS ONLY in this phase: `env` may only name a local environment (kind=local in corral_whoami's environment list) — a brief cannot be delivered to a remote environment, so a remote `env` is refused here rather than left to 400 on the server. Destructive: this starts a real session that consumes tokens.",
       inputSchema: {
         brief: z.string().describe("handoff text the new session starts from; required"),
         env: z.string().optional().describe("LOCAL environment id from corral_whoami; defaults to this session's. A remote environment is refused."),
       },
+      // Machine-readable counterpart to the "Destructive." in the descriptions below — a harness can
+      // gate on this without parsing prose. It changes nothing on its own: the actual control is the
+      // operator declining to allowlist these two tools.
+      annotations: { destructiveHint: true },
     },
     async (args: SpawnArgs) => toolText(await spawnHandler(deps, args)),
   );
@@ -147,6 +151,7 @@ export function registerSessionTools(server: McpServer, deps: SessionDeps): void
       inputSchema: {
         target: z.string().optional().describe('"self" (default) or "<env>:<paneId>"'),
       },
+      annotations: { destructiveHint: true },
     },
     async (args: CloseArgs) => toolText(await closeHandler(deps, args)),
   );

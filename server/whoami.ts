@@ -56,7 +56,14 @@ export function resolveSelf(input: {
   const only = sole(candidates);
   if (only !== undefined) return { ok: true, env: only.env, row: only.row };
   if (candidates.length === 0) {
-    return { ok: false, reason: `no live session at pane ${paneId} in any local environment` };
+    // Name the transient cause. The route already re-polls once before this is returned, so reaching
+    // here means the pane really was absent from a fresh listing — but a pane created in the last
+    // second still loses that race, and a flat "no live session" reads as permanent misconfiguration
+    // and stops a just-spawned session from simply trying again.
+    return {
+      ok: false,
+      reason: `no live session at pane ${paneId} in any local environment — if this pane was just created, retry in a few seconds`,
+    };
   }
 
   if (socket !== null) {
