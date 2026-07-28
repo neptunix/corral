@@ -82,7 +82,14 @@ function DroppableColumn({ columnId, label, collapsible, tasks, onTaskEdit, onOp
           >‹‹</button>
         )}
       </h3>
-      <div ref={setNodeRef} className={`flex flex-col gap-2 flex-1 min-h-24 p-2 rounded-lg transition-colors ${isOver ? "bg-muted" : ""}`}>
+      {/* Each column scrolls its OWN cards (the board scrolls horizontally only). This is what keeps
+          drag-and-drop honest: dnd-kit measures a drop target with getBoundingClientRect(), so when a
+          column's cards spilled out of a box clamped to the visible height, anything dropped on the
+          scrolled-past part fell outside every droppable rect and `pointerWithin` reported no target —
+          handleDragEnd then returned silently. Scrolling here makes the drop target and the scroll
+          viewport the same box, so the pointer is always inside it. It also keeps the column heading
+          above in view instead of scrolling away with the cards. */}
+      <div ref={setNodeRef} className={`flex flex-col gap-2 flex-1 min-h-24 overflow-y-auto p-2 rounded-lg transition-colors ${isOver ? "bg-muted" : ""}`}>
         {tasks.map((task) => (
           <TaskCard
             key={task.id}
@@ -217,8 +224,14 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <>
       <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragEnd={(e) => { void handleDragEnd(e); }}>
+        {/* The board's only scroll container, in BOTH axes: a non-visible `overflow-x` forces
+            `overflow-y` to compute to `auto` as well (CSS Overflow 3). `flex-1` (never `h-full`) is
+            what makes it fit: it is a flex item of a column that ALSO holds the board-title row, so
+            height:100% would overflow that column by the title's height and the column clips
+            (overflow-hidden) — which is how the bottom of this scroll viewport went missing. No
+            `min-h-0` needed to defeat the flex auto-min floor: a scroll container's is already 0. */}
         <div className="flex gap-4 p-4 overflow-x-auto flex-1">
           {board.columns.map((col) => (
             <DroppableColumn
@@ -258,6 +271,6 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
           onClose={handleClose}
         />
       )}
-    </div>
+    </>
   );
 }

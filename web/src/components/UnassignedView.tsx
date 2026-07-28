@@ -99,7 +99,10 @@ export function UnassignedView({ sessions, boards, envs, onOpen, onCreateTask, o
   const [creating, setCreating] = useState<SessionRow | null>(null);
   const [assigning, setAssigning] = useState<SessionRow | null>(null);
   return (
-    <div className="p-6">
+    // This view owns its scrolling: the parent is `flex-1 flex flex-col overflow-hidden`, so without
+    // `flex-1 overflow-y-auto` the grid just grows past the viewport and is clipped with no scrollbar
+    // anywhere in the chain. No `min-h-0` needed — a scroll container's automatic minimum size is 0.
+    <div className="flex-1 overflow-y-auto p-6">
       <h2 className="text-lg font-semibold text-foreground mb-4">Unassigned Sessions</h2>
       {sessions.length === 0 && <p className="text-muted-foreground text-sm">No unassigned sessions.</p>}
       <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3">
