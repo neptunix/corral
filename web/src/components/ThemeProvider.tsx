@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 
 import { api } from "../lib/api";
 import { parseMode, resolveTheme, STORAGE_KEY, type ResolvedTheme, type ThemeMode } from "../lib/theme";
@@ -40,15 +40,10 @@ export function ThemeProvider({ children }: { readonly children: ReactNode }): J
     return () => { window.cancelAnimationFrame(id); };
   }, [resolved]);
 
-  // Push the resolved theme to local Claude sessions (custom:corral) whenever it CHANGES — a manual
-  // toggle or an OS flip in System mode. Skips the initial mount so opening the dashboard doesn't
-  // silently re-theme running sessions; best-effort, so a failed sync never affects the UI.
-  const didInitialSync = useRef(false);
+  // Push the resolved theme to local Claude sessions (custom:corral) on mount and whenever it
+  // CHANGES — a manual toggle, an OS flip in System mode, or opening the dashboard while a stored
+  // preference is out of sync with what's on disk. Best-effort, so a failed sync never affects the UI.
   useEffect(() => {
-    if (!didInitialSync.current) {
-      didInitialSync.current = true;
-      return;
-    }
     void api.theme.set(resolved).catch(() => undefined);
   }, [resolved]);
 
