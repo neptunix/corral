@@ -20,10 +20,14 @@ describe("ORIENTATION (MCP instructions)", () => {
     }
   });
 
-  it("states the pane/session mapping correctly — panes map to sessions, tabs do not", () => {
-    // A tab can hold several panes, so "one tab = one session" is wrong and would make a session
-    // address the wrong thing. Pinned because it is a factual claim about herdr, not prose.
-    expect(ORIENTATION).toMatch(/TAB may hold several panes/);
+  it("states the tab convention and that addressing is still by pane", () => {
+    // Two claims, both load-bearing and both easy to get subtly wrong. The CONVENTION is one tab per
+    // session (panes split a tab's screen, so corral opens a tab rather than splitting), but a tab
+    // CAN hold several panes — so the addressable unit is the pane. Stating only the convention would
+    // make `env:paneId` look interchangeable with a tab id; stating only the mechanism would invite
+    // splitting panes.
+    expect(ORIENTATION).toMatch(/one tab, one pane, one session/);
+    expect(ORIENTATION).toMatch(/Addressing is\s+still by pane/);
   });
 
   it("names corral_whoami as the first call", () => {

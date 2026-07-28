@@ -344,7 +344,10 @@ describe("formatWhoami", () => {
 
   it("renders the bound card with its column ids and marks exactly self among the sessions", () => {
     const out = formatWhoami(resolved);
-    expect(out).toContain("columns available for status: todo, doing");
+    // Id first and labelled as the thing to pass, because that is what corral_task_update accepts;
+    // the label follows only where it differs from the id, which is what makes an opaque column id
+    // choosable at all.
+    expect(out).toContain("columns available for status (use the id): todo = Todo, doing = Doing");
     expect(out).toContain("card: board/t_abcdefg");
     const selfLine = out.split("\n").find((l) => l.includes("work-local:w1:p1"));
     const otherLine = out.split("\n").find((l) => l.includes("api-refactor-b"));
@@ -376,7 +379,7 @@ describe("formatWhoami", () => {
         ...resolved,
         task: resolved.task === null ? null : { ...resolved.task, columns: manyColumns },
       });
-      const columnsLine = out.split("\n").find((l) => l.startsWith("columns available for status:"));
+      const columnsLine = out.split("\n").find((l) => l.startsWith("columns available for status"));
       expect(columnsLine).toContain("col0");
       expect(columnsLine).toContain("col19");
       expect(columnsLine).not.toContain("col20");

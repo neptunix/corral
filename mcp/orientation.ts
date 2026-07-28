@@ -21,10 +21,11 @@ export const ORIENTATION = `You are running inside corral — a board over the C
 
 Terms the tools assume but never define: ENVIRONMENT = one machine. PANE = one terminal running one
 Claude session, addressed fleet-wide as \`env:paneId\` (pass that key verbatim as printed; a pane id
-may itself contain a colon). A TAB may hold several panes, so it is panes — not tabs — that map
-one-to-one to sessions. CARD = a task on a board, and the unit of work. LINK = the card-to-session
-binding, which outlives the session: a closed session renders detached and stays resumable, so
-closing is suspend, not destroy.
+may itself contain a colon). TAB = holds panes; the convention is one tab, one pane, one session,
+because panes split a tab's screen — so a new session gets a new tab, never a split. Addressing is
+still by pane, since a tab can technically hold several. CARD = a task on a board, and the unit of
+work. LINK = the card-to-session binding, which outlives the session: a closed session renders
+detached and stays resumable, so closing is suspend, not destroy.
 
 Call corral_whoami FIRST. It is how you learn which card you are on, that board's valid status
 column ids, and who else is on the card. The write tools refuse an unbound session.
