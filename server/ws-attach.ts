@@ -91,9 +91,25 @@ export function attachFailureReason(earlyOutput: string): string {
   let i = 0;
   while (i < earlyOutput.length) {
     const code = earlyOutput.charCodeAt(i);
-    if (code === 0x1b) { // ESC: drop the whole sequence — introducer, parameters and final byte
+    if (code === 0x1b) { // ESC: drop the whole sequence, never its payload
       i += 1;
-      if (earlyOutput.charCodeAt(i) === 0x5b) i += 1; // '[' of a CSI sequence
+      const intro = earlyOutput.charCodeAt(i);
+      // OSC (ESC ]) and DCS (ESC P) are STRING-terminated, and their introducers are themselves inside
+      // the CSI final-byte range — so the CSI scan below would stop on the introducer and spill the
+      // payload into the reason as text. A terminal title is the common case, it arrives BEFORE the
+      // error the child prints, and the reason is capped, so the title would eat the budget the actual
+      // diagnosis needs. Consume to BEL or ST (ESC \) instead.
+      if (intro === 0x5d || intro === 0x50) {
+        i += 1;
+        while (i < earlyOutput.length) {
+          const c = earlyOutput.charCodeAt(i);
+          i += 1;
+          if (c === 0x07) break; // BEL
+          if (c === 0x1b && earlyOutput.charCodeAt(i) === 0x5c) { i += 1; break; } // ST
+        }
+        continue;
+      }
+      if (intro === 0x5b) i += 1; // '[' of a CSI sequence; a two-byte escape has no introducer
       while (i < earlyOutput.length) {
         const c = earlyOutput.charCodeAt(i);
         i += 1;
@@ -108,7 +124,12 @@ export function attachFailureReason(earlyOutput: string): string {
   if (cleaned === "") return "attach unavailable";
   // Trim whole CODE POINTS, not UTF-16 units: slicing units could strip half a surrogate pair and
   // leave a lone surrogate, which encodes to a replacement character in the reason the operator reads.
-  const chars = Array.from(`attach failed: ${cleaned}`);
+  //
+  // Slice to the byte budget FIRST. Every code point is at least one byte, so 123 bytes can never need
+  // more than 123 code points — which bounds the loop below no matter how much the child printed. It
+  // used to re-join the whole array on every pop, so a large input made this quadratic and blocked the
+  // one event loop this server has (the poller, every SSE stream and every other attach with it).
+  const chars = Array.from(`attach failed: ${cleaned}`).slice(0, CLOSE_REASON_MAX_BYTES);
   while (chars.length > 0 && Buffer.byteLength(chars.join(""), "utf8") > CLOSE_REASON_MAX_BYTES) chars.pop();
   return chars.join("");
 }
@@ -205,7 +226,10 @@ function onConnection(ctx: ConnectionCtx): void {
     if (!capturing) return; // latched off after the grace so a busy terminal pays one boolean, not a clock read
     if (ctx.now() - spawnedAt >= WS_PROBE_GRACE_MS) { capturing = false; earlyOutput = ""; return; }
     if (earlyOutput.length >= PROBE_OUTPUT_MAX_CHARS) return;
-    earlyOutput += typeof d === "string" ? d : d.toString("utf8");
+    // Cap on APPEND, not before it. Checking only beforehand let the FIRST chunk in whole whatever its
+    // size — and node-pty reads the pty through a stream sized in tens of KiB, while `attach
+    // --takeover` replays the pane's screen, so a multi-KiB first chunk is ordinary rather than exotic.
+    earlyOutput += (typeof d === "string" ? d : d.toString("utf8")).slice(0, PROBE_OUTPUT_MAX_CHARS - earlyOutput.length);
   });
 
   // First-attach probe: a healthy attach to a live agent streams and stays alive. If the pty exits

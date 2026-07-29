@@ -35,7 +35,7 @@ which is indistinguishable from "no data yet".
 
 ```bash
 # 0. prerequisite check — without jq the metrics capture silently does nothing
-command -v jq >/dev/null || { echo "install jq first — the live metrics need it"; exit 1; }
+command -v jq >/dev/null || echo "install jq first — the live metrics need it"
 
 # 1. herdr's Claude integration (per machine) — enables session recaps
 herdr integration install claude
@@ -70,6 +70,14 @@ The server binds `127.0.0.1` only and refuses other hosts. There is no auth — 
 whoever can reach the loopback interface. On a single-user machine that's just you; on a shared
 or multi-user box, any other local user or process that can reach `127.0.0.1` has the same
 access, including the session-attach endpoint.
+
+**Putting a reverse proxy in front of corral removes that protection, and the proxy must
+therefore do the authenticating itself.** The loopback bind is the whole access control, so
+anything the proxy can reach, its callers can reach: spawning sessions, closing and resuming
+them, killing a pane, reading pane contents, writing theme files. Do not expect corral's
+non-loopback `Host` rejection to catch this — a default `proxy_pass` sends the loopback upstream
+as the `Host`, so the check passes. Note also that the live terminal will **not** work through a
+proxy: its WebSocket Origin allowlist is loopback-only by design.
 
 ## Upgrading
 
@@ -113,7 +121,9 @@ Each entry describes one place corral can see and spawn sessions into:
 - `kind: "local"` — talks to a herdr socket on this machine. With no `socket` it inherits
   the ambient `HERDR_SOCKET_PATH` (launch corral from the right herdr context or set it).
 - `kind: "remote"` — talks to a box over SSH (`sshHost`, `socket`, `herdrBin` required).
-  Unreachable environments show "offline" and keep their last-good snapshot.
+  An unreachable environment keeps its last-good snapshot and is **not** flagged anywhere in the
+  UI yet — its cards simply stop changing. The server records the reason, so the server log is
+  where you find out; corral also names a missing `herdr`/`ssh` at startup.
 - `spawnCommand` — what corral runs to start a new agent session in this environment.
   Defaults to `claude`. Two hard constraints: it must be a **single token** — no spaces and no
   arguments, which the config schema rejects outright, so wrap any flags in a script; and it must

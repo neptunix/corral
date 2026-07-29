@@ -12,6 +12,7 @@ import { UnassignedView } from "./components/UnassignedView";
 import { UsageFooter } from "./components/UsageFooter";
 import { api } from "./lib/api";
 import { attentionCountsByBoard, unassignedAttentionCount } from "./lib/attention";
+import { pickBoardState, pickGlobalState } from "./lib/board-precedence";
 import { envLabel } from "./lib/env";
 import { applyOptimisticState, type OptimisticState } from "./lib/optimistic";
 import { useEventSource } from "./useEventSource";
@@ -108,9 +109,10 @@ export function App(): JSX.Element {
     setOptimistic((m) => { if (!m.has(key)) return m; const next = new Map(m); next.delete(key); return next; });
   }, []);
 
-  // Precedence, freshest first: an optimistic/post-mutation override, then the live SSE frame, then
-  // the cold-start seed. The seed is last on purpose — it is a floor, never a mask.
-  const activeBoardState = localBoardState ?? (frame !== null && "board" in frame ? frame : null) ?? seedState;
+  // Precedence lives in lib/board-precedence (pure + tested): override, then live frame, then the
+  // cold-start seed — and a frame that arrived at all supersedes the seed, including when it says the
+  // board is gone. A single `??` swap here would silently turn the floor into a permanent mask.
+  const activeBoardState = pickBoardState(localBoardState, frame, seedState);
   // Overlay optimistic close/resume intent before handing the board to the view (pure; see lib/optimistic).
   const boardStateForView = useMemo(
     () => (activeBoardState !== null && optimistic.size > 0
@@ -119,7 +121,7 @@ export function App(): JSX.Element {
     [activeBoardState, optimistic],
   );
   // Attention + unassigned ride BOTH frame shapes; read them from whichever state is freshest.
-  const globalState = localBoardState ?? frame ?? seedState;
+  const globalState = pickGlobalState(localBoardState, frame, seedState);
   // Memoized so the derived-attention useMemos below get a stable dependency (the `?? {}` fallback
   // would otherwise mint a new object every render).
   const attention = useMemo(() => globalState?.attention ?? {}, [globalState]);

@@ -286,6 +286,32 @@ describe("attachFailureReason", () => {
     expect(reason.startsWith("attach failed: xxx")).toBe(true);
   });
 
+  it("drops an OSC title sequence instead of leaking its payload into the reason", () => {
+    // OSC/DCS introducers sit inside the CSI final-byte range, so a CSI-only scan stops on the
+    // introducer and the title becomes text. It arrives BEFORE the child's error and the reason is
+    // byte-capped, so a long title would push the actual cause out of the budget entirely.
+    const esc = String.fromCharCode(27);
+    const bel = String.fromCharCode(7);
+    expect(attachFailureReason(`${esc}]0;a very long herdr window title${bel}execvp(3) failed.: No such file`))
+      .toBe("attach failed: execvp(3) failed.: No such file");
+    expect(attachFailureReason(`${esc}P1;2q#0${esc}\\boom`)).toBe("attach failed: boom");
+  });
+
+  it("drops a two-byte escape and keeps the text after it", () => {
+    expect(attachFailureReason(`${String.fromCharCode(27)}Mreal error text`)).toBe("attach failed: real error text");
+  });
+
+  it("stays cheap on a large input — the trim must not be quadratic", () => {
+    // The truncation used to re-join the whole array on every popped character, and the capture cap let
+    // an arbitrarily large first chunk through. Together that blocked the single event loop for seconds
+    // (measured ~8 s at 64 KiB), stalling the poller, every SSE stream and every other attach.
+    const t0 = performance.now();
+    const reason = attachFailureReason("a".repeat(200_000));
+    const elapsed = performance.now() - t0;
+    expect(Buffer.byteLength(reason, "utf8")).toBeLessThanOrEqual(123);
+    expect(elapsed).toBeLessThan(100);
+  });
+
   it("truncates on a code-point boundary, so multi-byte output cannot emit a broken reason", () => {
     // Trimming UTF-16 units instead would strip half a surrogate pair and leave a lone surrogate,
     // which the operator then reads as a replacement character. Covers BMP and astral input.
