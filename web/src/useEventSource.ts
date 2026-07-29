@@ -9,6 +9,10 @@ export function useEventSource<T>(url: string, schema: ZodType<T, ZodTypeDef, un
       try {
         const parsed = schema.safeParse(JSON.parse(e.data));
         if (parsed.success) setData(parsed.data);
+        // A dropped frame is indistinguishable from "no data yet" on screen, and the view it feeds
+        // then sits frozen until the next frame parses — so say so. This has bitten before: the
+        // no-board stream once sent a bare Snapshot and every frame was discarded in silence.
+        else console.warn(`[corral] dropped an unparseable frame from ${url}`, parsed.error.issues);
       } catch {
         /* ignore a malformed frame */
       }

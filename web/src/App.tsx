@@ -32,6 +32,14 @@ export function App(): JSX.Element {
   // doesn't sit on a permanent misleading "Loading…".
   const [boardsLoaded, setBoardsLoaded] = useState(false);
   const [boardsError, setBoardsError] = useState<string | null>(null);
+  // Cold-start floor for the board. Everything else on the board rides SSE, which means on mount the
+  // FIRST frame is the only thing that can fill it — and a first frame that is lost, withheld by a
+  // buffering reverse proxy, or dropped by useEventSource's schema guard leaves a blank board until
+  // the next poller tick, i.e. up to a full poll interval with nothing on screen explaining why.
+  // Both failure modes are real: a proxy held the frame tail in production, and the no-board stream
+  // once emitted a shape the client's schema rejected outright. So seed the board once from the REST
+  // snapshot, which `GET /api/state?board=` builds with the very same builder as a board frame.
+  const [seedState, setSeedState] = useState<BoardState | null>(null);
 
   // awaitAgent = opened right after spawn: the live terminal retries until Claude registers (the pane
   // isn't an attachable agent for the first few seconds). Manual opens pass false → attach once.
@@ -71,6 +79,19 @@ export function App(): JSX.Element {
     setOptimistic((m) => (m.size === 0 ? m : new Map()));
   }, [frame]);
 
+  // Fetch the seed once per selected board. Cleared FIRST so a previous board's seed can never show
+  // beneath a newly selected one, and never refreshed afterwards: SSE stays the only steady-state
+  // source, and this is consulted last so it cannot mask a live frame.
+  useEffect(() => {
+    setSeedState(null);
+    if (activeBoardId === null) return;
+    let cancelled = false;
+    api.state(activeBoardId)
+      .then((s) => { if (!cancelled) setSeedState(s); })
+      .catch((err: unknown) => { console.warn("[corral] board seed fetch failed; the board now depends on SSE alone", err); });
+    return () => { cancelled = true; };
+  }, [activeBoardId]);
+
   const fetchBoardState = useCallback((bid: string): void => {
     void api.state(bid).then(setLocalBoardState).catch(console.error);
   }, []);
@@ -87,7 +108,9 @@ export function App(): JSX.Element {
     setOptimistic((m) => { if (!m.has(key)) return m; const next = new Map(m); next.delete(key); return next; });
   }, []);
 
-  const activeBoardState = localBoardState ?? (frame !== null && "board" in frame ? frame : null);
+  // Precedence, freshest first: an optimistic/post-mutation override, then the live SSE frame, then
+  // the cold-start seed. The seed is last on purpose — it is a floor, never a mask.
+  const activeBoardState = localBoardState ?? (frame !== null && "board" in frame ? frame : null) ?? seedState;
   // Overlay optimistic close/resume intent before handing the board to the view (pure; see lib/optimistic).
   const boardStateForView = useMemo(
     () => (activeBoardState !== null && optimistic.size > 0
@@ -96,7 +119,7 @@ export function App(): JSX.Element {
     [activeBoardState, optimistic],
   );
   // Attention + unassigned ride BOTH frame shapes; read them from whichever state is freshest.
-  const globalState = localBoardState ?? frame;
+  const globalState = localBoardState ?? frame ?? seedState;
   // Memoized so the derived-attention useMemos below get a stable dependency (the `?? {}` fallback
   // would otherwise mint a new object every render).
   const attention = useMemo(() => globalState?.attention ?? {}, [globalState]);
