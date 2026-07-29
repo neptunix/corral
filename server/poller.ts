@@ -135,11 +135,17 @@ export function createPoller(opts: {
       const t0 = Date.now();
       let found = 0, notFound = 0, noSummary = 0, errors = 0;
 
-      // Install-drift heuristic: warn once if panes have cwd but no sessionId
+      // Install-drift heuristic: warn once if panes have cwd but no sessionId. State the OBSERVATION
+      // and both causes, never a single asserted cause. A missing integration is only one of them:
+      // herdr's hook exits 0 without reporting a session unless HERDR_ENV, HERDR_SOCKET_PATH and
+      // HERDR_PANE_ID are all set in that pane, so any pane not started inside a herdr context trips
+      // this permanently. The old message asserted "integration likely not installed" and prescribed
+      // the install command — which changes nothing where the integration is already there, sending
+      // the operator down a dead end while the real cause goes unmentioned.
       const noSessionCount = rows.filter((r) => r.sessionId === null && r.cwd !== "").length;
       if (noSessionCount > 0 && !warnedNoIntegration.has(env.id)) {
         warnedNoIntegration.add(env.id);
-        console.warn(`[recap] integration likely not installed for env "${env.id}": ${String(noSessionCount)} pane(s) have no sessionId — run: herdr integration install claude`);
+        console.warn(`[recap] env "${env.id}": ${String(noSessionCount)} pane(s) report no Claude session id, so recap and live metrics stay empty for them. Either herdr's Claude integration is not installed on that machine (run: herdr integration install claude), or those panes were not started inside a herdr context — the hook reports nothing unless HERDR_ENV, HERDR_SOCKET_PATH and HERDR_PANE_ID are all set in the pane.`);
       }
 
       for (const row of rows) {

@@ -8,7 +8,7 @@ import { WebSocket } from "ws";
 import type { HerdrEnv } from "../environments.ts";
 import type { PtyLike } from "../server/pty-bridge.ts";
 import { createSpawnLimiter } from "../server/ws-attach-guard.ts";
-import { attachWebSocketServer, auditLine, type AttachServerOptions, type PtySpawnFn } from "../server/ws-attach.ts";
+import { attachFailureReason, attachWebSocketServer, auditLine, type AttachServerOptions, type PtySpawnFn } from "../server/ws-attach.ts";
 
 const ENV: HerdrEnv = { id: "work-local", label: "Work", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
 
@@ -183,6 +183,24 @@ describe("attachWebSocketServer (integration, injected fake pty)", () => {
     expect(String(reason)).toBe("attach unavailable");
   });
 
+  it("closes 4001 carrying the child's OWN error text when the command failed to exec", async () => {
+    // node-pty forks successfully for a command that does not exist: execvp fails in the CHILD, so the
+    // parent's try/catch around the spawn never fires and the attach is audited as a clean open. The
+    // child's output was the only evidence of the cause and it was being discarded — the modal said
+    // "attach unavailable" while the real reason (herdr unresolvable on the server's PATH) went
+    // unreported. 4001 is unchanged: it is a locked contract with SessionModal + lib/attach's
+    // post-spawn retry. The reason rides along, and closeMessage already prefers it over the mapping.
+    const h = await start();
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
+    await once(client, "open");
+    await waitFor(() => h.ptys.length === 1);
+    h.ptys[0]?.emitData("execvp(3) failed.: No such file or directory\r\n");
+    h.ptys[0]?.emitExit();
+    const [code, reason] = await once(client, "close");
+    expect(code).toBe(4001);
+    expect(String(reason)).toContain("execvp(3) failed");
+  });
+
   it("closes 1000 when the pty exits after the probe grace (normal end of session)", async () => {
     let t = 0;
     const h = await start({ now: () => t });
@@ -229,5 +247,34 @@ describe("attachWebSocketServer (integration, injected fake pty)", () => {
     ]);
     expect(outcome).toBe("open"); // slot was free again → second attach reserved successfully
     expect(h.ptys.length).toBe(2);
+  });
+});
+
+describe("attachFailureReason", () => {
+  it("keeps the historical string when the child printed nothing", () => {
+    // Also what closeMessage falls back to client-side, so an empty reason stays consistent.
+    expect(attachFailureReason("")).toBe("attach unavailable");
+  });
+
+  it("strips ANSI sequences and control bytes and collapses the blanks they leave behind", () => {
+    const raw = `${String.fromCharCode(27)}[31mexecvp(3) failed.:\r\n${String.fromCharCode(27)}[0m No such file`;
+    expect(attachFailureReason(raw)).toBe("attach failed: execvp(3) failed.: No such file");
+  });
+
+  it("truncates to the WebSocket protocol's 123-byte close-reason limit", () => {
+    // `ws` throws on a longer reason, which would turn a diagnostic into a second, opaque failure.
+    const reason = attachFailureReason("x".repeat(500));
+    expect(Buffer.byteLength(reason, "utf8")).toBeLessThanOrEqual(123);
+    expect(reason.startsWith("attach failed: xxx")).toBe(true);
+  });
+
+  it("truncates on a code-point boundary, so multi-byte output cannot emit a broken reason", () => {
+    // Trimming UTF-16 units instead would strip half a surrogate pair and leave a lone surrogate,
+    // which the operator then reads as a replacement character. Covers BMP and astral input.
+    for (const filler of ["—", "🐎"]) {
+      const reason = attachFailureReason(filler.repeat(200));
+      expect(Buffer.byteLength(reason, "utf8")).toBeLessThanOrEqual(123);
+      expect(Array.from(reason).every((ch) => { const c = ch.codePointAt(0) ?? 0; return c < 0xd800 || c > 0xdfff; })).toBe(true);
+    }
   });
 });

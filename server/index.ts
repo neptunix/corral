@@ -10,6 +10,7 @@ import { createGit } from "./git.ts";
 import { closePane, listTabs, listWorkspaces, readPane, workspaceClose } from "./herdr.ts";
 import { assertLoopback } from "./host-guard.ts";
 import { createPoller } from "./poller.ts";
+import { findMissingBinaries, isExecutableFile, missingBinaryMessage, resolveOnPath } from "./preflight.ts";
 import { startReconciler } from "./reconcile.ts";
 import { spawnSession } from "./spawn.ts";
 import { createStorage } from "./storage.ts";
@@ -26,6 +27,17 @@ if (process.env.HERDR_SOCKET_PATH === undefined) {
       "the ambient socket and may return no sessions or route to the wrong herdr instance. " +
       "Launch from the intended herdr context or set HERDR_SOCKET_PATH.",
   );
+}
+
+// Say it once, at startup, if a binary corral will exec is not resolvable from THIS process (see
+// server/preflight.ts for why the server's PATH is the only place the tell lives). Deliberately does
+// NOT exit: a multi-environment operator whose one broken env is `remote` still gets a working board,
+// and refusing to boot would turn a degraded deployment into a dead one. The point is that the
+// failure now says the binary's name out loud instead of surfacing as a frozen card and an attach
+// that dies with `execvp(3) failed` and no attribution.
+const searchedPath = process.env.PATH ?? "";
+for (const missing of findMissingBinaries(ENVIRONMENTS, (bin) => resolveOnPath(bin, searchedPath, isExecutableFile))) {
+  console.error(missingBinaryMessage(missing, searchedPath));
 }
 
 const storage = createStorage(BOARD_DATA_DIR);

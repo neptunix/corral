@@ -340,3 +340,27 @@ describe("createPoller initial sweep kick", () => {
     }
   });
 });
+
+describe("createPoller — install-drift warning", () => {
+  it("names both causes when panes report no Claude session, rather than asserting the integration is missing", async () => {
+    // The old warning asserted "integration likely not installed" and prescribed
+    // `herdr integration install claude`. On a box where the integration IS installed that command
+    // changes nothing and the operator is sent down a dead end — because a pane also reports no
+    // session id whenever the hook exited early, which it does unless HERDR_ENV, HERDR_SOCKET_PATH
+    // and HERDR_PANE_ID are all set in that pane, i.e. for any pane not started inside a herdr
+    // context. The message must therefore describe the observation and name both branches.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const list: ListFn = (e) => Promise.resolve([row(e.id, `${e.id}-1`)]); // sessionId null, cwd set
+      const p = createPoller({ envs: [A], list });
+      await p.pollOnce();
+      await p.runClaudeSweepOnce();
+      const msg = warn.mock.calls.map((c) => String(c[0])).join("\n");
+      expect(msg).toContain("herdr integration install claude"); // still actionable for that cause
+      expect(msg).toContain("HERDR_PANE_ID"); // ...but the other cause is named too
+      expect(msg).not.toContain("likely not installed"); // no asserted cause
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});

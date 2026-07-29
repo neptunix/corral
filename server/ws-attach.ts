@@ -53,6 +53,56 @@ export function auditLine(entry: AuditEntry): string {
   return JSON.stringify(entry) + "\n";
 }
 
+// The WebSocket protocol caps a close reason at 123 BYTES and `ws` throws past it — a diagnostic that
+// exceeded the cap would become a second, more opaque failure. The capture is bounded independently so
+// a chatty child cannot grow the buffer without limit.
+const CLOSE_REASON_MAX_BYTES = 123;
+const PROBE_OUTPUT_MAX_CHARS = 512;
+
+/**
+ * Operator-facing close reason for an attach whose pty died inside the probe grace.
+ *
+ * Why the child's own output is the only source: node-pty forks SUCCESSFULLY even for a command that
+ * does not exist — `execvp` fails in the child, so the parent's try/catch around the spawn never
+ * fires, the attach is audited as a clean open with a fully-resolved-looking command, and the sole
+ * evidence is what the child printed before exiting (`execvp(3) failed.: No such file or directory`).
+ * Reporting a fixed "attach unavailable" discarded that and left a symptom with no cause.
+ *
+ * Sanitised (escape sequences and control bytes dropped, runs of blanks collapsed) and truncated on a
+ * CHARACTER boundary so multi-byte output cannot emit a malformed reason. Empty input keeps the
+ * historical string, which is also `closeMessage`'s client-side fallback.
+ *
+ * Deliberately NOT added to the attach audit log: SEC-6 keeps session content out of that trail and
+ * this text is session output. It goes only to the operator already attached to that pane, over their
+ * own socket — not into a persisted record.
+ */
+export function attachFailureReason(earlyOutput: string): string {
+  let plain = "";
+  let i = 0;
+  while (i < earlyOutput.length) {
+    const code = earlyOutput.charCodeAt(i);
+    if (code === 0x1b) { // ESC: drop the whole sequence — introducer, parameters and final byte
+      i += 1;
+      if (earlyOutput.charCodeAt(i) === 0x5b) i += 1; // '[' of a CSI sequence
+      while (i < earlyOutput.length) {
+        const c = earlyOutput.charCodeAt(i);
+        i += 1;
+        if (c >= 0x40 && c <= 0x7e) break; // final byte terminates the sequence
+      }
+      continue;
+    }
+    plain += code < 0x20 || code === 0x7f ? " " : earlyOutput.charAt(i);
+    i += 1;
+  }
+  const cleaned = plain.split(" ").filter((s) => s !== "").join(" ");
+  if (cleaned === "") return "attach unavailable";
+  // Trim whole CODE POINTS, not UTF-16 units: slicing units could strip half a surrogate pair and
+  // leave a lone surrogate, which encodes to a replacement character in the reason the operator reads.
+  const chars = Array.from(`attach failed: ${cleaned}`);
+  while (chars.length > 0 && Buffer.byteLength(chars.join(""), "utf8") > CLOSE_REASON_MAX_BYTES) chars.pop();
+  return chars.join("");
+}
+
 function appendAudit(logPath: string, entry: AuditEntry): void {
   appendFile(logPath, auditLine(entry), () => {
     /* audit is best-effort — a disk error must never break a live attach */
@@ -135,6 +185,18 @@ function onConnection(ctx: ConnectionCtx): void {
     appendAudit(ctx.auditLogPath, { event: "close", ts: new Date().toISOString(), env: ctx.env.id, paneId: ctx.paneId });
   };
 
+  // Hold the child's first output so an exit inside the probe grace can name the REAL cause rather
+  // than a fixed string (see attachFailureReason). Bounded in size, and dropped the moment the grace
+  // has passed — a healthy long-lived session accumulates nothing.
+  let earlyOutput = "";
+  let capturing = true;
+  pty.onData((d) => {
+    if (!capturing) return; // latched off after the grace so a busy terminal pays one boolean, not a clock read
+    if (ctx.now() - spawnedAt >= WS_PROBE_GRACE_MS) { capturing = false; earlyOutput = ""; return; }
+    if (earlyOutput.length >= PROBE_OUTPUT_MAX_CHARS) return;
+    earlyOutput += typeof d === "string" ? d : d.toString("utf8");
+  });
+
   // First-attach probe: a healthy attach to a live agent streams and stays alive. If the pty exits
   // within the probe grace, the attach is unavailable (herdr error / pane gone) — surface a distinct
   // close reason. Registered BEFORE the bridge so this reason wins the ws.close race over the bridge's
@@ -142,11 +204,12 @@ function onConnection(ctx: ConnectionCtx): void {
   pty.onExit(() => {
     if (ctx.now() - spawnedAt < WS_PROBE_GRACE_MS) {
       try {
-        ctx.ws.close(4001, "attach unavailable");
+        ctx.ws.close(4001, attachFailureReason(earlyOutput));
       } catch {
         /* already closing */
       }
     }
+    earlyOutput = "";
     auditClose();
   });
   ctx.ws.on("close", auditClose);
