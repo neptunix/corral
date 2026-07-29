@@ -8,7 +8,7 @@ import { WebSocket } from "ws";
 import type { HerdrEnv } from "../environments.ts";
 import type { PtyLike } from "../server/pty-bridge.ts";
 import { createSpawnLimiter } from "../server/ws-attach-guard.ts";
-import { attachWebSocketServer, auditLine, type AttachServerOptions, type PtySpawnFn } from "../server/ws-attach.ts";
+import { attachFailureReason, attachWebSocketServer, auditLine, type AttachServerOptions, type PtySpawnFn } from "../server/ws-attach.ts";
 
 const ENV: HerdrEnv = { id: "work-local", label: "Work", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
 
@@ -109,6 +109,16 @@ describe("auditLine (SEC-6: open/close + source, never keystrokes)", () => {
   it("serializes a close entry", () => {
     const parsed: unknown = JSON.parse(auditLine({ event: "close", ts: "T", env: "e", paneId: "p" }));
     expect(parsed).toMatchObject({ event: "close", env: "e", paneId: "p" });
+    expect(auditLine({ event: "close", ts: "T", env: "e", paneId: "p" })).not.toContain("probeFailed");
+  });
+  it("marks a probe-window close with a FLAG and carries no diagnostic text", () => {
+    // Without the flag, an attach that died instantly and a normal end of session were byte-identical
+    // here, so a later log-only diagnosis could not tell them apart. The child's output stays OUT:
+    // SEC-6 excludes session content, and a real agent dying inside the probe window would contribute
+    // its first screenful, not an exec error. The operator gets the text in the close reason instead.
+    const line = auditLine({ event: "close", ts: "T", env: "e", paneId: "p", probeFailed: true });
+    expect(JSON.parse(line)).toMatchObject({ event: "close", probeFailed: true });
+    expect(line.toLowerCase()).not.toContain("execvp");
   });
 });
 
@@ -183,6 +193,29 @@ describe("attachWebSocketServer (integration, injected fake pty)", () => {
     expect(String(reason)).toBe("attach unavailable");
   });
 
+  it("closes 4001 carrying the child's OWN error text when the command failed to exec", async () => {
+    // node-pty forks successfully for a command that does not exist: execvp fails in the CHILD, so the
+    // parent's try/catch around the spawn never fires and the attach is audited as a clean open. The
+    // child's output was the only evidence of the cause and it was being discarded — the modal said
+    // "attach unavailable" while the real reason (herdr unresolvable on the server's PATH) went
+    // unreported. 4001 is unchanged: it is a locked contract with SessionModal + lib/attach's
+    // post-spawn retry. The reason rides along, and closeMessage already prefers it over the mapping.
+    const h = await start();
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
+    await once(client, "open");
+    await waitFor(() => h.ptys.length === 1);
+    h.ptys[0]?.emitData("execvp(3) failed.: No such file or directory\r\n");
+    h.ptys[0]?.emitExit();
+    const [code, reason] = await once(client, "close");
+    expect(code).toBe(4001);
+    expect(String(reason)).toContain("execvp(3) failed");
+    // The persisted trail records THAT it failed in the probe window, and still no session content.
+    await waitFor(() => existsSync(h.auditPath) && readFileSync(h.auditPath, "utf8").includes('"close"'));
+    const audit = readFileSync(h.auditPath, "utf8");
+    expect(audit).toContain('"probeFailed":true');
+    expect(audit).not.toContain("execvp");
+  });
+
   it("closes 1000 when the pty exits after the probe grace (normal end of session)", async () => {
     let t = 0;
     const h = await start({ now: () => t });
@@ -194,6 +227,9 @@ describe("attachWebSocketServer (integration, injected fake pty)", () => {
     const [code, reason] = await once(client, "close");
     expect(code).toBe(1000);
     expect(String(reason)).toBe("pty exited");
+    // A healthy session ending must NOT be flagged as a probe failure, or the flag means nothing.
+    await waitFor(() => existsSync(h.auditPath) && readFileSync(h.auditPath, "utf8").includes('"close"'));
+    expect(readFileSync(h.auditPath, "utf8")).not.toContain("probeFailed");
   });
 
   it("closes 4000 'attach failed' when spawn throws (e.g. node-pty ENOENT), audits it, spawns no pty", async () => {
@@ -229,5 +265,60 @@ describe("attachWebSocketServer (integration, injected fake pty)", () => {
     ]);
     expect(outcome).toBe("open"); // slot was free again → second attach reserved successfully
     expect(h.ptys.length).toBe(2);
+  });
+});
+
+describe("attachFailureReason", () => {
+  it("keeps the historical string when the child printed nothing", () => {
+    // Also what closeMessage falls back to client-side, so an empty reason stays consistent.
+    expect(attachFailureReason("")).toBe("attach unavailable");
+  });
+
+  it("strips ANSI sequences and control bytes and collapses the blanks they leave behind", () => {
+    const raw = `${String.fromCharCode(27)}[31mexecvp(3) failed.:\r\n${String.fromCharCode(27)}[0m No such file`;
+    expect(attachFailureReason(raw)).toBe("attach failed: execvp(3) failed.: No such file");
+  });
+
+  it("truncates to the WebSocket protocol's 123-byte close-reason limit", () => {
+    // `ws` throws on a longer reason, which would turn a diagnostic into a second, opaque failure.
+    const reason = attachFailureReason("x".repeat(500));
+    expect(Buffer.byteLength(reason, "utf8")).toBeLessThanOrEqual(123);
+    expect(reason.startsWith("attach failed: xxx")).toBe(true);
+  });
+
+  it("drops an OSC title sequence instead of leaking its payload into the reason", () => {
+    // OSC/DCS introducers sit inside the CSI final-byte range, so a CSI-only scan stops on the
+    // introducer and the title becomes text. It arrives BEFORE the child's error and the reason is
+    // byte-capped, so a long title would push the actual cause out of the budget entirely.
+    const esc = String.fromCharCode(27);
+    const bel = String.fromCharCode(7);
+    expect(attachFailureReason(`${esc}]0;a very long herdr window title${bel}execvp(3) failed.: No such file`))
+      .toBe("attach failed: execvp(3) failed.: No such file");
+    expect(attachFailureReason(`${esc}P1;2q#0${esc}\\boom`)).toBe("attach failed: boom");
+  });
+
+  it("drops a two-byte escape and keeps the text after it", () => {
+    expect(attachFailureReason(`${String.fromCharCode(27)}Mreal error text`)).toBe("attach failed: real error text");
+  });
+
+  it("stays cheap on a large input — the trim must not be quadratic", () => {
+    // The truncation used to re-join the whole array on every popped character, and the capture cap let
+    // an arbitrarily large first chunk through. Together that blocked the single event loop for seconds
+    // (measured ~8 s at 64 KiB), stalling the poller, every SSE stream and every other attach.
+    const t0 = performance.now();
+    const reason = attachFailureReason("a".repeat(200_000));
+    const elapsed = performance.now() - t0;
+    expect(Buffer.byteLength(reason, "utf8")).toBeLessThanOrEqual(123);
+    expect(elapsed).toBeLessThan(100);
+  });
+
+  it("truncates on a code-point boundary, so multi-byte output cannot emit a broken reason", () => {
+    // Trimming UTF-16 units instead would strip half a surrogate pair and leave a lone surrogate,
+    // which the operator then reads as a replacement character. Covers BMP and astral input.
+    for (const filler of ["—", "🐎"]) {
+      const reason = attachFailureReason(filler.repeat(200));
+      expect(Buffer.byteLength(reason, "utf8")).toBeLessThanOrEqual(123);
+      expect(Array.from(reason).every((ch) => { const c = ch.codePointAt(0) ?? 0; return c < 0xd800 || c > 0xdfff; })).toBe(true);
+    }
   });
 });

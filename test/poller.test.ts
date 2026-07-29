@@ -340,3 +340,66 @@ describe("createPoller initial sweep kick", () => {
     }
   });
 });
+
+// Only the install-drift line, so an unrelated console.warn in the same run cannot satisfy an assertion.
+function driftWarnings(spy: { mock: { calls: unknown[][] } }): string[] {
+  return spy.mock.calls
+    .map((c) => String(c[0]))
+    .filter((m) => m.includes("report no Claude session id"));
+}
+
+describe("createPoller — install-drift warning", () => {
+  it("names both causes when panes report no Claude session, rather than asserting the integration is missing", async () => {
+    // The old warning asserted "integration likely not installed" and prescribed
+    // `herdr integration install claude`. On a box where the integration IS installed that command
+    // changes nothing and the operator is sent down a dead end — because a pane also reports no
+    // session id whenever the hook exited early, which it does unless HERDR_ENV, HERDR_SOCKET_PATH
+    // and HERDR_PANE_ID are all set in that pane, i.e. for any pane not started inside a herdr
+    // context. The message must therefore describe the observation and name both branches.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const list: ListFn = (e) => Promise.resolve([row(e.id, `${e.id}-1`)]); // sessionId null, cwd set
+      const p = createPoller({ envs: [A], list });
+      await p.pollOnce();
+      await p.runClaudeSweepOnce();
+      // Match the SPECIFIC call, not every console.warn joined together — otherwise any unrelated
+      // warning mentioning HERDR_PANE_ID would satisfy this.
+      const msg = driftWarnings(warn)[0] ?? "";
+      expect(msg).toContain("herdr integration install claude"); // still actionable for that cause
+      expect(msg).toContain("HERDR_PANE_ID"); // ...but the other cause is named too
+      expect(msg).not.toContain("likely not installed"); // no asserted cause
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("stays silent when every pane reports a Claude session id", async () => {
+    // The rewrite made the message a paragraph, so a false positive is now materially noisier than the
+    // one-liner it replaced. Neither guard in the condition was covered before.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const list: ListFn = (e) => Promise.resolve([{ ...row(e.id, `${e.id}-1`), sessionId: "11111111-2222-3333-4444-555555555555" }]);
+      const p = createPoller({ envs: [A], list });
+      await p.pollOnce();
+      await p.runClaudeSweepOnce();
+      expect(driftWarnings(warn)).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("warns once per env, not once per sweep", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const list: ListFn = (e) => Promise.resolve([row(e.id, `${e.id}-1`)]);
+      const p = createPoller({ envs: [A], list });
+      await p.pollOnce();
+      await p.runClaudeSweepOnce();
+      await p.runClaudeSweepOnce();
+      await p.runClaudeSweepOnce();
+      expect(driftWarnings(warn)).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});

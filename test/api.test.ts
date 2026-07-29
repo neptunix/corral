@@ -103,6 +103,34 @@ describe("api", () => {
     }
   });
 
+  it("GET /api/stream opts out of reverse-proxy response buffering", async () => {
+    // A proxy buffering responses (nginx's default `proxy_buffering on`) forwards only FULL buffers
+    // and holds the trailing partial one — which is exactly where an SSE frame's terminating blank
+    // line sits. EventSource cannot dispatch a frame without that blank line, so the client renders
+    // nothing until the NEXT poll tick pushes enough bytes to flush the tail: a board blank for a
+    // whole poll interval. Measured on a proxied deployment: the server wrote the complete
+    // 12738-byte frame in 4 ms, 12116 bytes reached the browser, and the tail carrying the
+    // terminator was withheld. This header is the documented opt-out.
+    const res = await createApi({ poller, envs: ENVIRONMENTS }).request("/api/stream");
+    expect(res.headers.get("x-accel-buffering")).toBe("no");
+    await res.body?.cancel();
+  });
+
+  it("GET /api/state?board= returns a payload the board view's StreamFrameSchema accepts", async () => {
+    // The client seeds the board from this endpoint on mount so a cold start does not hang on a
+    // single SSE frame. That seed is worth something only while this payload stays shape-identical
+    // to a board FRAME: if it drifted to anything StreamFrameSchema parses as a GlobalState, the
+    // board view would ignore it (it keys on `board` being present) and the fallback would silently
+    // do nothing — the exact failure mode it exists to prevent.
+    const app = createApi({ poller, envs: ENVIRONMENTS, storage: createStorage(tmpDir) });
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
+    const res = await app.request("/api/state?board=test");
+    expect(res.status).toBe(200);
+    const parsed = StreamFrameSchema.safeParse(await res.json());
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect("board" in parsed.data).toBe(true);
+  });
+
   it("GET /api/state returns the snapshot", async () => {
     const res = await createApi({ poller, envs: ENVIRONMENTS }).request("/api/state");
     expect(res.status).toBe(200);

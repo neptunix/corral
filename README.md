@@ -27,9 +27,16 @@ you work on, and lets you respond in place.
 ## Quick start
 
 Prerequisites: Node ≥ 20.11, [herdr ≥ 0.7.1](https://github.com/ogulcancelik/herdr) on this
-machine (and on any remote box you add), `jq` for the optional statusline capture.
+machine (and on any remote box you add), and `jq` — **required** if you want the live Claude
+metrics (model / context % / cost / rate-limit windows). The metrics *capture* is optional;
+`jq` is not optional *for* it. Both helper scripts hard-depend on `jq` and are deliberately
+best-effort, so without it they write nothing and log nothing: the cards just show no metrics,
+which is indistinguishable from "no data yet".
 
 ```bash
+# 0. prerequisite check — without jq the metrics capture silently does nothing
+command -v jq >/dev/null || echo "install jq first — the live metrics need it"
+
 # 1. herdr's Claude integration (per machine) — enables session recaps
 herdr integration install claude
 
@@ -43,17 +50,61 @@ npm install          # node-pty is native — compiles against your Node ABI
 npm run dev          # Vite (http://127.0.0.1:5173) + API (http://127.0.0.1:8787), proxied
 # production:
 npm run build && npm start   # serves API + built UI on http://127.0.0.1:8787
+
+# 4. per-config-dir helper files — needed for the live metrics (and the optional theme).
+#    Skip this and roughly half of each card's information is simply not wired up.
+D=~/.claude          # repeat for every ~/.claude* dir you want surfaced, on every machine
+cp scripts/corral-status-capture.sh "$D/corral-status-capture.sh"
+cp scripts/statusline-command.sh    "$D/statusline-command.sh"   # skip if you have your own
+chmod +x "$D/corral-status-capture.sh" "$D/statusline-command.sh"
+#    ...then register the statusline in "$D/settings.json" — see the full section below for
+#    that snippet, the optional theme, remote boxes and multiple config dirs.
 ```
 
-That gets you the board, attention feed, and live terminal. **Live Claude metrics
-(model / context % / cost / rate-limit windows) and the optional TUI theme need one more
-per-config-dir step** — see [Claude statusline](#claude-statusline-live-metrics) and
+That gets you the board, attention feed, live terminal and recap — plus the live Claude metrics,
+which are what step 4 buys. Step 4 is summarised above and documented in full under
+[Claude statusline](#claude-statusline-live-metrics) and
 [Installing the Claude helper files](#installing-the-claude-helper-files-per-config-dir) below.
 
 The server binds `127.0.0.1` only and refuses other hosts. There is no auth — corral trusts
 whoever can reach the loopback interface. On a single-user machine that's just you; on a shared
 or multi-user box, any other local user or process that can reach `127.0.0.1` has the same
 access, including the session-attach endpoint.
+
+**Putting a reverse proxy in front of corral removes that protection, and the proxy must
+therefore do the authenticating itself.** The loopback bind is the whole access control, so
+anything the proxy can reach, its callers can reach: spawning sessions, closing and resuming
+them, killing a pane, reading pane contents, writing theme files. Do not expect corral's
+non-loopback `Host` rejection to catch this — a default `proxy_pass` sends the loopback upstream
+as the `Host`, so the check passes. Note also that the live terminal will **not** work through a
+proxy: its WebSocket Origin allowlist is loopback-only by design.
+
+## Upgrading
+
+```bash
+# If package-lock.json is the only dirty file and the diff is `libc` / `hasInstallScript` churn,
+# that is your npm version rewriting it — discard it, `npm install` regenerates it below.
+git checkout -- package-lock.json
+
+git pull --ff-only
+npm install      # node-pty is native — it may need a rebuild across Node versions
+npm run build    # production only
+npm run check    # optional and fast: typecheck + lint + tests
+```
+
+Then restart — and signal the process that **actually holds the port**, not the `npm` wrapper.
+`npm start` is `sh -c` → `tsx` → `node`, and killing the top of that chain leaves the `node`
+grandchild listening, so the next start fails with `EADDRINUSE` for no visible reason:
+
+```bash
+# Linux
+kill "$(ss -ltnp 2>/dev/null | awk -F'pid=' '/127.0.0.1:8787/{split($2,a,","); print a[1]}')"
+# macOS
+kill "$(lsof -nP -iTCP:8787 -sTCP:LISTEN -t)"
+```
+
+Install the theme only **after** upgrading to ≥ v0.3.2 — the theme-sync-on-mount fix landed
+there, so installing it against an older build means testing the old behaviour.
 
 ## Environments
 
@@ -70,9 +121,14 @@ Each entry describes one place corral can see and spawn sessions into:
 - `kind: "local"` — talks to a herdr socket on this machine. With no `socket` it inherits
   the ambient `HERDR_SOCKET_PATH` (launch corral from the right herdr context or set it).
 - `kind: "remote"` — talks to a box over SSH (`sshHost`, `socket`, `herdrBin` required).
-  Unreachable environments show "offline" and keep their last-good snapshot.
+  An unreachable environment keeps its last-good snapshot and is **not** flagged anywhere in the
+  UI yet — its cards simply stop changing. The server records the reason, so the server log is
+  where you find out; corral also names a missing `herdr`/`ssh` at startup.
 - `spawnCommand` — what corral runs to start a new agent session in this environment.
-  Defaults to `claude`.
+  Defaults to `claude`. Two hard constraints: it must be a **single token** — no spaces and no
+  arguments, which the config schema rejects outright, so wrap any flags in a script; and it must
+  be an **executable file on `PATH`**, never a shell function or alias, because sessions are
+  spawned into a non-interactive shell that never reads your `.bashrc`/`.zshrc`.
 - `claudeConfigDirs` — which `~/.claude*` dirs corral scans on this box for recap and the
   statusline metrics (local defaults to `~/.claude`; set it for profile-split or remote — see
   the statusline section).
@@ -102,13 +158,19 @@ complete local and remote entries.
 
 ## Multiple Claude accounts
 
-If you keep separate Claude accounts (say, work and personal), give each one its own config
-dir and a tiny shell wrapper:
+If you keep separate Claude accounts (say, work and personal), give each one its own config dir
+and a tiny wrapper **script**. It has to be a real executable on `PATH`: corral spawns sessions
+non-interactively, so the same wrappers written as shell functions in `.zshrc` work in your own
+terminal but are invisible to `spawnCommand` — the most common way this trips people up.
 
 ```bash
-# ~/.zshrc
-claude-work()     { CLAUDE_CONFIG_DIR=~/.claude-work     command claude "$@"; }
-claude-personal() { CLAUDE_CONFIG_DIR=~/.claude-personal command claude "$@"; }
+# ~/bin/claude-work — and ~/bin/claude-personal alongside it, with ~/bin on PATH
+#!/bin/sh
+exec env CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude "$@"
+```
+
+```bash
+chmod +x ~/bin/claude-work ~/bin/claude-personal
 ```
 
 Each account also needs its own herdr socket. A `local` environment with no `socket` inherits

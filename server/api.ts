@@ -335,8 +335,16 @@ export function createApi(opts: {
   // attention gets its own read-only route.
   app.get("/api/attention", (c) => c.json(opts.poller.getAttention()));
 
-  app.get("/api/stream", (c) =>
-    streamSSE(c, async (stream) => {
+  app.get("/api/stream", (c) => {
+    // Reverse proxies buffer responses by default (nginx's `proxy_buffering on`): they forward only
+    // FULL buffers and hold the trailing partial one — which is exactly where an SSE frame's
+    // terminating blank line sits. EventSource cannot dispatch a frame without that blank line, so a
+    // proxied client renders NOTHING until the next poller tick writes enough bytes to flush the
+    // tail: an empty board for a whole poll interval, with a first frame the server logged as sent
+    // in single-digit milliseconds. This header is the standard opt-out and nginx honours it unless
+    // the operator explicitly ignores it. Cheap insurance for every reverse proxy, not just nginx.
+    c.header("X-Accel-Buffering", "no");
+    return streamSSE(c, async (stream) => {
       const boardId = new URL(c.req.url).searchParams.get("board") ?? undefined;
       let writing = false;
 
@@ -367,8 +375,8 @@ export function createApi(opts: {
       stream.onAbort(unsubscribe);
       send(opts.poller.getSnapshot());
       while (!stream.aborted) await stream.sleep(30000);
-    }),
-  );
+    });
+  });
 
   app.delete("/api/sessions/:env/:paneId", async (c) => {
     const env = opts.envs.find((e) => e.id === c.req.param("env"));
