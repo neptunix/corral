@@ -4,6 +4,12 @@ import type { ZodType, ZodTypeDef } from "zod";
 export function useEventSource<T>(url: string, schema: ZodType<T, ZodTypeDef, unknown>): T | null {
   const [data, setData] = useState<T | null>(null);
   useEffect(() => {
+    // Drop the previous url's frame. This hook returns "the latest frame from THIS url", and holding a
+    // frame minted by a different one is simply wrong: `/api/stream?board=` encodes the board, so a
+    // retained frame kept the OLD board's tasks on screen under the newly selected board until the new
+    // stream produced its first frame — and it masked the REST seed that exists precisely to cover a
+    // first frame that is slow, buffered, or schema-rejected.
+    setData(null);
     const es = new EventSource(url);
     es.onmessage = (e: MessageEvent<string>) => {
       try {

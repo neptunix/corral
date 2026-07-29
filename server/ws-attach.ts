@@ -42,6 +42,16 @@ interface AuditCloseEntry {
   readonly ts: string;
   readonly env: string;
   readonly paneId: string;
+  // Set only when the pty exited inside the probe grace — the attach never became usable. Without it
+  // an attach that died instantly and a normal end of session were byte-identical in this log, so a
+  // diagnosis done later from logs alone could not tell them apart.
+  //
+  // A FLAG, deliberately not the child's output. SEC-6 keeps session content out of this trail, and
+  // the diagnostic text cannot be assumed to be an exec error: a real agent that happens to die
+  // within the probe window contributes its first screenful instead. The text goes to the attached
+  // operator in the close reason, where they are already entitled to see it; the log records only
+  // that it happened.
+  readonly probeFailed?: true;
 }
 export type AuditEntry = AuditOpenEntry | AuditCloseEntry;
 
@@ -179,10 +189,11 @@ function onConnection(ctx: ConnectionCtx): void {
 
   const spawnedAt = ctx.now();
   let closeAudited = false;
-  const auditClose = (): void => {
+  const auditClose = (probeFailed: boolean): void => {
     if (closeAudited) return;
     closeAudited = true;
-    appendAudit(ctx.auditLogPath, { event: "close", ts: new Date().toISOString(), env: ctx.env.id, paneId: ctx.paneId });
+    const base = { event: "close" as const, ts: new Date().toISOString(), env: ctx.env.id, paneId: ctx.paneId };
+    appendAudit(ctx.auditLogPath, probeFailed ? { ...base, probeFailed: true } : base);
   };
 
   // Hold the child's first output so an exit inside the probe grace can name the REAL cause rather
@@ -202,7 +213,8 @@ function onConnection(ctx: ConnectionCtx): void {
   // close reason. Registered BEFORE the bridge so this reason wins the ws.close race over the bridge's
   // generic "pty exited". Task 0 confirmed the 0.7.1 stream is raw, so this only fires on real failures.
   pty.onExit(() => {
-    if (ctx.now() - spawnedAt < WS_PROBE_GRACE_MS) {
+    const diedInProbe = ctx.now() - spawnedAt < WS_PROBE_GRACE_MS;
+    if (diedInProbe) {
       try {
         ctx.ws.close(4001, attachFailureReason(earlyOutput));
       } catch {
@@ -210,9 +222,11 @@ function onConnection(ctx: ConnectionCtx): void {
       }
     }
     earlyOutput = "";
-    auditClose();
+    auditClose(diedInProbe);
   });
-  ctx.ws.on("close", auditClose);
+  // Wrapped, NOT passed by reference: ws hands its listener (code, reason), which would arrive as the
+  // `probeFailed` argument and mark every operator-initiated close as a probe failure.
+  ctx.ws.on("close", () => { auditClose(false); });
 
   bridgePtyToWs(pty, ctx.ws, { graceMs: WS_KILL_GRACE_MS, heartbeatMs: WS_HEARTBEAT_MS });
 }

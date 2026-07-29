@@ -109,6 +109,16 @@ describe("auditLine (SEC-6: open/close + source, never keystrokes)", () => {
   it("serializes a close entry", () => {
     const parsed: unknown = JSON.parse(auditLine({ event: "close", ts: "T", env: "e", paneId: "p" }));
     expect(parsed).toMatchObject({ event: "close", env: "e", paneId: "p" });
+    expect(auditLine({ event: "close", ts: "T", env: "e", paneId: "p" })).not.toContain("probeFailed");
+  });
+  it("marks a probe-window close with a FLAG and carries no diagnostic text", () => {
+    // Without the flag, an attach that died instantly and a normal end of session were byte-identical
+    // here, so a later log-only diagnosis could not tell them apart. The child's output stays OUT:
+    // SEC-6 excludes session content, and a real agent dying inside the probe window would contribute
+    // its first screenful, not an exec error. The operator gets the text in the close reason instead.
+    const line = auditLine({ event: "close", ts: "T", env: "e", paneId: "p", probeFailed: true });
+    expect(JSON.parse(line)).toMatchObject({ event: "close", probeFailed: true });
+    expect(line.toLowerCase()).not.toContain("execvp");
   });
 });
 
@@ -199,6 +209,11 @@ describe("attachWebSocketServer (integration, injected fake pty)", () => {
     const [code, reason] = await once(client, "close");
     expect(code).toBe(4001);
     expect(String(reason)).toContain("execvp(3) failed");
+    // The persisted trail records THAT it failed in the probe window, and still no session content.
+    await waitFor(() => existsSync(h.auditPath) && readFileSync(h.auditPath, "utf8").includes('"close"'));
+    const audit = readFileSync(h.auditPath, "utf8");
+    expect(audit).toContain('"probeFailed":true');
+    expect(audit).not.toContain("execvp");
   });
 
   it("closes 1000 when the pty exits after the probe grace (normal end of session)", async () => {
@@ -212,6 +227,9 @@ describe("attachWebSocketServer (integration, injected fake pty)", () => {
     const [code, reason] = await once(client, "close");
     expect(code).toBe(1000);
     expect(String(reason)).toBe("pty exited");
+    // A healthy session ending must NOT be flagged as a probe failure, or the flag means nothing.
+    await waitFor(() => existsSync(h.auditPath) && readFileSync(h.auditPath, "utf8").includes('"close"'));
+    expect(readFileSync(h.auditPath, "utf8")).not.toContain("probeFailed");
   });
 
   it("closes 4000 'attach failed' when spawn throws (e.g. node-pty ENOENT), audits it, spawns no pty", async () => {
