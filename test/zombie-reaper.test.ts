@@ -1,6 +1,6 @@
 import type { Board } from "@shared/board-schema";
 import type { Snapshot } from "@shared/schema";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { getEnv } from "../environments.ts";
 import { detectZombies, startZombieReaper, type ReapCandidateLink, type TabInfo } from "../server/zombie-reaper.ts";
@@ -104,6 +104,7 @@ describe("detectZombies", () => {
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 const SID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+const SID2 = "eeeeeeee-ffff-0000-1111-222222222222";
 
 function boardWithLink(over: Partial<{ tabId: string; paneId: string; sessionId: string | null; tabLabel: string }> = {}): Board {
   return {
@@ -275,43 +276,119 @@ describe("startZombieReaper", () => {
   });
 
   it("restarts the grace window when a poll inside it shows the agent back (freshly-spawned session)", async () => {
-    // The regression this file's grace floor exists for. A poll captured in the sub-second gap between
-    // herdr creating a pane and registering the Claude started in it makes a LIVE session look detached
-    // and seeds the timer. The next poll of that env shows the agent — the timer must drop, so the
-    // stale sighting alone can never reap. Only a fresh detachment starts a new window.
-    const live = (sid: string): Snapshot => ({
-      envs: { "work-local": { reachable: true } },
-      sessions: [{
-        env: "work-local", paneId: "w1:p2", status: "working", agent: "claude", cwd: "/c",
-        tab: "task-a", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: sid,
-        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
-      }],
+    // The regression the grace floor exists for: a poll captured in the sub-second gap between herdr
+    // creating a pane and registering the Claude in it makes a LIVE session look detached and seeds the
+    // timer. The next poll shows the agent, so the timer must drop.
+    //
+    // TWO links on purpose. With one, the agent's return empties the candidate list and `since` is wiped
+    // by the byEnv.size === 0 branch — so a single-link version passes even if the per-round rebuild in
+    // detectZombies is removed (mutation-verified). B stays detached, keeping rounds non-empty, so only
+    // the rebuild can save A.
+    const sess = (paneId: string, tabId: string, ws: string, sid: string): Board["tasks"][0]["sessions"][0] => ({
+      env: "work-local", paneId, tabId, tabLabel: "z", workspaceId: ws, workspaceLabel: "c",
+      name: "z", cwdSnapshot: "/c", sessionId: sid,
     });
+    const board: Board = {
+      id: "b", label: "B", columns: [],
+      tasks: [{ id: "t", title: "x", description: "", status: "todo", priority: null, repo: null,
+        createdAt: 1, updatedAt: 1, sessions: [sess("w1:p2", "w1:t2", "w1", SID), sess("w2:p3", "w2:t3", "w2", SID2)] }],
+    };
     const empty: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+    const aLive: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [{
+      env: "work-local", paneId: "w1:p2", status: "working", agent: "claude", cwd: "/c",
+      tab: "z", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: SID,
+      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+    }] };
     let snap: Snapshot = empty;
     let clock = 0;
     const closed: string[] = [];
     let cb: ((s: Snapshot) => void) | null = null;
     startZombieReaper({
       poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+      storage: { getAllBoards: () => [board] },
+      envs: [getEnv("work-local")],
+      listTabs: () => Promise.resolve([
+        rawTab({ tab_id: "w1:t2", label: "z", workspace_id: "w1" }),
+        rawTab({ tab_id: "w2:t3", label: "z", workspace_id: "w2" }),
+      ]),
+      closePane: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); },
+      now: () => clock, graceMs: 20_000,
+    });
+
+    clock = 0; cb!(empty); await flush();          // both seeded
+    snap = aLive; clock = 5_000; cb!(snap); await flush();   // A's agent registers → A's timer drops
+    snap = empty; clock = 10_000; cb!(empty); await flush(); // A really exits → NEW window from here
+    expect(closed).toEqual([]);
+    clock = 21_000; cb!(empty); await flush();
+    expect(closed).toEqual(["w2:p3"]);             // B aged from 0; A's window runs to 30_000
+  });
+
+  it("re-seeds instead of reaping when ticks stopped for a whole grace (host suspend)", async () => {
+    // Wall clock advances while the poll loop does not, so no poll could have refuted the pending timer
+    // and every env's rows predate the gap. Reaping there would kill a live pane on one stale sighting.
+    const empty: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+    let clock = 0;
+    const closed: string[] = [];
+    let cb: ((s: Snapshot) => void) | null = null;
+    startZombieReaper({
+      poller: { getSnapshot: () => empty, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
       storage: { getAllBoards: () => [boardWithLink()] },
       envs: [getEnv("work-local")],
       listTabs: () => Promise.resolve([rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })]),
       closePane: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); },
       now: () => clock, graceMs: 20_000,
     });
-
-    clock = 0; cb!(empty); await flush();              // stale pre-registration sighting → timer seeded
-    snap = live(SID);
-    clock = 10_000; cb!(snap); await flush();          // the env's next poll lands: the agent is there
-    clock = 30_000; cb!(snap); await flush();          // well past the original window
-    expect(closed).toEqual([]);                        // …and nothing was reaped: the timer was dropped
-
-    snap = empty;                                      // now Claude really exits
-    clock = 40_000; cb!(empty); await flush();
-    expect(closed).toEqual([]);                        // a NEW window starts here, not at 0
-    clock = 60_000; cb!(empty); await flush();
+    clock = 0; cb!(empty); await flush();
+    clock = 60_000; cb!(empty); await flush();      // 60s tick gap > grace → clocks dropped, re-seeded
+    expect(closed).toEqual([]);
+    clock = 70_000; cb!(empty); await flush();      // normal cadence resumes; window runs from 60_000
+    expect(closed).toEqual([]);
+    clock = 80_000; cb!(empty); await flush();
     expect(closed).toEqual(["w1:p2"]);
+  });
+
+  it("logs every reap as a zombie_reaped line, and logs nothing when the close fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => void 0);
+    try {
+      const h = harness({
+        snapshot: { envs: { "work-local": { reachable: true } }, sessions: [] },
+        boards: [boardWithLink()],
+        tabs: [rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })],
+      });
+      h.setClock(0); h.fire(); await flush();
+      h.setClock(20_000); h.fire(); await flush();
+      const lines = warn.mock.calls.flat().filter((a): a is string => typeof a === "string" && a.includes("zombie_reaped"));
+      expect(lines).toHaveLength(1);
+      expect(JSON.parse(lines[0] ?? "")).toEqual({
+        event: "zombie_reaped", env: "work-local", pane: "w1:p2", tab: "w1:t2",
+        detached_for_ms: 20_000, grace_ms: 20_000,
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not log a reap when closePane rejects", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => void 0);
+    try {
+      let clock = 0;
+      let cb: ((s: Snapshot) => void) | null = null;
+      const empty: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+      startZombieReaper({
+        poller: { getSnapshot: () => empty, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+        storage: { getAllBoards: () => [boardWithLink()] },
+        envs: [getEnv("work-local")],
+        listTabs: () => Promise.resolve([rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })]),
+        closePane: () => Promise.reject(new Error("boom")),
+        now: () => clock, graceMs: 20_000,
+      });
+      clock = 0; cb!(empty); await flush();
+      clock = 20_000; cb!(empty); await flush();
+      const logged = warn.mock.calls.flat().some((a) => typeof a === "string" && a.includes("zombie_reaped"));
+      expect(logged).toBe(false); // a failed close must never read as a completed reap
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("ignores a live (non-detached) link", async () => {

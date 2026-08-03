@@ -55,16 +55,10 @@ export const SWEEP_INITIAL_DELAY_MS = intFromEnv("SWEEP_INITIAL_DELAY_MS", 5000,
 // pane, drops the agent). corral closes such tabs automatically once a detached link's tab has
 // lingered for this grace window. Set ZOMBIE_REAP_ENABLED=false to turn the reaper off entirely.
 //
-// The grace is measured in WALL CLOCK, but the evidence it judges — whether an agent occupies the
-// pane — is a poller snapshot, and a snapshot carries each env's rows from THAT env's own last poll
-// (see rebuild() in server/poller.ts: `perEnv` is replaced per env, while subscribers fire after
-// every env's poll). So a pane's liveness can be a full poll cycle stale, and a grace shorter than
-// that staleness can elapse entirely inside ONE stale cycle — the reaper then closes a pane whose
-// freshly-spawned Claude the poller simply has not seen yet. That is not hypothetical: at the old
-// 20000 default, against a 30000 poll, one poll landing in the sub-second gap between herdr creating
-// a pane and registering the Claude started in it was enough to kill a live session ~28s after spawn.
-// The floor that makes this impossible is derived and enforced at startup — see reapGraceFloorMs()
-// in server/preflight.ts. Raising HERDR_DASH_POLL_MS raises the floor with it.
+// The grace must outlast how stale a snapshot's liveness can be, or the reaper closes panes whose
+// freshly-spawned Claude it has not polled yet — the old 20000 default against a 30000 poll killed a
+// live session 28s after spawn. Clamped to a poll-derived floor: see resolveReapGrace() in
+// server/preflight.ts, which raising HERDR_DASH_POLL_MS raises too.
 export const ZOMBIE_REAP_ENABLED = process.env.ZOMBIE_REAP_ENABLED !== "false";
 export const ZOMBIE_REAP_GRACE_MS = intFromEnv("ZOMBIE_REAP_GRACE_MS", 180_000, { min: 0 });
 

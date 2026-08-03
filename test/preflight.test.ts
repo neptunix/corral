@@ -6,8 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { HerdrEnv } from "../environments.ts";
 import { buildAttachSpec, buildExec } from "../server/herdr.ts";
 import {
-  findMissingBinaries, isExecutableFile, missingBinaryMessage, reapGraceFloorMs, resolveOnPath,
-  resolveReapGrace,
+  findMissingBinaries, isExecutableFile, missingBinaryMessage, resolveOnPath, resolveReapGrace,
 } from "../server/preflight.ts";
 
 const local = (id: string): HerdrEnv => ({
@@ -129,13 +128,9 @@ describe("missingBinaryMessage", () => {
   });
 });
 
-describe("reapGraceFloorMs / resolveReapGrace (zombie-reaper grace guard)", () => {
-  it("derives the floor as two staleness windows of poll interval + list timeout", () => {
-    expect(reapGraceFloorMs(30_000, 15_000)).toBe(90_000);
-  });
-
+describe("resolveReapGrace (zombie-reaper grace guard)", () => {
   it("scales the floor with the poll interval, so a slower poll cannot re-open the race", () => {
-    expect(reapGraceFloorMs(120_000, 15_000)).toBe(270_000);
+    expect(resolveReapGrace(100_000, 120_000, 15_000).ms).toBe(270_000);
   });
 
   it("leaves a grace at or above the floor untouched and stays silent", () => {

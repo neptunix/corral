@@ -80,47 +80,31 @@ export function findMissingBinaries(
 }
 
 /**
- * The floor the zombie reaper's grace window is held to (see ZOMBIE_REAP_GRACE_MS in config.ts).
+ * Floor for the zombie reaper's grace window (ZOMBIE_REAP_GRACE_MS), clamped UP at startup so a
+ * too-short grace degrades into slower cleanup instead of refusing to boot.
  *
- * A pane's liveness inside a poller snapshot is at most `pollMs + listTimeoutMs` old: the interval
- * timer re-polls an env every `pollMs`, and that poll itself can take until `listTimeoutMs` before its
- * rows land. Call that one staleness window.
+ * A pane's liveness in a poller snapshot is at most `pollMs + listTimeoutMs` old — one staleness
+ * window. The grace must outlast two of them: while the poll loop is ticking on schedule that is long
+ * enough for a refuting poll to land and reset the clock (detectZombies rebuilds `since` from the
+ * round's candidates), so a single stale sighting cannot reap a live pane. A stopped poll loop is a
+ * separate case, handled by the tick-gap rail in zombie-reaper.ts.
  *
- * The reaper's grace clock RESETS the moment any poll shows an agent back on the pane — detectZombies
- * rebuilds `since` from the round's candidates, so a link that stops qualifying loses its timer. So
- * requiring the grace to outlast TWO staleness windows means a reap can only fire once at least two
- * independent, freshly-polled observations of that env agree the pane is agentless. One unlucky poll
- * can no longer kill a live session, which is exactly the failure this floor exists to prevent.
- *
- * Two windows, not one, because one only guarantees that a refuting poll had *time* to land — two
- * guarantee that a refuting poll actually did land and was seen before the window closed.
- */
-export function reapGraceFloorMs(pollMs: number, listTimeoutMs: number): number {
-  return 2 * (pollMs + listTimeoutMs);
-}
-
-/**
- * Hold the configured grace to that floor, clamping UP rather than refusing to boot: a too-short grace
- * degrades safely into a slower cleanup, and a dashboard that boots is worth more than one that
- * doesn't. `message` is non-null only when the value actually had to move, so a correct configuration
- * stays silent.
+ * `message` is non-null only when the value had to move, so a correct configuration stays silent.
  */
 export function resolveReapGrace(
   configuredMs: number,
   pollMs: number,
   listTimeoutMs: number,
 ): { readonly ms: number; readonly message: string | null } {
-  const floor = reapGraceFloorMs(pollMs, listTimeoutMs);
+  const floor = 2 * (pollMs + listTimeoutMs); // two staleness windows
   if (configuredMs >= floor) return { ms: configuredMs, message: null };
   return {
     ms: floor,
     message:
-      `[preflight] ZOMBIE_REAP_GRACE_MS=${String(configuredMs)} is below the ` +
-      `${String(floor)} ms floor implied by HERDR_DASH_POLL_MS=${String(pollMs)} — a pane's liveness ` +
-      `in a poller snapshot can be ${String(pollMs + listTimeoutMs)} ms stale, and a reap must ` +
-      `outlast two of those so at least two fresh polls agree the pane is agentless. Using ` +
-      `${String(floor)} ms instead. A shorter window lets the zombie reaper close a pane whose ` +
-      `just-spawned Claude the poller has not seen yet, killing a live session.`,
+      `[preflight] ZOMBIE_REAP_GRACE_MS=${String(configuredMs)} is below the ${String(floor)} ms ` +
+      `floor implied by HERDR_DASH_POLL_MS=${String(pollMs)}; using ${String(floor)} ms. A shorter ` +
+      `grace lets the zombie reaper close a pane whose just-spawned Claude it has not polled yet, ` +
+      `killing a live session.`,
   };
 }
 

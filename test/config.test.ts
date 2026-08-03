@@ -2,10 +2,11 @@ import { describe, it, expect, afterEach } from "vitest";
 
 import {
   ATTENTION_MIN_WORK_MS, BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, CORRAL_HOME, intFromEnv,
-  RECAP_ENABLED, RECAP_INTERVAL_MS, RECAP_TAIL_BYTES,
+  LIST_TIMEOUT, RECAP_ENABLED, RECAP_INTERVAL_MS, RECAP_TAIL_BYTES,
   RECAP_READ_TIMEOUT_MS, RECAP_CONTENT_MAX,
-  TAB_RENAME_ENABLED,
+  TAB_RENAME_ENABLED, ZOMBIE_REAP_GRACE_MS,
 } from "../config.ts";
+import { resolveReapGrace } from "../server/preflight.ts";
 
 describe("intFromEnv", () => {
   const KEY = "CORRAL_TEST_INT_ENV"; // static property below → avoids no-dynamic-delete
@@ -69,5 +70,15 @@ describe("BRIEF_ROOT", () => {
   });
   it("does not live inside BOARD_DATA_DIR (what server/git.ts actually commits)", () => {
     expect(BRIEF_ROOT.startsWith(BOARD_DATA_DIR)).toBe(false);
+  });
+});
+
+describe("shipped reaper defaults", () => {
+  it("clear their own floor, so a default install never needs the startup clamp", () => {
+    // Guards the pair, not the literals: lowering the grace default OR raising the poll interval
+    // default re-opens the race this floor exists to close, and would otherwise only show up as a
+    // console line at boot.
+    expect(resolveReapGrace(ZOMBIE_REAP_GRACE_MS, CHEAP_INTERVAL_MS, LIST_TIMEOUT))
+      .toEqual({ ms: ZOMBIE_REAP_GRACE_MS, message: null });
   });
 });

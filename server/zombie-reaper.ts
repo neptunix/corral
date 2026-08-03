@@ -1,7 +1,6 @@
 import type { Board } from "@shared/board-schema";
 import type { Snapshot } from "@shared/schema";
 
-import { ZOMBIE_REAP_GRACE_MS } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 
@@ -31,10 +30,7 @@ export interface ReapDecision {
   readonly env: string;
   readonly paneId: string;
   readonly tabId: string;
-  // When this tab was FIRST seen detached — carried out so the reap log can state how long the tab
-  // actually lingered. A reap that closes a live pane is otherwise invisible after the fact: the pane
-  // is gone, the card reads detached, and nothing says corral did it (this cost one debugging session,
-  // recovered only from herdr's own `cli:pane:close` log line).
+  /** First sighting as detached — lets the reap log say how long the tab lingered. */
   readonly firstSeenAt: number;
 }
 
@@ -82,7 +78,8 @@ export interface ZombieReaperOpts {
   readonly listTabs: (env: HerdrEnv) => Promise<{ tab_id: string; label: string; workspace_id: string }[]>;
   readonly closePane: (env: HerdrEnv, paneId: string) => Promise<void>;
   readonly now?: () => number;
-  readonly graceMs?: number;
+  /** Required: forces every caller through resolveReapGrace, so the clamp cannot be bypassed. */
+  readonly graceMs: number;
 }
 
 // Subscribe to poller snapshots and reap zombie tabs (a detached link whose herdr tab still lingers,
@@ -94,14 +91,22 @@ export interface ZombieReaperOpts {
 // per-tab grace clock) is retained across snapshots; an in-flight guard serializes overlapping polls.
 export function startZombieReaper(opts: ZombieReaperOpts): () => void {
   const now = opts.now ?? ((): number => Date.now());
-  const graceMs = opts.graceMs ?? ZOMBIE_REAP_GRACE_MS;
+  const graceMs = opts.graceMs;
   let since = new Map<string, number>();
+  let lastTick: number | null = null;
   let inFlight = false;
 
   async function tick(): Promise<void> {
     if (inFlight) return;
     inFlight = true;
     try {
+      // Ticks run every few seconds (one per env poll). A gap of a whole grace means they stopped —
+      // host suspend, blocked loop — and every env's rows predate it, so no poll could have refuted a
+      // pending timer. Drop the clocks rather than reap on pre-gap evidence.
+      const t = now();
+      if (lastTick !== null && t - lastTick > graceMs) since = new Map();
+      lastTick = t;
+
       const snapshot = opts.poller.getSnapshot();
       const index = buildLiveIndex(snapshot.sessions);
 
@@ -144,12 +149,8 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
       const result = detectZombies({ detached, tabsByEnv, now: now(), since, graceMs });
       since = result.since;
 
-      // Re-read liveness against the LATEST snapshot: the reap decision was made before the (possibly
-      // slow, remote-SSH) listTabs await, during which a poll could have landed showing a session in
-      // the pane. Never close a pane that now hosts a live agent. This only catches a poll that landed
-      // inside that await — it re-reads the poller's current snapshot, so it cannot refute a decision
-      // taken from a stale one. The grace floor (config.ts / reapGraceFloorMs) is what covers staleness;
-      // this rail covers only the await window.
+      // Re-read liveness: a poll may have landed during the (possibly slow, remote-SSH) listTabs await
+      // and put a session in the pane. Covers only that await window — staleness is the grace's job.
       const fresh = buildLiveIndex(opts.poller.getSnapshot().sessions);
       await Promise.all(result.reap.map(async (r) => {
         const env = opts.envs.find((e) => e.id === r.env);
@@ -157,8 +158,7 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
         if (fresh.liveMap.has(`${r.env}:${r.paneId}`)) return;
         try {
           await opts.closePane(env, r.paneId);
-          // Log every reap, not just failures. This is the poll loop's ONE herdr mutation and it
-          // destroys a pane — an operator who lost a session must be able to see corral say so.
+          // Log every reap: this destroys a pane, so it must never be silent.
           console.warn(JSON.stringify({
             event: "zombie_reaped", env: r.env, pane: r.paneId, tab: r.tabId,
             detached_for_ms: now() - r.firstSeenAt, grace_ms: graceMs,

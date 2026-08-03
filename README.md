@@ -319,25 +319,11 @@ must run ≥10 min for its finish to count) · `CORRAL_HOME` (`~/.corral`) ·
 WebSocket attach: `WS_MAX_CONCURRENT` (3) · `WS_RATE_PER_WINDOW` (10) / `WS_RATE_WINDOW_MS`
 (10000) · `WS_HEARTBEAT_MS` (30000) · `WS_KILL_GRACE_MS` (2000) · `WS_PROBE_GRACE_MS` (2000).
 
-### Zombie-tab reaper
-
-When a Claude session exits it leaves a shell-only tab behind — herdr keeps the pane and drops the
-agent. corral closes those automatically: `ZOMBIE_REAP_ENABLED` (true) · `ZOMBIE_REAP_GRACE_MS`
-(180000 — how long a detached link's tab must linger before its pane is closed). This is the only
-place the poll loop mutates herdr, and every reap is logged as a `zombie_reaped` line naming the env,
-pane, tab and how long the tab had been detached.
-
-**The grace has a floor, derived from the poll interval, and corral clamps up to it at startup.** The
-grace is wall-clock, but the evidence it judges — whether an agent occupies the pane — comes from a
-poller snapshot, and a snapshot carries each environment's rows from *that* environment's last poll.
-So a pane's liveness can be a full poll cycle stale, and a grace shorter than that staleness can
-elapse entirely inside one stale cycle: corral then closes a pane whose freshly-spawned Claude it has
-not polled yet, killing a live session. The floor is two staleness windows —
-`2 × (HERDR_DASH_POLL_MS + 15000)`, so 90000 at the default poll interval — which is enough that a
-reap needs at least two independently-polled observations to agree the pane is agentless. Raising
-`HERDR_DASH_POLL_MS` raises the floor with it. If your configured value is below the floor, corral
-prints a `[preflight]` line naming both numbers and uses the floor. To turn the reaper off, set
-`ZOMBIE_REAP_ENABLED=false` — do not try to disable it with a short or zero grace.
+Zombie-tab reaper — closes the shell-only tab a session leaves behind when Claude exits, and logs
+every reap as a `zombie_reaped` line: `ZOMBIE_REAP_ENABLED` (true) · `ZOMBIE_REAP_GRACE_MS` (180000 —
+how long a detached link's tab must linger first; clamped up at startup to a floor derived from
+`HERDR_DASH_POLL_MS`, so a reap can never fire on a single stale snapshot, with a `[preflight]` line
+when it moves). Turn the reaper off with `ZOMBIE_REAP_ENABLED=false`, never with a short grace.
 
 [MCP server](#mcp-server): `CORRAL_URL` (defaults to `http://127.0.0.1:$HERDR_DASH_PORT` — read by
 the MCP process, see the note there) · `BRIEF_MAX_BYTES` (16384) · `BRIEF_CLEANUP_DELAY_MS` (600000
