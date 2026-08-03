@@ -108,6 +108,10 @@ noticing. While the override is active every start prints a reminder that it is 
 process's environment is not readable on macOS. If sessions behave oddly and corral is clean, relaunch
 your herdr session servers from a terminal outside Claude Code too.
 
+**A missing or invalid `environments.json` now stops the launch too**, with the Zod error on one line
+instead of a stack trace — `npm run dev` aborts before Vite starts rather than serving a page over a
+dead API.
+
 **After a reboot**, in order: start the herdr session servers → `npm run dev` → open the UI. corral
 renders the board from persisted state, so it comes up looking healthy whether or not herdr is
 running; the cards simply stop changing.

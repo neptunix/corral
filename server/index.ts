@@ -12,10 +12,7 @@ import { createGit } from "./git.ts";
 import { closePane, listTabs, listWorkspaces, readPane, workspaceClose } from "./herdr.ts";
 import { assertLoopback } from "./host-guard.ts";
 import { createPoller } from "./poller.ts";
-import {
-  buildReport, findMissingBinaries, formatReport, isExecutableFile, loadEnvironmentsOrReport,
-  resolveOnPath, resolveReapGrace,
-} from "./preflight.ts";
+import { formatReport, resolveReapGrace, runPreflight } from "./preflight.ts";
 import { startReconciler } from "./reconcile.ts";
 import { spawnSession } from "./spawn.ts";
 import { createStorage } from "./storage.ts";
@@ -26,32 +23,12 @@ import { startZombieReaper } from "./zombie-reaper.ts";
 
 assertLoopback(HOST);
 
-// The config is loaded through a DYNAMIC import on purpose: environments.ts evaluates ENVIRONMENTS at
-// module scope, so a static import would throw during import resolution — before anything here could
-// turn it into a readable line. Re-adding `import { ENVIRONMENTS }` compiles and lints clean while
-// making this whole block unreachable; test/preflight-wiring.test.ts guards against exactly that.
-const searchedPath = process.env.PATH ?? "";
-const cfg = await loadEnvironmentsOrReport(
-  async () => (await import("../environments.ts")).ENVIRONMENTS,
-  ENV_CONFIG_PATH,
-);
-const report = buildReport({
-  env: process.env,
-  envs: cfg.ok ? cfg.envs : null,
-  configLine: cfg.line,
-  // Missing binaries are resolved against THIS process's PATH — see server/preflight.ts for why the
-  // server's own environment is the only place that tell lives — and stay a warning, never fatal.
-  missing: cfg.ok
-    ? findMissingBinaries(cfg.envs, (bin) => resolveOnPath(bin, searchedPath, isExecutableFile))
-    : [],
-  pathEnv: searchedPath,
-});
+const { report, envs: ENVS } = await runPreflight(process.env, ENV_CONFIG_PATH);
 console.error(formatReport(report.lines));
-if (report.fatal || !cfg.ok) {
+if (report.fatal || ENVS === null) {
   console.error("\nFATAL: refusing to start.");
   process.exit(1);
 }
-const ENVS = cfg.envs;
 
 const storage = createStorage(BOARD_DATA_DIR);
 const git = createGit(BOARD_DATA_DIR);

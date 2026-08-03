@@ -8,12 +8,13 @@ import { describe, it, expect } from "vitest";
 const root = path.join(import.meta.dirname, "..");
 const read = (rel: string): string => readFileSync(path.join(root, rel), "utf8");
 
-/** Runs the real pre-step in a child process and returns its exit code. */
-function runPreflight(env: Record<string, string>): number {
+/** Runs a real entrypoint in a child process and returns its exit code. */
+function run(entry: string, env: Record<string, string>): number {
   try {
-    execFileSync("npx", ["tsx", "scripts/preflight.ts"], {
+    execFileSync("npx", ["tsx", entry], {
       cwd: root,
       stdio: "pipe",
+      timeout: 20_000, // vitest cannot interrupt a blocking sync call; bound it at the OS level
       env: { ...process.env, CLAUDECODE: "", CORRAL_ALLOW_UNDER_CLAUDE: "", ...env },
     });
     return 0;
@@ -29,24 +30,36 @@ describe("the pre-step actually stops a launch", () => {
   // The guard's entire value is that it fires; unit tests of buildReport cannot show that the process
   // exits non-zero, which is the only thing npm reacts to.
   it("exits non-zero under Claude Code", () => {
-    expect(runPreflight({ CLAUDECODE: "1" })).toBe(1);
+    expect(run("scripts/preflight.ts", { CLAUDECODE: "1" })).toBe(1);
   }, 30_000);
 
   it("exits zero when the override is set", () => {
-    expect(runPreflight({ CLAUDECODE: "1", CORRAL_ALLOW_UNDER_CLAUDE: "1" })).toBe(0);
+    expect(run("scripts/preflight.ts", { CLAUDECODE: "1", CORRAL_ALLOW_UNDER_CLAUDE: "1" })).toBe(0);
   }, 30_000);
 
   it("exits zero outside Claude Code", () => {
-    expect(runPreflight({})).toBe(0);
+    expect(run("scripts/preflight.ts", {})).toBe(0);
+  }, 30_000);
+});
+
+describe("the in-process guard is the backstop", () => {
+  // Survives every npm-level bypass, so it needs its own execution proof: deleting the block from
+  // server/index.ts must not leave the suite green.
+  it("refuses to boot the server itself under Claude Code", () => {
+    expect(run("server/index.ts", { CLAUDECODE: "1" })).toBe(1);
   }, 30_000);
 });
 
 describe("the guard is wired into npm", () => {
-  it("runs before both documented launch paths", () => {
-    const parsed: unknown = JSON.parse(read("package.json"));
-    const scripts = scriptsOf(parsed);
-    expect(scripts.predev).toContain("scripts/preflight.ts");
-    expect(scripts.prestart).toContain("scripts/preflight.ts");
+  it("runs inside dev and start themselves, not as a pre-hook", () => {
+    // `npm run dev --ignore-scripts` skips pre/post hooks but still runs the script body, so putting
+    // the guard in the body is the only shape --ignore-scripts cannot bypass. Verified empirically.
+    const scripts = scriptsOf(JSON.parse(read("package.json")));
+    for (const name of ["dev", "start"]) {
+      expect(scripts[name]?.startsWith("tsx scripts/preflight.ts &&")).toBe(true);
+    }
+    expect(scripts.predev).toBeUndefined();
+    expect(scripts.prestart).toBeUndefined();
   });
 });
 

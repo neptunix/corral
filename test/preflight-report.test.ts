@@ -48,6 +48,13 @@ describe("buildReport — the under-Claude rule", () => {
     expect(texts(r)).toContain("Claude Code");
   });
 
+  it("tells the operator why it refused and how to proceed — the whole point of refusing", () => {
+    const detail = buildReport(input({ env: { CLAUDECODE: "1" } })).lines[0]?.detail ?? "";
+    expect(detail).toContain("passes its whole environment to every child");
+    expect(detail).toContain("CORRAL_ALLOW_UNDER_CLAUDE=1");
+    expect(detail).toContain("outside Claude Code");
+  });
+
   it("downgrades to a warning when the override is exactly \"1\"", () => {
     const r = buildReport(input({ env: { CLAUDECODE: "1", CORRAL_ALLOW_UNDER_CLAUDE: "1" } }));
     expect(r.fatal).toBe(false);
@@ -71,8 +78,10 @@ describe("buildReport — the socket consequence is conditional", () => {
       env: { CLAUDECODE: "1", HERDR_SOCKET_PATH: "/sock" },
       envs: [unpinned("local"), pinned("work")],
     }));
-    expect(texts(r)).toContain("would follow this pane's herdr");
-    expect(texts(r)).toContain("local");
+    const detail = r.lines[0]?.detail ?? "";
+    expect(detail).toContain("would follow this pane's herdr");
+    expect(detail).toContain("local");
+    expect(detail).not.toContain("work"); // the pinned env must not be blamed
   });
 
   it("omits it when every local env pins its own socket — there is nothing to inherit", () => {
@@ -105,6 +114,12 @@ describe("buildReport — socket warnings, both directions", () => {
     const r = buildReport(input({ envs: [unpinned("local")] }));
     expect(r.fatal).toBe(false);
     expect(r.lines.some((l) => l.level === "warning" && l.text.includes("unpinned"))).toBe(true);
+  });
+
+  it("treats an empty HERDR_SOCKET_PATH as unset, like CLAUDECODE", () => {
+    const r = buildReport(input({ env: { PATH: "/usr/bin", HERDR_SOCKET_PATH: "" }, envs: [unpinned("local")] }));
+    expect(r.lines.some((l) => l.text.includes("HERDR_SOCKET_PATH is unset"))).toBe(true);
+    expect(texts(r)).not.toContain("from this shell");
   });
 
   it("keeps the pre-existing warning for an unset HERDR_SOCKET_PATH", () => {
@@ -185,6 +200,16 @@ describe("formatReport", () => {
     expect(out).toContain("env \"local\" is unpinned");
     expect(out).toContain("relaunch elsewhere");
     expect(out.split("\n").length).toBeGreaterThanOrEqual(4); // heading + three lines
+  });
+
+  it("marks each line by level — a report that renders every level alike says nothing", () => {
+    const out = formatReport([
+      { level: "ok", text: "fine" }, { level: "warning", text: "iffy" }, { level: "fatal", text: "broken" },
+    ]);
+    expect(out).toMatch(/✓ fine/);
+    expect(out).toMatch(/⚠ iffy/);
+    expect(out).toMatch(/✗ broken/);
+    expect(out.split("\n")[0]).toBe("corral preflight");
   });
 
   it("indents a multi-line detail — every real fatal detail takes that path", () => {

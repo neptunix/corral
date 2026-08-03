@@ -133,21 +133,21 @@ function unpinnedLocalIds(envs: readonly HerdrEnv[]): string[] {
   return envs.filter((e) => e.kind === "local" && e.socket === undefined).map((e) => e.id);
 }
 
+/** Empty counts as absent: process env carries "" for anything a wrapper exported without a value. */
+const value = (v: string | undefined): string | undefined => (v === undefined || v === "" ? undefined : v);
+
 function launchLines(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[] | null): ReportLine[] {
-  // Empty counts as absent: a cleared variable is not a Claude session, and process env carries "" for
-  // anything a wrapper exported without a value.
-  if (env.CLAUDECODE === undefined || env.CLAUDECODE === "") {
+  if (value(env.CLAUDECODE) === undefined) {
     return [{ level: "ok", text: "not running under Claude Code" }];
   }
 
-  // Exact match, not presence: CORRAL_ALLOW_UNDER_CLAUDE=0 must not disable the guard. Decided once
-  // here, so the level and the banner below cannot drift apart.
+  // Exact match, not presence: CORRAL_ALLOW_UNDER_CLAUDE=0 must not disable the guard.
   const overridden = env.CORRAL_ALLOW_UNDER_CLAUDE === "1";
   const unpinned = envs === null ? [] : unpinnedLocalIds(envs);
   // Only assert the wrong-fleet consequence when it is actually reachable: CLAUDECODE is set for every
   // Claude process tree, including headless runs that inherit no socket at all.
   const consequence =
-    env.HERDR_SOCKET_PATH !== undefined && unpinned.length > 0
+    value(env.HERDR_SOCKET_PATH) !== undefined && unpinned.length > 0
       ? `\n\nHERDR_SOCKET_PATH is set here, and environment(s) ${unpinned.join(", ")} have no ` +
         `explicit "socket" — they would follow this pane's herdr, not the one you meant.`
       : "";
@@ -174,7 +174,8 @@ function socketLines(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[]): ReportL
   const unpinned = unpinnedLocalIds(envs);
   if (unpinned.length === 0) return [];
   const ids = unpinned.join(", ");
-  return env.HERDR_SOCKET_PATH === undefined
+  const socket = value(env.HERDR_SOCKET_PATH);
+  return socket === undefined
     ? [{
         level: "warning",
         text: `HERDR_SOCKET_PATH is unset — environment(s) ${ids} inherit the ambient socket`,
@@ -185,15 +186,10 @@ function socketLines(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[]): ReportL
     : [{
         level: "warning",
         text: `environment(s) ${ids} unpinned — they will use HERDR_SOCKET_PATH from this shell`,
-        detail: `HERDR_SOCKET_PATH=${env.HERDR_SOCKET_PATH}`,
+        detail: `HERDR_SOCKET_PATH=${socket}`,
       }];
 }
 
-/**
- * The whole report, assembled in one place. Splitting line production across functions that then have
- * to be merged in the right order is how the socket paragraph ended up needing data its producer was
- * never given — every line here sees the same inputs.
- */
 export function buildReport(input: BuildReportInput): { lines: readonly ReportLine[]; fatal: boolean } {
   const lines: ReportLine[] = [...launchLines(input.env, input.envs), input.configLine];
 
@@ -261,4 +257,31 @@ export function missingBinaryMessage(missing: MissingBinary, pathEnv: string): s
     `non-interactive shell does not read your profile) or install "${missing.bin}" into one of those ` +
     `directories.`
   );
+}
+
+/**
+ * The whole preflight, as both entrypoints need it. Exported so `scripts/preflight.ts` and
+ * `server/index.ts` cannot drift: a check added here fires on every launch path, and one added to only
+ * one caller would silently stop guarding the path it was written for.
+ *
+ * The dynamic import is load-bearing — environments.ts evaluates ENVIRONMENTS at module scope, so a
+ * static import throws during resolution, before any of this can turn it into a readable line.
+ */
+export async function runPreflight(env: NodeJS.ProcessEnv, configPath: string): Promise<{
+  report: { lines: readonly ReportLine[]; fatal: boolean };
+  envs: readonly HerdrEnv[] | null;
+}> {
+  const pathEnv = env.PATH ?? "";
+  const cfg = await loadEnvironmentsOrReport(
+    async () => (await import("../environments.ts")).ENVIRONMENTS,
+    configPath,
+  );
+  const report = buildReport({
+    env,
+    envs: cfg.ok ? cfg.envs : null,
+    configLine: cfg.line,
+    missing: cfg.ok ? findMissingBinaries(cfg.envs, (bin) => resolveOnPath(bin, pathEnv, isExecutableFile)) : [],
+    pathEnv,
+  });
+  return { report, envs: cfg.ok ? cfg.envs : null };
 }
