@@ -187,6 +187,15 @@ describe("formatReport", () => {
     expect(out.split("\n").length).toBeGreaterThanOrEqual(4); // heading + three lines
   });
 
+  it("indents a multi-line detail — every real fatal detail takes that path", () => {
+    const out = formatReport([
+      { level: "fatal", text: "launched from inside a Claude Code session", detail: "why it matters\n\nfix: do the thing" },
+    ]);
+    const rendered = out.split("\n").filter((l) => l.includes("why it matters") || l.includes("fix: do the thing"));
+    expect(rendered).toHaveLength(2);
+    for (const l of rendered) expect(l).toMatch(/^\s{4,}/);
+  });
+
   it("indents every continuation line, so a multi-line Zod error keeps the report's shape", () => {
     const out = formatReport([{ level: "fatal", text: "config: invalid\n  - environments.0.id: required" }]);
     const cont = out.split("\n").filter((l) => l.includes("environments.0.id"));
