@@ -38,6 +38,10 @@ describe("buildReport — the under-Claude rule", () => {
     expect(buildReport(input()).fatal).toBe(false);
   });
 
+  it("treats an empty CLAUDECODE as absent — a cleared variable is not a Claude session", () => {
+    expect(buildReport(input({ env: { CLAUDECODE: "", PATH: "/usr/bin" } })).fatal).toBe(false);
+  });
+
   it("is fatal when CLAUDECODE is set", () => {
     const r = buildReport(input({ env: { CLAUDECODE: "1", HERDR_SOCKET_PATH: "/sock" } }));
     expect(r.fatal).toBe(true);
@@ -67,8 +71,8 @@ describe("buildReport — the socket consequence is conditional", () => {
       env: { CLAUDECODE: "1", HERDR_SOCKET_PATH: "/sock" },
       envs: [unpinned("local"), pinned("work")],
     }));
+    expect(texts(r)).toContain("would follow this pane's herdr");
     expect(texts(r)).toContain("local");
-    expect(texts(r)).toContain("HERDR_SOCKET_PATH");
   });
 
   it("omits it when every local env pins its own socket — there is nothing to inherit", () => {
@@ -121,11 +125,28 @@ describe("buildReport — missing binaries never make it fatal", () => {
     expect(r.lines.some((l) => l.level === "ok" && l.text.includes("PATH"))).toBe(true);
   });
 
-  it("warns per missing binary and does NOT exit — see server/index.ts:35-40", () => {
+  it("warns per missing binary and does NOT exit — a dead board is worse than a degraded one", () => {
     const missing: MissingBinary[] = [{ bin: "herdr", envIds: ["work"] }, { bin: "ssh", envIds: ["box"] }];
     const r = buildReport(input({ missing }));
     expect(r.fatal).toBe(false);
     expect(r.lines.filter((l) => l.level === "warning" && l.text.includes("is not on this server"))).toHaveLength(2);
+  });
+
+  it("names only the binaries it actually looked for — an all-local config never checks ssh", () => {
+    const r = buildReport(input({ envs: [pinned("work")] }));
+    const ok = r.lines.find((l) => l.level === "ok" && l.text.includes("PATH"));
+    expect(ok?.text).toContain("herdr");
+    expect(ok?.text).not.toContain("ssh");
+  });
+
+  it("names ssh too once a remote env needs it", () => {
+    const r = buildReport(input({ envs: [pinned("work"), remote("box")] }));
+    expect(r.lines.find((l) => l.level === "ok" && l.text.includes("PATH"))?.text).toContain("ssh");
+  });
+
+  it("does not claim a clean PATH while also reporting something missing", () => {
+    const r = buildReport(input({ missing: [{ bin: "herdr", envIds: ["work"] }] }));
+    expect(r.lines.some((l) => l.level === "ok" && l.text.includes("resolved on PATH"))).toBe(false);
   });
 
   it("emits no binary lines at all when the config failed to load", () => {
@@ -164,5 +185,12 @@ describe("formatReport", () => {
     expect(out).toContain("env \"local\" is unpinned");
     expect(out).toContain("relaunch elsewhere");
     expect(out.split("\n").length).toBeGreaterThanOrEqual(4); // heading + three lines
+  });
+
+  it("indents every continuation line, so a multi-line Zod error keeps the report's shape", () => {
+    const out = formatReport([{ level: "fatal", text: "config: invalid\n  - environments.0.id: required" }]);
+    const cont = out.split("\n").filter((l) => l.includes("environments.0.id"));
+    expect(cont).toHaveLength(1);
+    expect(cont[0]).toMatch(/^\s{4,}/);
   });
 });

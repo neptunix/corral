@@ -1,7 +1,7 @@
 import { ENV_CONFIG_PATH } from "../config.ts";
 import {
   buildReport, findMissingBinaries, formatReport, isExecutableFile, loadEnvironmentsOrReport,
-  printReport, resolveOnPath,
+  resolveOnPath,
 } from "../server/preflight.ts";
 
 /**
@@ -26,7 +26,7 @@ const report = buildReport({
 });
 
 if (report.fatal) {
-  printReport(formatReport(report.lines));
+  console.error(formatReport(report.lines));
   console.error("\nFATAL: refusing to start.");
   process.exit(1);
 }

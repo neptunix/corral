@@ -126,16 +126,23 @@ const UNDER_CLAUDE_FATAL =
   "live-terminal attach would carry this Claude session's variables.";
 
 const UNDER_CLAUDE_FIX =
-  "fix: CORRAL_ALLOW_UNDER_CLAUDE=1 npm run dev   (this launch only)\n" +
+  "fix: prefix the launch — CORRAL_ALLOW_UNDER_CLAUDE=1 npm run dev   (or npm start)\n" +
   "     or launch corral from a terminal outside Claude Code";
 
 function unpinnedLocalIds(envs: readonly HerdrEnv[]): string[] {
   return envs.filter((e) => e.kind === "local" && e.socket === undefined).map((e) => e.id);
 }
 
-function launchLine(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[] | null): ReportLine {
-  if (env.CLAUDECODE === undefined) return { level: "ok", text: "not running under Claude Code" };
+function launchLines(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[] | null): ReportLine[] {
+  // Empty counts as absent: a cleared variable is not a Claude session, and process env carries "" for
+  // anything a wrapper exported without a value.
+  if (env.CLAUDECODE === undefined || env.CLAUDECODE === "") {
+    return [{ level: "ok", text: "not running under Claude Code" }];
+  }
 
+  // Exact match, not presence: CORRAL_ALLOW_UNDER_CLAUDE=0 must not disable the guard. Decided once
+  // here, so the level and the banner below cannot drift apart.
+  const overridden = env.CORRAL_ALLOW_UNDER_CLAUDE === "1";
   const unpinned = envs === null ? [] : unpinnedLocalIds(envs);
   // Only assert the wrong-fleet consequence when it is actually reachable: CLAUDECODE is set for every
   // Claude process tree, including headless runs that inherit no socket at all.
@@ -145,12 +152,22 @@ function launchLine(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[] | null): R
         `explicit "socket" — they would follow this pane's herdr, not the one you meant.`
       : "";
 
-  return {
-    // Exact match, not presence: CORRAL_ALLOW_UNDER_CLAUDE=0 must not disable the guard.
-    level: env.CORRAL_ALLOW_UNDER_CLAUDE === "1" ? "warning" : "fatal",
+  const lines: ReportLine[] = [{
+    level: overridden ? "warning" : "fatal",
     text: "launched from inside a Claude Code session",
-    detail: `${UNDER_CLAUDE_FATAL}${consequence}\n\n${UNDER_CLAUDE_FIX}`,
-  };
+    detail: `${UNDER_CLAUDE_FATAL}${consequence}${overridden ? "" : `\n\n${UNDER_CLAUDE_FIX}`}`,
+  }];
+  // Repeated on every start, not just once: the likeliest way this guard dies is the operator
+  // exporting the override into a shell profile and ceasing to notice.
+  if (overridden) {
+    lines.push({ level: "warning", text: "CORRAL_ALLOW_UNDER_CLAUDE=1 — the under-Claude guard is disabled" });
+  }
+  return lines;
+}
+
+/** Which binaries the configured envs actually make corral exec — the same split findMissingBinaries uses. */
+function neededBinaries(envs: readonly HerdrEnv[]): string[] {
+  return [...new Set(envs.map((e) => (e.kind === "remote" ? "ssh" : "herdr")))];
 }
 
 function socketLines(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[]): ReportLine[] {
@@ -178,20 +195,15 @@ function socketLines(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[]): ReportL
  * never given — every line here sees the same inputs.
  */
 export function buildReport(input: BuildReportInput): { lines: readonly ReportLine[]; fatal: boolean } {
-  const lines: ReportLine[] = [launchLine(input.env, input.envs)];
-
-  // Announced on every launch, not just once: the likeliest way this guard dies is the operator
-  // exporting the override into a shell profile and silently living without it.
-  if (input.env.CLAUDECODE !== undefined && input.env.CORRAL_ALLOW_UNDER_CLAUDE === "1") {
-    lines.push({ level: "warning", text: "CORRAL_ALLOW_UNDER_CLAUDE=1 — the under-Claude guard is disabled" });
-  }
-  lines.push(input.configLine);
+  const lines: ReportLine[] = [...launchLines(input.env, input.envs), input.configLine];
 
   if (input.envs !== null) {
-    // Missing binaries are a WARNING, never fatal — server/index.ts:35-40 argues it and the argument
-    // holds: refusing to boot would turn a degraded deployment into a dead one.
+    // Missing binaries are a WARNING, never fatal: refusing to boot would turn a degraded deployment
+    // into a dead one.
     if (input.missing.length === 0) {
-      lines.push({ level: "ok", text: "herdr, ssh resolved on PATH" });
+      // Name only what was actually looked up — an all-local config never searches for ssh, and a
+      // green line claiming otherwise is the silent lie this module exists to remove.
+      lines.push({ level: "ok", text: `${neededBinaries(input.envs).join(", ")} resolved on PATH` });
     }
     for (const m of input.missing) {
       lines.push({ level: "warning", text: missingBinaryMessage(m, input.pathEnv) });
@@ -226,18 +238,19 @@ export async function loadEnvironmentsOrReport(
 
 const MARK = { ok: "✓", warning: "⚠", fatal: "✗" } as const;
 
+const indent = (s: string, pad: string): string[] =>
+  s.split("\n").map((line, i) => (i === 0 || line === "" ? line : `${pad}${line}`));
+
 export function formatReport(lines: readonly ReportLine[]): string {
   const body = lines.flatMap((l) => {
-    const head = `  ${MARK[l.level]} ${l.text}`;
-    if (l.detail === undefined) return [head];
-    return [head, ...l.detail.split("\n").map((d) => (d === "" ? "" : `        ${d}`))];
+    // A Zod config error is multi-line; without indenting continuations it breaks the report's shape.
+    const head = indent(`  ${MARK[l.level]} ${l.text}`, "      ");
+    if (l.detail === undefined) return head;
+    return [...head, ...l.detail.split("\n").map((d) => (d === "" ? "" : `        ${d}`))];
   });
   return ["corral preflight", ...body].join("\n");
 }
 
-export function printReport(text: string): void {
-  console.error(text);
-}
 
 /** One actionable line. The PATH is the load-bearing part — see the note on MissingBinary. */
 export function missingBinaryMessage(missing: MissingBinary, pathEnv: string): string {

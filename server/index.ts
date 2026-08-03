@@ -14,7 +14,7 @@ import { assertLoopback } from "./host-guard.ts";
 import { createPoller } from "./poller.ts";
 import {
   buildReport, findMissingBinaries, formatReport, isExecutableFile, loadEnvironmentsOrReport,
-  printReport, resolveOnPath, resolveReapGrace,
+  resolveOnPath, resolveReapGrace,
 } from "./preflight.ts";
 import { startReconciler } from "./reconcile.ts";
 import { spawnSession } from "./spawn.ts";
@@ -46,7 +46,7 @@ const report = buildReport({
     : [],
   pathEnv: searchedPath,
 });
-printReport(formatReport(report.lines));
+console.error(formatReport(report.lines));
 if (report.fatal || !cfg.ok) {
   console.error("\nFATAL: refusing to start.");
   process.exit(1);
