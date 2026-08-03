@@ -2,10 +2,9 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 
 import {
-  BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, HOST, LIST_TIMEOUT, PORT, UPLOAD_ROOT,
-  WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED, ZOMBIE_REAP_GRACE_MS,
+  BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, ENV_CONFIG_PATH, HOST, LIST_TIMEOUT, PORT,
+  UPLOAD_ROOT, WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED, ZOMBIE_REAP_GRACE_MS,
 } from "../config.ts";
-import { ENVIRONMENTS } from "../environments.ts";
 import { createApi } from "./api.ts";
 import { createAttentionStore } from "./attention-store.ts";
 import { sweepBriefRoot } from "./brief.ts";
@@ -13,7 +12,10 @@ import { createGit } from "./git.ts";
 import { closePane, listTabs, listWorkspaces, readPane, workspaceClose } from "./herdr.ts";
 import { assertLoopback } from "./host-guard.ts";
 import { createPoller } from "./poller.ts";
-import { findMissingBinaries, isExecutableFile, missingBinaryMessage, resolveOnPath, resolveReapGrace } from "./preflight.ts";
+import {
+  buildReport, findMissingBinaries, formatReport, isExecutableFile, loadEnvironmentsOrReport,
+  printReport, resolveOnPath, resolveReapGrace,
+} from "./preflight.ts";
 import { startReconciler } from "./reconcile.ts";
 import { spawnSession } from "./spawn.ts";
 import { createStorage } from "./storage.ts";
@@ -24,24 +26,32 @@ import { startZombieReaper } from "./zombie-reaper.ts";
 
 assertLoopback(HOST);
 
-if (process.env.HERDR_SOCKET_PATH === undefined) {
-  console.warn(
-    'HERDR_SOCKET_PATH is unset — any `kind:"local"` environment without an explicit `socket` inherits ' +
-      "the ambient socket and may return no sessions or route to the wrong herdr instance. " +
-      "Launch from the intended herdr context or set HERDR_SOCKET_PATH.",
-  );
-}
-
-// Say it once, at startup, if a binary corral will exec is not resolvable from THIS process (see
-// server/preflight.ts for why the server's PATH is the only place the tell lives). Deliberately does
-// NOT exit: a multi-environment operator whose one broken env is `remote` still gets a working board,
-// and refusing to boot would turn a degraded deployment into a dead one. The point is that the
-// failure now says the binary's name out loud instead of surfacing as a frozen card and an attach
-// that dies with `execvp(3) failed` and no attribution.
+// The config is loaded through a DYNAMIC import on purpose: environments.ts evaluates ENVIRONMENTS at
+// module scope, so a static import would throw during import resolution — before anything here could
+// turn it into a readable line. Re-adding `import { ENVIRONMENTS }` compiles and lints clean while
+// making this whole block unreachable; test/preflight-wiring.test.ts guards against exactly that.
 const searchedPath = process.env.PATH ?? "";
-for (const missing of findMissingBinaries(ENVIRONMENTS, (bin) => resolveOnPath(bin, searchedPath, isExecutableFile))) {
-  console.error(missingBinaryMessage(missing, searchedPath));
+const cfg = await loadEnvironmentsOrReport(
+  async () => (await import("../environments.ts")).ENVIRONMENTS,
+  ENV_CONFIG_PATH,
+);
+const report = buildReport({
+  env: process.env,
+  envs: cfg.ok ? cfg.envs : null,
+  configLine: cfg.line,
+  // Missing binaries are resolved against THIS process's PATH — see server/preflight.ts for why the
+  // server's own environment is the only place that tell lives — and stay a warning, never fatal.
+  missing: cfg.ok
+    ? findMissingBinaries(cfg.envs, (bin) => resolveOnPath(bin, searchedPath, isExecutableFile))
+    : [],
+  pathEnv: searchedPath,
+});
+printReport(formatReport(report.lines));
+if (report.fatal || !cfg.ok) {
+  console.error("\nFATAL: refusing to start.");
+  process.exit(1);
 }
+const ENVS = cfg.envs;
 
 const storage = createStorage(BOARD_DATA_DIR);
 const git = createGit(BOARD_DATA_DIR);
@@ -56,7 +66,7 @@ void (async () => {
   // recap sweep is live by default (RECAP_ENABLED=true, 60s interval); set RECAP_ENABLED=false to disable
   const attention = createAttentionStore({ dataDir: BOARD_DATA_DIR, read: readPane });
   attention.init(); // load attention.json once at startup (§3.2)
-  const poller = createPoller({ envs: ENVIRONMENTS, attention });
+  const poller = createPoller({ envs: ENVS, attention });
   poller.start();
   // Backfill stored links' Claude sessionId once the poller sees it (spawned links start null) — the
   // write-side half of persistent session identity; buildBoardState does the read-side churn-heal.
@@ -67,11 +77,11 @@ void (async () => {
   if (ZOMBIE_REAP_ENABLED) {
     const reapGrace = resolveReapGrace(ZOMBIE_REAP_GRACE_MS, CHEAP_INTERVAL_MS, LIST_TIMEOUT);
     if (reapGrace.message !== null) console.error(reapGrace.message);
-    startZombieReaper({ poller, storage, envs: ENVIRONMENTS, listTabs, closePane, graceMs: reapGrace.ms });
+    startZombieReaper({ poller, storage, envs: ENVS, listTabs, closePane, graceMs: reapGrace.ms });
   }
 
   const app = createApi({
-    poller, envs: ENVIRONMENTS, storage,
+    poller, envs: ENVS, storage,
     listWorkspaces,
     lastActivity: readLastActivity,
     allowedOrigins: WS_ALLOWED_ORIGINS,
@@ -88,5 +98,5 @@ void (async () => {
   });
   // Live-terminal WS attach rides the same loopback-only http server (assertLoopback above). SEC-1
   // Origin allowlist + SEC-2 rate/cap + SEC-3 reaping are all enforced inside attachWebSocketServer.
-  attachWebSocketServer(server, { envs: ENVIRONMENTS, allowedOrigins: WS_ALLOWED_ORIGINS });
+  attachWebSocketServer(server, { envs: ENVS, allowedOrigins: WS_ALLOWED_ORIGINS });
 })();

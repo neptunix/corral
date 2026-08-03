@@ -45,7 +45,7 @@ mkdir -p ~/.corral
 cp environments.example.json ~/.corral/environments.json
 $EDITOR ~/.corral/environments.json
 
-# 3. run
+# 3. run — from a terminal OUTSIDE Claude Code (see "Launching corral" below)
 npm install          # node-pty is native — compiles against your Node ABI
 npm run dev          # Vite (http://127.0.0.1:5173) + API (http://127.0.0.1:8787), proxied
 # production:
@@ -78,6 +78,42 @@ them, killing a pane, reading pane contents, writing theme files. Do not expect 
 non-loopback `Host` rejection to catch this — a default `proxy_pass` sends the loopback upstream
 as the `Host`, so the check passes. Note also that the live terminal will **not** work through a
 proxy: its WebSocket Origin allowlist is loopback-only by design.
+
+## Launching corral
+
+**Launch from a normal terminal, never from inside a Claude Code session.** corral refuses to start
+there, and prints why:
+
+```
+corral preflight
+  ✗ launched from inside a Claude Code session
+```
+
+Two things go wrong when it does. corral passes its whole environment to every child process, so every
+`herdr` call and every live-terminal attach carries that Claude session's variables. And any `local`
+environment without an explicit `socket` inherits `HERDR_SOCKET_PATH` from the pane — so corral talks
+to *that* pane's herdr and shows you a real, healthy fleet belonging to the wrong machine. Nothing on
+the board looks wrong, which is what makes it worth refusing.
+
+To override for a single launch:
+
+```bash
+CORRAL_ALLOW_UNDER_CLAUDE=1 npm run dev
+```
+
+Prefer that to exporting it in your shell profile: exported, the guard is off everywhere and you stop
+noticing. While the override is active every start prints a reminder that it is disabled.
+
+**What the check cannot see:** an herdr *server* that was itself started from a Claude session. That
+process's environment is not readable on macOS. If sessions behave oddly and corral is clean, relaunch
+your herdr session servers from a terminal outside Claude Code too.
+
+**After a reboot**, in order: start the herdr session servers → `npm run dev` → open the UI. corral
+renders the board from persisted state, so it comes up looking healthy whether or not herdr is
+running; the cards simply stop changing.
+
+**Create sessions from the corral UI**, not by typing `claude` into a pane yourself — the UI uses the
+environment's `spawnCommand` (e.g. a profile-specific `claude-work`).
 
 ## Upgrading
 
@@ -314,7 +350,8 @@ cheap poll driving the attention feed) · `ATTENTION_MIN_WORK_MS` (600000 — a 
 must run ≥10 min for its finish to count) · `CORRAL_HOME` (`~/.corral`) ·
 `CORRAL_CONFIG` (`$CORRAL_HOME/environments.json`) · `BOARD_DATA_DIR` (defaults to
 `$CORRAL_HOME` — see Architecture for why this must be a fresh directory) ·
-`RECAP_ENABLED` (true) · `STATUSLINE_ENABLED` (true).
+`RECAP_ENABLED` (true) · `STATUSLINE_ENABLED` (true) · `CORRAL_ALLOW_UNDER_CLAUDE` (unset — set to
+exactly `1` to start anyway from inside a Claude Code session; see Launching corral).
 
 WebSocket attach: `WS_MAX_CONCURRENT` (3) · `WS_RATE_PER_WINDOW` (10) / `WS_RATE_WINDOW_MS`
 (10000) · `WS_HEARTBEAT_MS` (30000) · `WS_KILL_GRACE_MS` (2000) · `WS_PROBE_GRACE_MS` (2000).

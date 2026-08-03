@@ -1,0 +1,168 @@
+import { describe, it, expect } from "vitest";
+
+import type { HerdrEnv } from "../environments.ts";
+import type { MissingBinary, ReportLine } from "../server/preflight.ts";
+import { buildReport, formatReport, loadEnvironmentsOrReport } from "../server/preflight.ts";
+
+const pinned = (id: string): HerdrEnv => ({
+  id, label: id.toUpperCase(), kind: "local", socket: `~/.config/herdr/sessions/${id}/herdr.sock`,
+  claudeConfigDirs: [], spawnCommand: "claude", repos: {},
+});
+const unpinned = (id: string): HerdrEnv => ({
+  id, label: id.toUpperCase(), kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {},
+});
+const remote = (id: string): HerdrEnv => ({
+  id, label: id.toUpperCase(), kind: "remote", sshHost: "h", socket: "~/s.sock", herdrBin: "herdr",
+  claudeConfigDirs: [], spawnCommand: "claude", repos: {},
+});
+
+const okLine: ReportLine = { level: "ok", text: "config: 1 environment loaded from /cfg.json" };
+
+/** buildReport input with everything healthy; each test overrides only what it is about. */
+function input(over: Partial<Parameters<typeof buildReport>[0]> = {}): Parameters<typeof buildReport>[0] {
+  return {
+    env: { PATH: "/usr/bin", HERDR_SOCKET_PATH: "/sock" },
+    envs: [pinned("work")],
+    configLine: okLine,
+    missing: [],
+    pathEnv: "/usr/bin",
+    ...over,
+  };
+}
+
+const texts = (r: { lines: readonly ReportLine[] }): string =>
+  r.lines.map((l) => `${l.text} ${l.detail ?? ""}`).join("\n");
+
+describe("buildReport — the under-Claude rule", () => {
+  it("is not fatal when CLAUDECODE is absent", () => {
+    expect(buildReport(input()).fatal).toBe(false);
+  });
+
+  it("is fatal when CLAUDECODE is set", () => {
+    const r = buildReport(input({ env: { CLAUDECODE: "1", HERDR_SOCKET_PATH: "/sock" } }));
+    expect(r.fatal).toBe(true);
+    expect(texts(r)).toContain("Claude Code");
+  });
+
+  it("downgrades to a warning when the override is exactly \"1\"", () => {
+    const r = buildReport(input({ env: { CLAUDECODE: "1", CORRAL_ALLOW_UNDER_CLAUDE: "1" } }));
+    expect(r.fatal).toBe(false);
+    expect(r.lines.some((l) => l.level === "warning" && l.text.includes("CORRAL_ALLOW_UNDER_CLAUDE"))).toBe(true);
+  });
+
+  it("stays fatal for CORRAL_ALLOW_UNDER_CLAUDE=0 — the override is an exact match, not presence", () => {
+    expect(buildReport(input({ env: { CLAUDECODE: "1", CORRAL_ALLOW_UNDER_CLAUDE: "0" } })).fatal).toBe(true);
+  });
+
+  it("says nothing about the guard when the override is set but corral is not under Claude", () => {
+    const r = buildReport(input({ env: { CORRAL_ALLOW_UNDER_CLAUDE: "1" } }));
+    expect(r.fatal).toBe(false);
+    expect(texts(r)).not.toContain("CORRAL_ALLOW_UNDER_CLAUDE");
+  });
+});
+
+describe("buildReport — the socket consequence is conditional", () => {
+  it("names the wrong-fleet consequence when the socket is inherited and an env is unpinned", () => {
+    const r = buildReport(input({
+      env: { CLAUDECODE: "1", HERDR_SOCKET_PATH: "/sock" },
+      envs: [unpinned("local"), pinned("work")],
+    }));
+    expect(texts(r)).toContain("local");
+    expect(texts(r)).toContain("HERDR_SOCKET_PATH");
+  });
+
+  it("omits it when every local env pins its own socket — there is nothing to inherit", () => {
+    const r = buildReport(input({
+      env: { CLAUDECODE: "1", HERDR_SOCKET_PATH: "/sock" },
+      envs: [pinned("work"), remote("box")],
+    }));
+    expect(r.fatal).toBe(true);
+    expect(texts(r)).not.toContain("would follow this pane's herdr");
+  });
+
+  it("omits it when HERDR_SOCKET_PATH is unset — a headless run inherits no socket", () => {
+    const r = buildReport(input({ env: { CLAUDECODE: "1" }, envs: [unpinned("local")] }));
+    expect(r.fatal).toBe(true);
+    expect(texts(r)).not.toContain("would follow this pane's herdr");
+  });
+
+  it("omits it when the config never loaded, since nothing is known about the envs", () => {
+    const r = buildReport(input({
+      env: { CLAUDECODE: "1", HERDR_SOCKET_PATH: "/sock" },
+      envs: null,
+      configLine: { level: "fatal", text: "config: cannot read /cfg.json" },
+    }));
+    expect(texts(r)).not.toContain("would follow this pane's herdr");
+  });
+});
+
+describe("buildReport — socket warnings, both directions", () => {
+  it("warns that an unpinned env will follow the ambient socket when one is set", () => {
+    const r = buildReport(input({ envs: [unpinned("local")] }));
+    expect(r.fatal).toBe(false);
+    expect(r.lines.some((l) => l.level === "warning" && l.text.includes("unpinned"))).toBe(true);
+  });
+
+  it("keeps the pre-existing warning for an unset HERDR_SOCKET_PATH", () => {
+    const r = buildReport(input({ env: { PATH: "/usr/bin" }, envs: [unpinned("local")] }));
+    expect(r.lines.some((l) => l.level === "warning" && l.text.includes("HERDR_SOCKET_PATH is unset"))).toBe(true);
+  });
+
+  it("says neither when every local env pins a socket", () => {
+    const r = buildReport(input({ envs: [pinned("work")] }));
+    expect(texts(r)).not.toContain("unpinned");
+    expect(texts(r)).not.toContain("HERDR_SOCKET_PATH is unset");
+  });
+});
+
+describe("buildReport — missing binaries never make it fatal", () => {
+  it("reports one ok line when everything resolves", () => {
+    const r = buildReport(input());
+    expect(r.lines.some((l) => l.level === "ok" && l.text.includes("PATH"))).toBe(true);
+  });
+
+  it("warns per missing binary and does NOT exit — see server/index.ts:35-40", () => {
+    const missing: MissingBinary[] = [{ bin: "herdr", envIds: ["work"] }, { bin: "ssh", envIds: ["box"] }];
+    const r = buildReport(input({ missing }));
+    expect(r.fatal).toBe(false);
+    expect(r.lines.filter((l) => l.level === "warning" && l.text.includes("is not on this server"))).toHaveLength(2);
+  });
+
+  it("emits no binary lines at all when the config failed to load", () => {
+    const r = buildReport(input({ envs: null, configLine: { level: "fatal", text: "config: bad" } }));
+    expect(texts(r)).not.toContain("PATH");
+    expect(r.fatal).toBe(true);
+  });
+});
+
+describe("loadEnvironmentsOrReport", () => {
+  it("turns a thrown config error into a fatal line carrying the message", async () => {
+    const res = await loadEnvironmentsOrReport(() => Promise.reject(new Error("bad JSON at line 3")), "/cfg.json");
+    expect(res.ok).toBe(false);
+    expect(res.line.level).toBe("fatal");
+    expect(res.line.text + (res.line.detail ?? "")).toContain("bad JSON at line 3");
+  });
+
+  it("passes the loaded environments through and names the config file it opened", async () => {
+    const envs = [pinned("work")];
+    const res = await loadEnvironmentsOrReport(() => Promise.resolve(envs), "~/custom/environments.json");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.envs).toEqual(envs);
+    expect(res.line.text).toContain("~/custom/environments.json"); // verbatim — CORRAL_CONFIG is not expanded
+  });
+});
+
+describe("formatReport", () => {
+  it("renders one marked line per report line", () => {
+    const out = formatReport([
+      { level: "ok", text: "not running under Claude Code" },
+      { level: "warning", text: "env \"local\" is unpinned" },
+      { level: "fatal", text: "launched from inside a Claude Code session", detail: "relaunch elsewhere" },
+    ]);
+    expect(out).toContain("not running under Claude Code");
+    expect(out).toContain("env \"local\" is unpinned");
+    expect(out).toContain("relaunch elsewhere");
+    expect(out.split("\n").length).toBeGreaterThanOrEqual(4); // heading + three lines
+  });
+});
