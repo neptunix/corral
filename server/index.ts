@@ -1,7 +1,10 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 
-import { BOARD_DATA_DIR, BRIEF_ROOT, HOST, PORT, UPLOAD_ROOT, WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED } from "../config.ts";
+import {
+  BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, HOST, LIST_TIMEOUT, PORT, UPLOAD_ROOT,
+  WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED, ZOMBIE_REAP_GRACE_MS,
+} from "../config.ts";
 import { ENVIRONMENTS } from "../environments.ts";
 import { createApi } from "./api.ts";
 import { createAttentionStore } from "./attention-store.ts";
@@ -10,7 +13,7 @@ import { createGit } from "./git.ts";
 import { closePane, listTabs, listWorkspaces, readPane, workspaceClose } from "./herdr.ts";
 import { assertLoopback } from "./host-guard.ts";
 import { createPoller } from "./poller.ts";
-import { findMissingBinaries, isExecutableFile, missingBinaryMessage, resolveOnPath } from "./preflight.ts";
+import { findMissingBinaries, isExecutableFile, missingBinaryMessage, resolveOnPath, resolveReapGrace } from "./preflight.ts";
 import { startReconciler } from "./reconcile.ts";
 import { spawnSession } from "./spawn.ts";
 import { createStorage } from "./storage.ts";
@@ -60,7 +63,12 @@ void (async () => {
   startReconciler({ poller, storage });
   // Close shell-only tabs left behind when a Claude session exits (detached link whose herdr tab still
   // lingers). The ONLY place the poll loop mutates herdr — gated, guarded, and via pane close only.
-  if (ZOMBIE_REAP_ENABLED) startZombieReaper({ poller, storage, envs: ENVIRONMENTS, listTabs, closePane });
+  // Clamp + warning sit inside the gate: with the reaper off there is nothing to clamp or warn about.
+  if (ZOMBIE_REAP_ENABLED) {
+    const reapGrace = resolveReapGrace(ZOMBIE_REAP_GRACE_MS, CHEAP_INTERVAL_MS, LIST_TIMEOUT);
+    if (reapGrace.message !== null) console.error(reapGrace.message);
+    startZombieReaper({ poller, storage, envs: ENVIRONMENTS, listTabs, closePane, graceMs: reapGrace.ms });
+  }
 
   const app = createApi({
     poller, envs: ENVIRONMENTS, storage,

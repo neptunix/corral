@@ -79,6 +79,33 @@ export function findMissingBinaries(
     .map(([bin, envIds]) => ({ bin, envIds }));
 }
 
+/**
+ * Floor for the zombie reaper's grace window (ZOMBIE_REAP_GRACE_MS), clamped UP at startup so a
+ * too-short grace degrades into slower cleanup instead of refusing to boot.
+ *
+ * A pane's liveness in a poller snapshot is at most `pollMs + listTimeoutMs` old — one staleness
+ * window. The grace must outlast two of them: while the poll loop is ticking on schedule that is long
+ * enough for a refuting poll to land and reset the clock (detectZombies rebuilds `since` from the
+ * round's candidates), so a single stale sighting cannot reap a live pane. A stopped poll loop is a
+ * separate case, handled by the tick-gap rail in zombie-reaper.ts.
+ */
+export function resolveReapGrace(
+  configuredMs: number,
+  pollMs: number,
+  listTimeoutMs: number,
+): { readonly ms: number; readonly message: string | null } {
+  const floor = 2 * (pollMs + listTimeoutMs); // two staleness windows
+  if (configuredMs >= floor) return { ms: configuredMs, message: null };
+  return {
+    ms: floor,
+    message:
+      `[preflight] ZOMBIE_REAP_GRACE_MS=${String(configuredMs)} is below the ${String(floor)} ms ` +
+      `floor implied by HERDR_DASH_POLL_MS=${String(pollMs)}; using ${String(floor)} ms. A shorter ` +
+      `grace lets the zombie reaper close a pane whose just-spawned Claude it has not polled yet, ` +
+      `killing a live session.`,
+  };
+}
+
 /** One actionable line. The PATH is the load-bearing part — see the note on MissingBinary. */
 export function missingBinaryMessage(missing: MissingBinary, pathEnv: string): string {
   return (

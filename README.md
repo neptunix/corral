@@ -319,6 +319,10 @@ must run ≥10 min for its finish to count) · `CORRAL_HOME` (`~/.corral`) ·
 WebSocket attach: `WS_MAX_CONCURRENT` (3) · `WS_RATE_PER_WINDOW` (10) / `WS_RATE_WINDOW_MS`
 (10000) · `WS_HEARTBEAT_MS` (30000) · `WS_KILL_GRACE_MS` (2000) · `WS_PROBE_GRACE_MS` (2000).
 
+Zombie-tab reaper (closes the shell-only tab left when Claude exits; logs each reap as
+`zombie_reaped`): `ZOMBIE_REAP_ENABLED` (true) · `ZOMBIE_REAP_GRACE_MS` (180000 — clamped up at boot
+to a floor derived from `HERDR_DASH_POLL_MS`; to disable, use the flag, never a short grace).
+
 [MCP server](#mcp-server): `CORRAL_URL` (defaults to `http://127.0.0.1:$HERDR_DASH_PORT` — read by
 the MCP process, see the note there) · `BRIEF_MAX_BYTES` (16384) · `BRIEF_CLEANUP_DELAY_MS` (600000
 — backstop only; a brief is normally deleted by the launch command that reads it).
