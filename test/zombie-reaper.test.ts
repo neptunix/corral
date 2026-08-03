@@ -19,7 +19,7 @@ describe("detectZombies", () => {
       detached: [link()], tabsByEnv: tabsByEnv([tab()]),
       now: 20_000, since: new Map([["e:w1:t2", 0]]), graceMs: 20_000,
     });
-    expect(r.reap).toEqual([{ env: "e", paneId: "w1:p2" }]);
+    expect(r.reap).toEqual([{ env: "e", paneId: "w1:p2", tabId: "w1:t2", firstSeenAt: 0 }]);
   });
 
   it("does not reap when the stored tabId is absent from the tab list (herdr churn)", () => {
@@ -45,7 +45,7 @@ describe("detectZombies", () => {
       detached: [link({ tabLabel: "test-corral-b" })], tabsByEnv: tabsByEnv([tab({ label: "test-corral-5" })]),
       now: 20_000, since: new Map([["e:w1:t2", 0]]), graceMs: 20_000,
     });
-    expect(r.reap).toEqual([{ env: "e", paneId: "w1:p2" }]);
+    expect(r.reap).toEqual([{ env: "e", paneId: "w1:p2", tabId: "w1:t2", firstSeenAt: 0 }]);
   });
 
   it("ignores a link with an empty tabId", () => {
@@ -92,7 +92,10 @@ describe("detectZombies", () => {
       tabsByEnv: tabsByEnv([tab(), tab({ tabId: "w2:t3", label: "other-a", workspaceId: "w2" })]),
       now: 20_000, since: new Map([["e:w1:t2", 0], ["e:w2:t3", 0]]), graceMs: 20_000,
     });
-    expect(r.reap).toEqual([{ env: "e", paneId: "w1:p2" }, { env: "e", paneId: "w2:p3" }]);
+    expect(r.reap).toEqual([
+      { env: "e", paneId: "w1:p2", tabId: "w1:t2", firstSeenAt: 0 },
+      { env: "e", paneId: "w2:p3", tabId: "w2:t3", firstSeenAt: 0 },
+    ]);
   });
 });
 
@@ -269,6 +272,46 @@ describe("startZombieReaper", () => {
     clock = 0; cb!(empty); await flush();
     clock = 20_000; cb!(empty); await flush();
     expect(closed).toEqual(["w2:p3"]); // w1's rejection was caught; w2 still reaped; no unhandled rejection
+  });
+
+  it("restarts the grace window when a poll inside it shows the agent back (freshly-spawned session)", async () => {
+    // The regression this file's grace floor exists for. A poll captured in the sub-second gap between
+    // herdr creating a pane and registering the Claude started in it makes a LIVE session look detached
+    // and seeds the timer. The next poll of that env shows the agent — the timer must drop, so the
+    // stale sighting alone can never reap. Only a fresh detachment starts a new window.
+    const live = (sid: string): Snapshot => ({
+      envs: { "work-local": { reachable: true } },
+      sessions: [{
+        env: "work-local", paneId: "w1:p2", status: "working", agent: "claude", cwd: "/c",
+        tab: "task-a", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: sid,
+        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+      }],
+    });
+    const empty: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+    let snap: Snapshot = empty;
+    let clock = 0;
+    const closed: string[] = [];
+    let cb: ((s: Snapshot) => void) | null = null;
+    startZombieReaper({
+      poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+      storage: { getAllBoards: () => [boardWithLink()] },
+      envs: [getEnv("work-local")],
+      listTabs: () => Promise.resolve([rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })]),
+      closePane: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); },
+      now: () => clock, graceMs: 20_000,
+    });
+
+    clock = 0; cb!(empty); await flush();              // stale pre-registration sighting → timer seeded
+    snap = live(SID);
+    clock = 10_000; cb!(snap); await flush();          // the env's next poll lands: the agent is there
+    clock = 30_000; cb!(snap); await flush();          // well past the original window
+    expect(closed).toEqual([]);                        // …and nothing was reaped: the timer was dropped
+
+    snap = empty;                                      // now Claude really exits
+    clock = 40_000; cb!(empty); await flush();
+    expect(closed).toEqual([]);                        // a NEW window starts here, not at 0
+    clock = 60_000; cb!(empty); await flush();
+    expect(closed).toEqual(["w1:p2"]);
   });
 
   it("ignores a live (non-detached) link", async () => {

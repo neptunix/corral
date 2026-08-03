@@ -5,7 +5,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import type { HerdrEnv } from "../environments.ts";
 import { buildAttachSpec, buildExec } from "../server/herdr.ts";
-import { findMissingBinaries, isExecutableFile, missingBinaryMessage, resolveOnPath } from "../server/preflight.ts";
+import {
+  findMissingBinaries, isExecutableFile, missingBinaryMessage, reapGraceFloorMs, resolveOnPath,
+  resolveReapGrace,
+} from "../server/preflight.ts";
 
 const local = (id: string): HerdrEnv => ({
   id, label: id.toUpperCase(), kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {},
@@ -123,5 +126,40 @@ describe("missingBinaryMessage", () => {
   it("says what breaks, so the line is actionable on its own", () => {
     const msg = missingBinaryMessage({ bin: "herdr", envIds: ["a"] }, "/bin");
     expect(msg.toLowerCase()).toContain("attach");
+  });
+});
+
+describe("reapGraceFloorMs / resolveReapGrace (zombie-reaper grace guard)", () => {
+  it("derives the floor as two staleness windows of poll interval + list timeout", () => {
+    expect(reapGraceFloorMs(30_000, 15_000)).toBe(90_000);
+  });
+
+  it("scales the floor with the poll interval, so a slower poll cannot re-open the race", () => {
+    expect(reapGraceFloorMs(120_000, 15_000)).toBe(270_000);
+  });
+
+  it("leaves a grace at or above the floor untouched and stays silent", () => {
+    expect(resolveReapGrace(180_000, 30_000, 15_000)).toEqual({ ms: 180_000, message: null });
+    expect(resolveReapGrace(90_000, 30_000, 15_000)).toEqual({ ms: 90_000, message: null });
+  });
+
+  it("clamps a too-short grace UP to the floor rather than refusing to boot", () => {
+    const r = resolveReapGrace(20_000, 30_000, 15_000); // the configuration that killed a live session
+    expect(r.ms).toBe(90_000);
+    expect(r.message).not.toBeNull();
+  });
+
+  it("names both numbers and the consequence in the clamp message", () => {
+    // The operator must be able to act on this line alone: which var, which floor, and what the old
+    // value actually did — a bare "clamped" tells them nothing about the session they lost.
+    const msg = resolveReapGrace(20_000, 30_000, 15_000).message ?? "";
+    expect(msg).toContain("ZOMBIE_REAP_GRACE_MS=20000");
+    expect(msg).toContain("HERDR_DASH_POLL_MS=30000");
+    expect(msg).toContain("90000");
+    expect(msg).toContain("killing a live session");
+  });
+
+  it("clamps a disabling 0 too — ZOMBIE_REAP_ENABLED=false is the way to turn the reaper off", () => {
+    expect(resolveReapGrace(0, 30_000, 15_000).ms).toBe(90_000);
   });
 });

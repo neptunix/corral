@@ -27,15 +27,26 @@ export interface DetectInput {
   readonly graceMs: number;
 }
 
+export interface ReapDecision {
+  readonly env: string;
+  readonly paneId: string;
+  readonly tabId: string;
+  // When this tab was FIRST seen detached — carried out so the reap log can state how long the tab
+  // actually lingered. A reap that closes a live pane is otherwise invisible after the fact: the pane
+  // is gone, the card reads detached, and nothing says corral did it (this cost one debugging session,
+  // recovered only from herdr's own `cli:pane:close` log line).
+  readonly firstSeenAt: number;
+}
+
 export interface DetectOutput {
-  readonly reap: readonly { readonly env: string; readonly paneId: string }[];
+  readonly reap: readonly ReapDecision[];
   readonly since: Map<string, number>;
 }
 
 export function detectZombies(input: DetectInput): DetectOutput {
   const { detached, tabsByEnv, now, since, graceMs } = input;
   const nextSince = new Map<string, number>();
-  const reap: { env: string; paneId: string }[] = [];
+  const reap: ReapDecision[] = [];
   for (const link of detached) {
     if (link.tabId === "") continue;
     // Guard on the STABLE coordinates (workspaceId + tabId): the stored tab must still exist. A herdr
@@ -49,7 +60,9 @@ export function detectZombies(input: DetectInput): DetectOutput {
     const key = `${link.env}:${link.tabId}`;
     const first = since.get(key) ?? now;
     nextSince.set(key, first);
-    if (now - first >= graceMs) reap.push({ env: link.env, paneId: link.paneId });
+    if (now - first >= graceMs) {
+      reap.push({ env: link.env, paneId: link.paneId, tabId: link.tabId, firstSeenAt: first });
+    }
   }
   return { reap, since: nextSince };
 }
@@ -131,9 +144,12 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
       const result = detectZombies({ detached, tabsByEnv, now: now(), since, graceMs });
       since = result.since;
 
-      // Re-read liveness against a FRESH snapshot: the reap decision was made before the (possibly slow,
-      // remote-SSH) listTabs await, during which a session could have started in a pane. Never close a
-      // pane that now hosts a live agent — this closes the TOCTOU window the candidate guard can't.
+      // Re-read liveness against the LATEST snapshot: the reap decision was made before the (possibly
+      // slow, remote-SSH) listTabs await, during which a poll could have landed showing a session in
+      // the pane. Never close a pane that now hosts a live agent. This only catches a poll that landed
+      // inside that await — it re-reads the poller's current snapshot, so it cannot refute a decision
+      // taken from a stale one. The grace floor (config.ts / reapGraceFloorMs) is what covers staleness;
+      // this rail covers only the await window.
       const fresh = buildLiveIndex(opts.poller.getSnapshot().sessions);
       await Promise.all(result.reap.map(async (r) => {
         const env = opts.envs.find((e) => e.id === r.env);
@@ -141,6 +157,12 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
         if (fresh.liveMap.has(`${r.env}:${r.paneId}`)) return;
         try {
           await opts.closePane(env, r.paneId);
+          // Log every reap, not just failures. This is the poll loop's ONE herdr mutation and it
+          // destroys a pane — an operator who lost a session must be able to see corral say so.
+          console.warn(JSON.stringify({
+            event: "zombie_reaped", env: r.env, pane: r.paneId, tab: r.tabId,
+            detached_for_ms: now() - r.firstSeenAt, grace_ms: graceMs,
+          }));
         } catch (err) {
           console.warn(`[zombie-reaper] pane close failed env=${r.env} pane=${r.paneId}: ${err instanceof Error ? err.message : String(err)}`);
         }
