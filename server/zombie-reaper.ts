@@ -100,9 +100,8 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
     if (inFlight) return;
     inFlight = true;
     try {
-      // Ticks run every few seconds (one per env poll). A gap of a whole grace means they stopped —
-      // host suspend, blocked loop — and every env's rows predate it, so no poll could have refuted a
-      // pending timer. Drop the clocks rather than reap on pre-gap evidence.
+      // A tick gap of a whole grace means ticks stopped (host suspend, blocked loop): every env's rows
+      // predate the gap, so no poll could have refuted a pending timer. Re-seed instead of reaping.
       const t = now();
       if (lastTick !== null && t - lastTick > graceMs) since = new Map();
       lastTick = t;
@@ -158,7 +157,6 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
         if (fresh.liveMap.has(`${r.env}:${r.paneId}`)) return;
         try {
           await opts.closePane(env, r.paneId);
-          // Log every reap: this destroys a pane, so it must never be silent.
           console.warn(JSON.stringify({
             event: "zombie_reaped", env: r.env, pane: r.paneId, tab: r.tabId,
             detached_for_ms: now() - r.firstSeenAt, grace_ms: graceMs,

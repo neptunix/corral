@@ -88,8 +88,6 @@ export function findMissingBinaries(
  * enough for a refuting poll to land and reset the clock (detectZombies rebuilds `since` from the
  * round's candidates), so a single stale sighting cannot reap a live pane. A stopped poll loop is a
  * separate case, handled by the tick-gap rail in zombie-reaper.ts.
- *
- * `message` is non-null only when the value had to move, so a correct configuration stays silent.
  */
 export function resolveReapGrace(
   configuredMs: number,

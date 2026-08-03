@@ -63,8 +63,7 @@ void (async () => {
   startReconciler({ poller, storage });
   // Close shell-only tabs left behind when a Claude session exits (detached link whose herdr tab still
   // lingers). The ONLY place the poll loop mutates herdr — gated, guarded, and via pane close only.
-  // Grace is clamped to a poll-derived floor — see resolveReapGrace(). Both live inside the gate: with
-  // the reaper off there is nothing to clamp and nothing to warn about.
+  // Clamp + warning sit inside the gate: with the reaper off there is nothing to clamp or warn about.
   if (ZOMBIE_REAP_ENABLED) {
     const reapGrace = resolveReapGrace(ZOMBIE_REAP_GRACE_MS, CHEAP_INTERVAL_MS, LIST_TIMEOUT);
     if (reapGrace.message !== null) console.error(reapGrace.message);
