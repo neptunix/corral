@@ -1,6 +1,7 @@
 import { accessSync, constants, statSync } from "node:fs";
 import path from "node:path";
 
+import { ENV_CONFIG_PATH } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 
 /**
@@ -133,11 +134,14 @@ function unpinnedLocalIds(envs: readonly HerdrEnv[]): string[] {
   return envs.filter((e) => e.kind === "local" && e.socket === undefined).map((e) => e.id);
 }
 
-/** Empty counts as absent: process env carries "" for anything a wrapper exported without a value. */
-const value = (v: string | undefined): string | undefined => (v === undefined || v === "" ? undefined : v);
+/** An empty socket path behaves exactly like an unset one — herdr.ts passes the value straight through. */
+const socketOf = (env: NodeJS.ProcessEnv): string | undefined =>
+  env.HERDR_SOCKET_PATH === undefined || env.HERDR_SOCKET_PATH === "" ? undefined : env.HERDR_SOCKET_PATH;
 
 function launchLines(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[] | null): ReportLine[] {
-  if (value(env.CLAUDECODE) === undefined) {
+  // Presence is the signal, whatever the value: `CLAUDECODE= npm run dev` would otherwise be a silent
+  // escape, and the only sanctioned one announces itself on every start.
+  if (env.CLAUDECODE === undefined) {
     return [{ level: "ok", text: "not running under Claude Code" }];
   }
 
@@ -147,7 +151,7 @@ function launchLines(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[] | null): 
   // Only assert the wrong-fleet consequence when it is actually reachable: CLAUDECODE is set for every
   // Claude process tree, including headless runs that inherit no socket at all.
   const consequence =
-    value(env.HERDR_SOCKET_PATH) !== undefined && unpinned.length > 0
+    socketOf(env) !== undefined && unpinned.length > 0
       ? `\n\nHERDR_SOCKET_PATH is set here, and environment(s) ${unpinned.join(", ")} have no ` +
         `explicit "socket" — they would follow this pane's herdr, not the one you meant.`
       : "";
@@ -174,7 +178,7 @@ function socketLines(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[]): ReportL
   const unpinned = unpinnedLocalIds(envs);
   if (unpinned.length === 0) return [];
   const ids = unpinned.join(", ");
-  const socket = value(env.HERDR_SOCKET_PATH);
+  const socket = socketOf(env);
   return socket === undefined
     ? [{
         level: "warning",
@@ -264,17 +268,22 @@ export function missingBinaryMessage(missing: MissingBinary, pathEnv: string): s
  * `server/index.ts` cannot drift: a check added here fires on every launch path, and one added to only
  * one caller would silently stop guarding the path it was written for.
  *
+ * Takes no arguments on purpose. A `configPath` parameter could only ever label the report — the file
+ * actually read is fixed by environments.ts at module scope — so a caller passing a different one
+ * would make the report name a file that was never opened.
+ *
  * The dynamic import is load-bearing — environments.ts evaluates ENVIRONMENTS at module scope, so a
  * static import throws during resolution, before any of this can turn it into a readable line.
  */
-export async function runPreflight(env: NodeJS.ProcessEnv, configPath: string): Promise<{
+export async function runPreflight(): Promise<{
   report: { lines: readonly ReportLine[]; fatal: boolean };
   envs: readonly HerdrEnv[] | null;
 }> {
+  const env = process.env;
   const pathEnv = env.PATH ?? "";
   const cfg = await loadEnvironmentsOrReport(
     async () => (await import("../environments.ts")).ENVIRONMENTS,
-    configPath,
+    ENV_CONFIG_PATH,
   );
   const report = buildReport({
     env,

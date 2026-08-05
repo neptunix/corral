@@ -1,4 +1,3 @@
-import { ENV_CONFIG_PATH } from "../config.ts";
 import { formatReport, runPreflight } from "../server/preflight.ts";
 
 /**
@@ -8,7 +7,7 @@ import { formatReport, runPreflight } from "../server/preflight.ts";
  *
  * Its job is to STOP the launch, not narrate it — the server prints the report on every healthy start.
  */
-const { report } = await runPreflight(process.env, ENV_CONFIG_PATH);
+const { report } = await runPreflight();
 
 if (report.fatal) {
   console.error(formatReport(report.lines));

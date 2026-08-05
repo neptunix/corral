@@ -1,44 +1,71 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { describe, it, expect } from "vitest";
+import { afterAll, describe, it, expect } from "vitest";
 
 // The guard lives as much in configuration as in code, and every defect below typechecks and lints
 // clean — only reading the files, or running the thing, catches a regression.
 const root = path.join(import.meta.dirname, "..");
 const read = (rel: string): string => readFileSync(path.join(root, rel), "utf8");
 
-/** Runs a real entrypoint in a child process and returns its exit code. */
-function run(entry: string, env: Record<string, string>): number {
+const sandbox = mkdtempSync(path.join(os.tmpdir(), "corral-preflight-test-"));
+afterAll(() => { rmSync(sandbox, { recursive: true, force: true }); });
+
+/**
+ * Runs a real entrypoint in a child process. The child is ISOLATED: server/index.ts runs its startup
+ * block — upload/brief sweeps, git commits, poller, zombie reaper — before `serve()` fails, so an
+ * inherited environment would point all of that at the operator's live corral.
+ */
+function run(entry: string, over: Record<string, string>): { status: number; stderr: string } {
+  const env: Record<string, string> = {
+    ...process.env,
+    CORRAL_HOME: sandbox,
+    BOARD_DATA_DIR: sandbox,
+    HERDR_DASH_PORT: "0",
+    ZOMBIE_REAP_ENABLED: "false",
+    RECAP_ENABLED: "false",
+    ...over,
+  };
+  delete env.CLAUDECODE; // must be ABSENT, not "" — see the empty-value case in preflight-report
+  delete env.CORRAL_ALLOW_UNDER_CLAUDE;
+  for (const [k, v] of Object.entries(over)) env[k] = v;
   try {
     execFileSync("npx", ["tsx", entry], {
-      cwd: root,
-      stdio: "pipe",
+      cwd: root, stdio: "pipe", encoding: "utf8",
       timeout: 20_000, // vitest cannot interrupt a blocking sync call; bound it at the OS level
-      env: { ...process.env, CLAUDECODE: "", CORRAL_ALLOW_UNDER_CLAUDE: "", ...env },
+      env,
     });
-    return 0;
+    return { status: 0, stderr: "" };
   } catch (err) {
     if (err !== null && typeof err === "object" && "status" in err && typeof err.status === "number") {
-      return err.status;
+      const stderr = "stderr" in err && typeof err.stderr === "string" ? err.stderr : "";
+      return { status: err.status, stderr };
     }
     throw err;
   }
+}
+
+/** An exit code alone proves nothing — any startup crash produces one. The guard must SAY it refused. */
+function expectRefusal(r: { status: number; stderr: string }): void {
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain("launched from inside a Claude Code session");
+  expect(r.stderr).toContain("FATAL: refusing to start");
 }
 
 describe("the pre-step actually stops a launch", () => {
   // The guard's entire value is that it fires; unit tests of buildReport cannot show that the process
   // exits non-zero, which is the only thing npm reacts to.
   it("exits non-zero under Claude Code", () => {
-    expect(run("scripts/preflight.ts", { CLAUDECODE: "1" })).toBe(1);
+    expectRefusal(run("scripts/preflight.ts", { CLAUDECODE: "1" }));
   }, 30_000);
 
   it("exits zero when the override is set", () => {
-    expect(run("scripts/preflight.ts", { CLAUDECODE: "1", CORRAL_ALLOW_UNDER_CLAUDE: "1" })).toBe(0);
+    expect(run("scripts/preflight.ts", { CLAUDECODE: "1", CORRAL_ALLOW_UNDER_CLAUDE: "1" }).status).toBe(0);
   }, 30_000);
 
   it("exits zero outside Claude Code", () => {
-    expect(run("scripts/preflight.ts", {})).toBe(0);
+    expect(run("scripts/preflight.ts", {}).status).toBe(0);
   }, 30_000);
 });
 
@@ -46,7 +73,7 @@ describe("the in-process guard is the backstop", () => {
   // Survives every npm-level bypass, so it needs its own execution proof: deleting the block from
   // server/index.ts must not leave the suite green.
   it("refuses to boot the server itself under Claude Code", () => {
-    expect(run("server/index.ts", { CLAUDECODE: "1" })).toBe(1);
+    expectRefusal(run("server/index.ts", { CLAUDECODE: "1" }));
   }, 30_000);
 });
 

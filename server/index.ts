@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 
 import {
-  BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, ENV_CONFIG_PATH, HOST, LIST_TIMEOUT, PORT,
+  BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, HOST, LIST_TIMEOUT, PORT,
   UPLOAD_ROOT, WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED, ZOMBIE_REAP_GRACE_MS,
 } from "../config.ts";
 import { createApi } from "./api.ts";
@@ -23,7 +23,7 @@ import { startZombieReaper } from "./zombie-reaper.ts";
 
 assertLoopback(HOST);
 
-const { report, envs: ENVS } = await runPreflight(process.env, ENV_CONFIG_PATH);
+const { report, envs: ENVS } = await runPreflight();
 console.error(formatReport(report.lines));
 if (report.fatal || ENVS === null) {
   console.error("\nFATAL: refusing to start.");

@@ -38,8 +38,8 @@ describe("buildReport — the under-Claude rule", () => {
     expect(buildReport(input()).fatal).toBe(false);
   });
 
-  it("treats an empty CLAUDECODE as absent — a cleared variable is not a Claude session", () => {
-    expect(buildReport(input({ env: { CLAUDECODE: "", PATH: "/usr/bin" } })).fatal).toBe(false);
+  it("counts CLAUDECODE as set whatever its value — `CLAUDECODE= npm run dev` must not be a silent escape", () => {
+    expect(buildReport(input({ env: { CLAUDECODE: "", PATH: "/usr/bin" } })).fatal).toBe(true);
   });
 
   it("is fatal when CLAUDECODE is set", () => {
