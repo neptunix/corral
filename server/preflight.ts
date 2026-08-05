@@ -1,6 +1,7 @@
 import { accessSync, constants, statSync } from "node:fs";
 import path from "node:path";
 
+import { ENV_CONFIG_PATH } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 
 /**
@@ -106,6 +107,151 @@ export function resolveReapGrace(
   };
 }
 
+export interface ReportLine {
+  readonly level: "ok" | "warning" | "fatal";
+  readonly text: string;
+  readonly detail?: string;
+}
+
+export interface BuildReportInput {
+  readonly env: NodeJS.ProcessEnv;
+  /** null when the config failed to load — nothing is known about the environments. */
+  readonly envs: readonly HerdrEnv[] | null;
+  readonly configLine: ReportLine;
+  readonly missing: readonly MissingBinary[];
+  readonly pathEnv: string;
+}
+
+const UNDER_CLAUDE_FATAL =
+  "corral passes its whole environment to every child process, so every herdr call and every " +
+  "live-terminal attach would carry this Claude session's variables.";
+
+const UNDER_CLAUDE_FIX =
+  "fix: prefix the launch — CORRAL_ALLOW_UNDER_CLAUDE=1 npm run dev   (or npm start)\n" +
+  "     or launch corral from a terminal outside Claude Code";
+
+function unpinnedLocalIds(envs: readonly HerdrEnv[]): string[] {
+  return envs.filter((e) => e.kind === "local" && e.socket === undefined).map((e) => e.id);
+}
+
+/** An empty socket path behaves exactly like an unset one — herdr.ts passes the value straight through. */
+const socketOf = (env: NodeJS.ProcessEnv): string | undefined =>
+  env.HERDR_SOCKET_PATH === undefined || env.HERDR_SOCKET_PATH === "" ? undefined : env.HERDR_SOCKET_PATH;
+
+function launchLines(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[] | null): ReportLine[] {
+  // Presence is the signal, whatever the value: `CLAUDECODE= npm run dev` would otherwise be a silent
+  // escape, and the only sanctioned one announces itself on every start.
+  if (env.CLAUDECODE === undefined) {
+    return [{ level: "ok", text: "not running under Claude Code" }];
+  }
+
+  // Exact match, not presence: CORRAL_ALLOW_UNDER_CLAUDE=0 must not disable the guard.
+  const overridden = env.CORRAL_ALLOW_UNDER_CLAUDE === "1";
+  const unpinned = envs === null ? [] : unpinnedLocalIds(envs);
+  // Only assert the wrong-fleet consequence when it is actually reachable: CLAUDECODE is set for every
+  // Claude process tree, including headless runs that inherit no socket at all.
+  const consequence =
+    socketOf(env) !== undefined && unpinned.length > 0
+      ? `\n\nHERDR_SOCKET_PATH is set here, and environment(s) ${unpinned.join(", ")} have no ` +
+        `explicit "socket" — they would follow this pane's herdr, not the one you meant.`
+      : "";
+
+  const lines: ReportLine[] = [{
+    level: overridden ? "warning" : "fatal",
+    text: "launched from inside a Claude Code session",
+    detail: `${UNDER_CLAUDE_FATAL}${consequence}${overridden ? "" : `\n\n${UNDER_CLAUDE_FIX}`}`,
+  }];
+  // Repeated on every start, not just once: the likeliest way this guard dies is the operator
+  // exporting the override into a shell profile and ceasing to notice.
+  if (overridden) {
+    lines.push({ level: "warning", text: "CORRAL_ALLOW_UNDER_CLAUDE=1 — the under-Claude guard is disabled" });
+  }
+  return lines;
+}
+
+/** Which binaries the configured envs actually make corral exec — the same split findMissingBinaries uses. */
+function neededBinaries(envs: readonly HerdrEnv[]): string[] {
+  return [...new Set(envs.map((e) => (e.kind === "remote" ? "ssh" : "herdr")))];
+}
+
+function socketLines(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[]): ReportLine[] {
+  const unpinned = unpinnedLocalIds(envs);
+  if (unpinned.length === 0) return [];
+  const ids = unpinned.join(", ");
+  const socket = socketOf(env);
+  return socket === undefined
+    ? [{
+        level: "warning",
+        text: `HERDR_SOCKET_PATH is unset — environment(s) ${ids} inherit the ambient socket`,
+        detail:
+          "They may return no sessions or route to the wrong herdr instance. Launch from the " +
+          "intended herdr context or set HERDR_SOCKET_PATH.",
+      }]
+    : [{
+        level: "warning",
+        text: `environment(s) ${ids} unpinned — they will use HERDR_SOCKET_PATH from this shell`,
+        detail: `HERDR_SOCKET_PATH=${socket}`,
+      }];
+}
+
+export function buildReport(input: BuildReportInput): { lines: readonly ReportLine[]; fatal: boolean } {
+  const lines: ReportLine[] = [...launchLines(input.env, input.envs), input.configLine];
+
+  if (input.envs !== null) {
+    // Missing binaries are a WARNING, never fatal: refusing to boot would turn a degraded deployment
+    // into a dead one.
+    if (input.missing.length === 0) {
+      // Name only what was actually looked up — an all-local config never searches for ssh, and a
+      // green line claiming otherwise is the silent lie this module exists to remove.
+      lines.push({ level: "ok", text: `${neededBinaries(input.envs).join(", ")} resolved on PATH` });
+    }
+    for (const m of input.missing) {
+      lines.push({ level: "warning", text: missingBinaryMessage(m, input.pathEnv) });
+    }
+    lines.push(...socketLines(input.env, input.envs));
+  }
+
+  return { lines, fatal: lines.some((l) => l.level === "fatal") };
+}
+
+export async function loadEnvironmentsOrReport(
+  load: () => Promise<readonly HerdrEnv[]>,
+  configPath: string,
+): Promise<
+  | { ok: true; envs: readonly HerdrEnv[]; line: ReportLine }
+  | { ok: false; line: ReportLine }
+> {
+  try {
+    const envs = await load();
+    return {
+      ok: true,
+      envs,
+      // configPath verbatim: CORRAL_CONFIG is used unexpanded (config.ts:29-30), so claiming an
+      // absolute path would be a lie for anyone who overrode it.
+      line: { level: "ok", text: `config: ${String(envs.length)} environment(s) loaded from ${configPath}` },
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, line: { level: "fatal", text: `config: ${msg}` } };
+  }
+}
+
+const MARK = { ok: "✓", warning: "⚠", fatal: "✗" } as const;
+
+const indent = (s: string, pad: string): string[] =>
+  s.split("\n").map((line, i) => (i === 0 || line === "" ? line : `${pad}${line}`));
+
+export function formatReport(lines: readonly ReportLine[]): string {
+  const body = lines.flatMap((l) => {
+    // A Zod config error is multi-line; without indenting continuations it breaks the report's shape.
+    const head = indent(`  ${MARK[l.level]} ${l.text}`, "      ");
+    if (l.detail === undefined) return head;
+    return [...head, ...l.detail.split("\n").map((d) => (d === "" ? "" : `        ${d}`))];
+  });
+  return ["corral preflight", ...body].join("\n");
+}
+
+
 /** One actionable line. The PATH is the load-bearing part — see the note on MissingBinary. */
 export function missingBinaryMessage(missing: MissingBinary, pathEnv: string): string {
   return (
@@ -115,4 +261,36 @@ export function missingBinaryMessage(missing: MissingBinary, pathEnv: string): s
     `non-interactive shell does not read your profile) or install "${missing.bin}" into one of those ` +
     `directories.`
   );
+}
+
+/**
+ * The whole preflight, as both entrypoints need it. Exported so `scripts/preflight.ts` and
+ * `server/index.ts` cannot drift: a check added here fires on every launch path, and one added to only
+ * one caller would silently stop guarding the path it was written for.
+ *
+ * Takes no arguments on purpose. A `configPath` parameter could only ever label the report — the file
+ * actually read is fixed by environments.ts at module scope — so a caller passing a different one
+ * would make the report name a file that was never opened.
+ *
+ * The dynamic import is load-bearing — environments.ts evaluates ENVIRONMENTS at module scope, so a
+ * static import throws during resolution, before any of this can turn it into a readable line.
+ */
+export async function runPreflight(): Promise<{
+  report: { lines: readonly ReportLine[]; fatal: boolean };
+  envs: readonly HerdrEnv[] | null;
+}> {
+  const env = process.env;
+  const pathEnv = env.PATH ?? "";
+  const cfg = await loadEnvironmentsOrReport(
+    async () => (await import("../environments.ts")).ENVIRONMENTS,
+    ENV_CONFIG_PATH,
+  );
+  const report = buildReport({
+    env,
+    envs: cfg.ok ? cfg.envs : null,
+    configLine: cfg.line,
+    missing: cfg.ok ? findMissingBinaries(cfg.envs, (bin) => resolveOnPath(bin, pathEnv, isExecutableFile)) : [],
+    pathEnv,
+  });
+  return { report, envs: cfg.ok ? cfg.envs : null };
 }

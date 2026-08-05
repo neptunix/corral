@@ -12,9 +12,9 @@
     "node": ">=20.11"
   },
   "scripts": {
-    "dev": "concurrently -k \"tsx watch server/index.ts\" \"vite\"",
+    "dev": "tsx scripts/preflight.ts && concurrently -k \"tsx watch server/index.ts\" \"vite\"",
     "build": "vite build",
-    "start": "tsx server/index.ts",
+    "start": "tsx scripts/preflight.ts && tsx server/index.ts",
     "mcp": "tsx mcp/index.ts",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
