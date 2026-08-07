@@ -268,6 +268,25 @@ const PaneListSchema = z.object({
   }).default({ panes: [] }),
 });
 
+// No `.default()` on `result`/`panes` (unlike the sibling PaneListSchema above): a missing or
+// renamed container must fail safeParse and hit the warn branch in listAllPanes below, not
+// silently parse as zero panes — that silence is exactly the failure mode the warning exists to
+// catch (a shape drift would otherwise disable reaping for the env with no signal). Accepted
+// trade-off: a herdr host with genuinely zero panes that omits `panes` also warns once per env;
+// harmless — the return value is still `[]` either way, and an empty host has nothing to reap.
+const PaneListAllSchema = z.object({
+  result: z.object({
+    panes: z.array(z.object({
+      pane_id: z.string(),
+      tab_id: z.string(),
+      workspace_id: z.string(),
+      agent: z.string().optional(),
+      agent_status: z.string().optional(),
+      agent_session: AgentSessionSchema,
+    })),
+  }),
+});
+
 export async function paneRun(env: HerdrEnv, paneId: string, text: string, exec?: ExecFn): Promise<void> {
   await runHerdr(env, ["pane", "run", paneId, text],
     exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec });
@@ -357,6 +376,47 @@ export async function listPanes(
   return parsed.data.result.panes.map((p) => ({ paneId: p.pane_id, cwd: p.cwd }));
 }
 
+export interface PaneIdentity {
+  readonly paneId: string;
+  readonly tabId: string;
+  readonly workspaceId: string;
+  readonly hasAgent: boolean;
+}
+
+// One warning per env per process for an unparseable `pane list` — see the safeParse branch below.
+const warnedPaneListShape = new Set<string>();
+
+/**
+ * Every pane herdr knows about, with its tab/workspace and whether an agent is registered on it.
+ * Distinct from `listPanes` above, which is workspace-scoped and carries `cwd` for spawn.
+ *
+ * `hasAgent` reports whether herdr shows ANY agent signal on the pane: an `agent` string, an
+ * `agent_session`, or an `agent_status` other than "unknown". It is NOT authoritative for absence:
+ * an agent started as a bare shell (`herdr agent start <name> -- bash`) is reported here exactly like
+ * a free pane. Occupancy is decided by the `agent list` index in the poller snapshot, which does list
+ * that case; this call supplies pane IDENTITY. An unparseable list yields [], which the reaper reads
+ * as "no evidence", so a shape change can only suppress reaping, never widen it.
+ */
+export async function listAllPanes(env: HerdrEnv, exec?: ExecFn): Promise<PaneIdentity[]> {
+  const raw = await herdrJson(env, ["pane", "list"], exec);
+  const parsed = PaneListAllSchema.safeParse(raw);
+  if (!parsed.success) {
+    // Silent before: an env whose `pane list` shape drifts loses reaping forever with no signal.
+    // Rate-limited to once per env per process — this can fire every poll tick otherwise.
+    if (!warnedPaneListShape.has(env.id)) {
+      warnedPaneListShape.add(env.id);
+      console.warn(`[herdr] pane list: unexpected shape env=${env.id}: ${JSON.stringify(raw).slice(0, 200)}`);
+    }
+    return [];
+  }
+  return parsed.data.result.panes.map((p) => ({
+    paneId: p.pane_id,
+    tabId: p.tab_id,
+    workspaceId: p.workspace_id,
+    hasAgent: p.agent !== undefined || p.agent_session !== undefined || (p.agent_status ?? "unknown") !== "unknown",
+  }));
+}
+
 export async function tabClose(env: HerdrEnv, tabId: string, exec?: ExecFn): Promise<void> {
   await runHerdr(env, ["tab", "close", tabId],
     exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec });
@@ -379,13 +439,4 @@ export async function listWorkspaces(
   const parsed = WorkspaceListSchema.safeParse(raw);
   if (!parsed.success) return [];
   return parsed.data.result.workspaces;
-}
-
-export async function listTabs(
-  env: HerdrEnv, exec?: ExecFn,
-): Promise<{ tab_id: string; label: string; workspace_id: string }[]> {
-  const raw = await herdrJson(env, ["tab", "list"], exec);
-  const parsed = TabListSchema.safeParse(raw);
-  if (!parsed.success) return [];
-  return parsed.data.result.tabs;
 }

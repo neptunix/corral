@@ -9,7 +9,7 @@ import { createApi } from "./api.ts";
 import { createAttentionStore } from "./attention-store.ts";
 import { sweepBriefRoot } from "./brief.ts";
 import { createGit } from "./git.ts";
-import { closePane, listTabs, listWorkspaces, readPane, workspaceClose } from "./herdr.ts";
+import { closePane, listAllPanes, listWorkspaces, readPane, workspaceClose } from "./herdr.ts";
 import { assertLoopback } from "./host-guard.ts";
 import { createPoller } from "./poller.ts";
 import { formatReport, resolveReapGrace, runPreflight } from "./preflight.ts";
@@ -48,13 +48,13 @@ void (async () => {
   // Backfill stored links' Claude sessionId once the poller sees it (spawned links start null) — the
   // write-side half of persistent session identity; buildBoardState does the read-side churn-heal.
   startReconciler({ poller, storage });
-  // Close shell-only tabs left behind when a Claude session exits (detached link whose herdr tab still
+  // Close shell-only panes left behind when a Claude session exits (detached link whose herdr pane still
   // lingers). The ONLY place the poll loop mutates herdr — gated, guarded, and via pane close only.
   // Clamp + warning sit inside the gate: with the reaper off there is nothing to clamp or warn about.
   if (ZOMBIE_REAP_ENABLED) {
     const reapGrace = resolveReapGrace(ZOMBIE_REAP_GRACE_MS, CHEAP_INTERVAL_MS, LIST_TIMEOUT);
     if (reapGrace.message !== null) console.error(reapGrace.message);
-    startZombieReaper({ poller, storage, envs: ENVS, listTabs, closePane, graceMs: reapGrace.ms });
+    startZombieReaper({ poller, storage, envs: ENVS, listPanes: listAllPanes, closePane, graceMs: reapGrace.ms });
   }
 
   const app = createApi({
