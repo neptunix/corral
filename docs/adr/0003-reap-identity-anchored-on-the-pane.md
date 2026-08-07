@@ -72,8 +72,9 @@ unchanged. It also carries agent state directly, making it fresher evidence than
 the poller snapshot (up to one poll interval stale) that the previous code
 consulted.
 
-A close that still fails is retried at most **3 times per pane**, after which the
-candidate is abandoned for the process lifetime.
+A close that still fails is retried at most **3 times per grace window**: on the
+third failure the candidate's grace timer is dropped, so it must age through a full
+grace again before another attempt. The cap is never permanent.
 
 ## Rationale
 
@@ -91,20 +92,45 @@ The attempt cap covers what the model cannot promise. The precheck's guarantee i
 conditional on `pane list` and `pane close` agreeing inside the daemon; that
 assumption is well-supported but unverified. The cap makes the property
 unconditional: no cause, known or unknown, can produce an unbounded retry loop.
-Three attempts still tolerate a transient failure (a remote SSH timeout) without
-abandoning a genuine zombie on the first stumble.
+Scoping it to a grace window rather than the process keeps that bound while
+tolerating transient failure — three SSH timeouts in a row must not strand a real
+zombie until restart, and a cap that persisted for the process could also suppress
+a *later* pane that inherits the same id after state loss.
 
-Verifying the pane makes three older guards redundant, and they are removed: the
-`tab list` fetch and its `TabInfo` shape, the pre-filter that consulted the poller
-snapshot for a live agent at the pane, and the post-await re-read of that same
-snapshot. All three inferred from staler data what one fresh `pane list` states
-directly.
+Only one older guard becomes redundant and is removed: the `tab list` fetch and its
+`TabInfo` shape, which the pane list now subsumes.
 
-**Residual risk, accepted.** If a herdr session's persisted state is lost or
-replaced, its counters restart at 1 and old links holding low ids can name new
-panes. The agent check and the grace window cover the realistic form: a freshly
+Two guards that read the poller snapshot are deliberately **kept**, both consulted
+in the original design of this change and restored after review:
+
+- The pre-filter that skips a link whose pane already holds a live agent. It reads
+  `agent list` — a source independent of `pane list`. If the pane-list shape ever
+  drifts such that panes parse as agentless, this is what still refuses to close
+  live sessions. Two independent sources are proportionate for an operation that
+  kills sessions.
+- The re-read of the snapshot immediately before closing. The tempting argument for
+  deleting it — that a fresh `pane list` is strictly newer evidence — is false:
+  response *arrival* order is not state order. A `pane list` reply can be generated
+  from herdr state before an agent registers and arrive after a newer poll snapshot
+  that already shows it, which is reachable on a remote environment where the list
+  crosses SSH. The existing TOCTOU test covers exactly this.
+
+**Residual risk, accepted (state loss).** If a herdr session's persisted state is
+lost or replaced, its counters restart at 1 and old links holding low ids can name
+new panes. The agent check and the grace window cover the realistic form: a freshly
 spawned Claude registers within seconds, so only a pane that is agentless at
 exactly the recycled coordinates for longer than the grace is exposed.
+
+**Residual risk, pre-existing and unchanged (unregistered agent).** herdr reports a
+pane as agentless until it registers the Claude running in it, and no field in
+`pane list` distinguishes "shell at a prompt" from "Claude starting". So a link that
+has already aged past its grace can be reaped in the seconds between a user
+re-running `claude` in the lingering pane and herdr registering it. Both liveness
+sources in the current code derive from `agent list` and share this blindness, so
+the fault predates this decision and neither the pane anchor nor the guards above
+close it. Closing it would need herdr to expose pane process state, or corral to
+observe the re-run some other way. The grace window is what bounds the exposure
+today: it is the reap tick landing inside the registration window.
 
 ## Rejected alternatives
 
