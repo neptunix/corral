@@ -126,11 +126,34 @@ describe("listAllPanes", () => {
   });
 
   it("marks a pane with no agent, no agent_session and unknown status as agentless", async () => {
+    // KNOWN BLIND SPOT — this same input is also what an OCCUPIED pane looks like. Verified against a
+    // live herdr, `herdr agent start <name> -- bash` yields a pane list entry with no `agent`, no
+    // `agent_session` and agent_status "unknown": identical to an unoccupied pane. That is why
+    // occupancy is decided by the poller's `agent list` index, which DOES see it, and not by this
+    // field; `test/zombie-reaper.test.ts` pins the end-to-end consequence.
     const payload = JSON.stringify({
       result: { panes: [{ agent_status: "unknown", cwd: "/x", pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1" }] },
     });
     expect(await listAllPanes(env, makeExec(payload))).toEqual([
       { paneId: "w1:p1", tabId: "w1:t1", workspaceId: "w1", hasAgent: false },
+    ]);
+  });
+
+  it("reports a live-observed post-exit pane (the state the reaper exists to act on) as agentless", async () => {
+    // Copied from a live `herdr pane list` entry for a pane whose Claude had exited (ids and paths
+    // replaced with placeholders, nothing else changed): no `agent`, no `agent_session`, and
+    // agent_status "unknown". `agent list` no longer reports it either, so both the pre-filter and
+    // this field agree it is free — the one shape the reap path's `hasAgent === false` must accept.
+    const payload = JSON.stringify({
+      result: {
+        panes: [{
+          agent_status: "unknown", cwd: "/x", focused: false, foreground_cwd: "/x",
+          pane_id: "w1:p2", revision: 0, tab_id: "w1:t2", terminal_id: "term_x", workspace_id: "w1",
+        }],
+      },
+    });
+    expect(await listAllPanes(env, makeExec(payload))).toEqual([
+      { paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false },
     ]);
   });
 
@@ -142,32 +165,13 @@ describe("listAllPanes", () => {
     expect(panes[0]!.hasAgent).toBe(true);
   });
 
-  it("treats an empty `agent` string as absent (defensive: herdr's `pane list` omits the key entirely rather than sending \"\")", async () => {
+  it("treats a lone `agent` string as occupied (no agent_session, status unknown)", async () => {
+    // A Claude that herdr has registered but not yet settled: `agent` is present while
+    // `agent_session` is still absent. Only the `agent` disjunct can catch this row.
     const payload = JSON.stringify({
-      result: { panes: [{ agent: "", agent_status: "unknown", cwd: "/x", pane_id: "w1:p5", tab_id: "w1:t5", workspace_id: "w1" }] },
+      result: { panes: [{ agent: "claude", agent_status: "unknown", cwd: "/x", pane_id: "w1:p5", tab_id: "w1:t5", workspace_id: "w1" }] },
     });
-    const panes = await listAllPanes(env, makeExec(payload));
-    expect(panes[0]!.hasAgent).toBe(false);
-  });
-
-  it('treats an empty `agent_status` the same as "unknown"', async () => {
-    const payload = JSON.stringify({
-      result: { panes: [{ agent_status: "", cwd: "/x", pane_id: "w1:p6", tab_id: "w1:t6", workspace_id: "w1" }] },
-    });
-    const panes = await listAllPanes(env, makeExec(payload));
-    expect(panes[0]!.hasAgent).toBe(false);
-  });
-
-  it("KNOWN BLIND SPOT: a bash-style agent is indistinguishable from a free pane here", async () => {
-    // Verified against a live herdr: `herdr agent start <name> -- bash` yields a pane list entry with
-    // no `agent`, no `agent_session` and agent_status "unknown" — identical to an unoccupied pane.
-    // This is why occupancy is decided by the poller's `agent list` index, which DOES see it, and not
-    // by this field. Pinned as a test so the limitation cannot be forgotten.
-    const payload = JSON.stringify({
-      result: { panes: [{ agent_status: "unknown", cwd: "/x", pane_id: "w1:p4", tab_id: "w1:t4", workspace_id: "w1" }] },
-    });
-    const panes = await listAllPanes(env, makeExec(payload));
-    expect(panes[0]!.hasAgent).toBe(false);
+    expect((await listAllPanes(env, makeExec(payload)))[0]!.hasAgent).toBe(true);
   });
 
   it("treats a lone agent_session as occupied (no `agent`, status unknown)", async () => {

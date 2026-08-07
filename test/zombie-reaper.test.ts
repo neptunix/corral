@@ -288,7 +288,7 @@ describe("startZombieReaper", () => {
     expect(h.listCalls).toBe(0);             // did not even query panes on an unreachable env
   });
 
-  it("a listPanes rejection reaps nothing and drops the candidate's grace timer (no accumulation across a flaky env)", async () => {
+  it("a listPanes rejection reaps nothing, warns once, and drops the candidate's grace timer (no accumulation across a flaky env)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       const snap: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
@@ -309,7 +309,16 @@ describe("startZombieReaper", () => {
       clock = 0; cb!(snap); await flush();                  // seeds the timer at 0
       shouldFail = true;
       clock = 10_000; cb!(snap); await flush();              // listPanes rejects: no entry in panesByEnv
+      clock = 12_000; cb!(snap); await flush();              // and rejects again on the very next tick
       expect(closed).toEqual([]);
+      // The failure is reported (a silently un-listable env would lose reaping with no signal), but
+      // only once per env — this can reject on every tick for as long as the host is unreachable.
+      const listWarnings = warn.mock.calls.flat().filter(
+        (a): a is string => typeof a === "string" && a.includes("pane list failed"),
+      );
+      expect(listWarnings).toHaveLength(1);
+      expect(listWarnings[0]).toContain("env=work-local");
+      expect(listWarnings[0]).toContain("ssh timeout");     // carries the underlying error, not just "failed"
       shouldFail = false;
       // Recovers at 25_000 — if the earlier timer (seeded at 0) had survived the failure, 25_000 - 0 =
       // 25_000 >= grace would reap NOW. It does not: the failed tick dropped it, so this is a fresh seed.
@@ -317,6 +326,49 @@ describe("startZombieReaper", () => {
       expect(closed).toEqual([]);
       clock = 45_000; cb!(snap); await flush();              // full grace elapsed from the 25_000 re-seed
       expect(closed).toEqual(["w1:p2"]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("isolates a per-env pane-list failure: a fast-rejecting env does not starve a slower healthy one", async () => {
+    // work-local's list rejects immediately (SSH connection refused); personal-local's resolves a
+    // macrotask later (a local call that still takes a few ms). The catch must sit INSIDE the
+    // per-env task: hoisted around the whole Promise.all, the first rejection settles the await
+    // before the healthy env's panes ever land, so personal-local sees an empty pane list, drops its
+    // timer and never reaps — a real regression that every other test in this file misses.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const closed: { env: string; paneId: string }[] = [];
+      let clock = 0;
+      let cb: ((s: Snapshot) => void) | null = null;
+      const snap: Snapshot = {
+        envs: { "work-local": { reachable: true }, "personal-local": { reachable: true } },
+        sessions: [],
+      };
+      const board: Board = {
+        id: "b", label: "B", columns: [],
+        tasks: [{
+          id: "t", title: "x", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1,
+          sessions: [
+            { env: "work-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID },
+            { env: "personal-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID2 },
+          ],
+        }],
+      };
+      startZombieReaper({
+        poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+        storage: { getAllBoards: () => [board] },
+        envs: [getEnv("work-local"), getEnv("personal-local")],
+        listPanes: (env) => env.id === "work-local"
+          ? Promise.reject(new Error("connection refused"))
+          : new Promise((res) => { setTimeout(() => { res([{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }]); }, 0); }),
+        closePane: (env, paneId) => { closed.push({ env: env.id, paneId }); return Promise.resolve(); },
+        now: () => clock, graceMs: 20_000,
+      });
+      clock = 0; cb!(snap); await flush(); await flush();
+      clock = 20_000; cb!(snap); await flush(); await flush();
+      expect(closed).toEqual([{ env: "personal-local", paneId: "w1:p2" }]);
     } finally {
       warn.mockRestore();
     }
@@ -364,6 +416,74 @@ describe("startZombieReaper", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it("dedupes AFTER identity validation: a stale duplicate link does not hide the valid one", async () => {
+    // Two detached links on the same pane, iterated in board order. The FIRST carries a stale tabId
+    // (the pane's old tab, recorded before it moved); the second matches the live pane. Collapsing
+    // duplicates during collection keeps only the first, which then fails the tab check — and the
+    // valid sibling is never examined, on this tick or any other, because iteration order is stable.
+    const linkSession = (tabId: string, sid: string): Board["tasks"][0]["sessions"][0] => ({
+      env: "work-local", paneId: "w1:p2", tabId, tabLabel: "z", workspaceId: "w1", workspaceLabel: "c",
+      name: "z", cwdSnapshot: "/c", sessionId: sid,
+    });
+    const board: Board = {
+      id: "b", label: "B", columns: [],
+      tasks: [
+        { id: "t1", title: "x", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1, sessions: [linkSession("w1:t1", SID)] },
+        { id: "t2", title: "y", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1, sessions: [linkSession("w1:t2", SID2)] },
+      ],
+    };
+    const closed: string[] = [];
+    let clock = 0;
+    let cb: ((s: Snapshot) => void) | null = null;
+    const empty: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+    startZombieReaper({
+      poller: { getSnapshot: () => empty, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+      storage: { getAllBoards: () => [board] },
+      envs: [getEnv("work-local")],
+      listPanes: () => Promise.resolve([{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }]),
+      closePane: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); },
+      now: () => clock, graceMs: 20_000,
+    });
+    clock = 0; cb!(empty); await flush();
+    clock = 20_000; cb!(empty); await flush();
+    expect(closed).toEqual(["w1:p2"]); // the valid link still reaps, and only once
+  });
+
+  it("seeds no grace timer while the agent-list index shows the pane occupied (pre-filter, not just the close check)", async () => {
+    // The pre-filter's own, distinct effect: an occupied pane starts NO clock. Occupancy here is
+    // visible only in the poller's agent-list index — `pane list` already reports the pane free, which
+    // a snapshot up to one poll interval old can legitimately lag behind. The stranger is gone by the
+    // second tick, so the pre-close `fresh` re-read sees nothing and cannot block the close: the
+    // pre-filter is the only guard in play. Without it the timer is seeded on tick 1 and the pane is
+    // closed with ZERO grace the moment the stranger's agent disappears.
+    const S2 = "99999999-8888-7777-6666-555555555555";
+    const occupied: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [{
+      env: "work-local", paneId: "w1:p2", status: "idle", agent: "claude", cwd: "/c",
+      tab: "task-a", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: S2,
+      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+    }] };
+    const free: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+    let snap: Snapshot = occupied;
+    let clock = 0;
+    const closed: string[] = [];
+    let cb: ((s: Snapshot) => void) | null = null;
+    startZombieReaper({
+      poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+      storage: { getAllBoards: () => [boardWithLink({ sessionId: SID })] },   // our own session is gone
+      envs: [getEnv("work-local")],
+      listPanes: () => Promise.resolve([{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }]),
+      closePane: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); },
+      now: () => clock, graceMs: 20_000,
+    });
+    clock = 0; cb!(snap); await flush();                        // stranger holds the pane → no candidate, no timer
+    snap = free; clock = 20_000; cb!(snap); await flush();       // stranger gone → the window starts HERE
+    expect(closed).toEqual([]);
+    clock = 39_999; cb!(snap); await flush();
+    expect(closed).toEqual([]);                                  // still inside the window seeded at 20_000
+    clock = 40_000; cb!(snap); await flush();
+    expect(closed).toEqual(["w1:p2"]);                           // a full grace after the pane came free
   });
 
   it("does NOT reap a pane now occupied by a DIFFERENT live session (shell reused after Claude exited)", async () => {
@@ -621,7 +741,11 @@ describe("startZombieReaper", () => {
   it("does NOT reap a pane running a non-Claude agent that pane list reports as free", async () => {
     // A bash-style agent (`herdr agent start <name> -- bash`) is indistinguishable from a free pane in
     // `pane list` — verified against a live herdr. The poller's agent-list index is what sees it, so
-    // this proves occupancy authority sits there and not on PaneIdentity.hasAgent.
+    // this pins occupancy authority on that index and not on PaneIdentity.hasAgent. It does NOT say
+    // WHICH agent-list guard did the work: the stranger is present in every snapshot here, so the
+    // pre-close re-read alone would also block the close. The pre-filter's own effect (an occupied
+    // pane seeds no timer) is pinned by "seeds no grace timer while the agent-list index shows the
+    // pane occupied" above.
     const h = harness({
       snapshot: { envs: { "work-local": { reachable: true } }, sessions: [{
         env: "work-local", paneId: "w1:p2", status: "unknown", agent: "", cwd: "/c",
@@ -702,10 +826,13 @@ describe("startZombieReaper", () => {
     }
   });
 
-  it("does not let a stale failure count from an earlier grace window shrink a later one", async () => {
+  it("restarts the close-attempt count for a new grace window (window stamp at the increment)", async () => {
+    // Pins the reset mechanism: `failures` entries are stamped with the window they were booked under
+    // (`firstSeenAt`), and the increment only builds on a stamp matching the CURRENT window. A count
+    // from an earlier window is therefore never read again, with no pruning pass involved.
     // The link's own episode ends mid-window (a different session takes over the pane), then a
-    // genuinely new episode starts later. The failure count must not survive the gap — the new window
-    // gets a full 3 attempts, not 3 minus whatever had already failed before the break.
+    // genuinely new episode starts later. The new window gets a full 3 attempts, not 3 minus whatever
+    // had already failed before the break.
     const S2 = "ffffffff-1111-2222-3333-444444444444";
     const empty: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
     const live: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [{
