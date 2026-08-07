@@ -60,8 +60,10 @@ that satisfies **all** of:
 
 - `pane_id` equals the link's `paneId`,
 - `tab_id` and `workspace_id` equal the link's,
-- **no agent is registered on it** (an agent means a live session, ours or a
-  stranger's — either way not a zombie).
+- **nothing is registered on it** — an agent means a live session, ours or a
+  stranger's, and either way not a zombie. Absence is decided by the poller's
+  `agent list` index, with the pane list's own agent fields as a secondary skip
+  signal; see the guard note below for why the pane list alone cannot answer this.
 
 Anything else — pane absent, pane now in a different tab, pane occupied — is
 skipped silently, seeds no grace timer, and issues no herdr command. The grace
@@ -103,11 +105,14 @@ Only one older guard becomes redundant and is removed: the `tab list` fetch and 
 Two guards that read the poller snapshot are deliberately **kept**, both consulted
 in the original design of this change and restored after review:
 
-- The pre-filter that skips a link whose pane already holds a live agent. It reads
-  `agent list` — a source independent of `pane list`. If the pane-list shape ever
-  drifts such that panes parse as agentless, this is what still refuses to close
-  live sessions. Two independent sources are proportionate for an operation that
-  kills sessions.
+- The pre-filter that skips a link whose pane already holds a live agent. This one
+  is load-bearing, not redundant: `pane list` cannot see every agent. Verified
+  against a live herdr, an agent started as a bare shell
+  (`herdr agent start <name> -- bash`) appears there byte-identically to a free pane
+  — no `agent`, no `agent_session`, `agent_status: "unknown"`. `agent list` does
+  list it, because a missing `agent` string defaults to `""`. So the two calls carry
+  different authority: `pane list` decides **identity**, `agent list` decides
+  **occupancy**, and the reap needs both.
 - The re-read of the snapshot immediately before closing. The tempting argument for
   deleting it — that a fresh `pane list` is strictly newer evidence — is false:
   response *arrival* order is not state order. A `pane list` reply can be generated
