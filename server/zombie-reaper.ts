@@ -73,6 +73,13 @@ interface ReaperStorage {
   getAllBoards(): readonly Board[];
 }
 
+// Close attempts per pane per grace window. The pane precheck already makes a permanent
+// `pane_not_found` loop unreachable — unless `pane list` and `pane close` ever disagree inside herdr,
+// which this bounds regardless. Scoped to the grace window, never the process: three transient
+// failures (a remote SSH timeout) must not strand a real zombie until restart, and a process-lifetime
+// cap could also suppress a later pane that inherits the id after state loss.
+const CLOSE_ATTEMPT_CAP = 3;
+
 export interface ZombieReaperOpts {
   readonly poller: ReaperPoller;
   readonly storage: ReaperStorage;
@@ -96,6 +103,7 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
   const now = opts.now ?? ((): number => Date.now());
   const graceMs = opts.graceMs;
   let since = new Map<string, number>();
+  const failures = new Map<string, number>();
   let lastTick: number | null = null;
   let inFlight = false;
 
@@ -154,14 +162,25 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
         const env = opts.envs.find((e) => e.id === r.env);
         if (env === undefined) return;
         if (fresh.liveMap.has(`${r.env}:${r.paneId}`)) return;
+        const key = `${r.env}:${r.paneId}`;
         try {
           await opts.closePane(env, r.paneId);
+          failures.delete(key);
           console.warn(JSON.stringify({
             event: "zombie_reaped", env: r.env, pane: r.paneId, tab: r.tabId,
             detached_for_ms: now() - r.firstSeenAt, grace_ms: graceMs,
           }));
         } catch (err) {
           console.warn(`[zombie-reaper] pane close failed env=${r.env} pane=${r.paneId}: ${err instanceof Error ? err.message : String(err)}`);
+          const n = (failures.get(key) ?? 0) + 1;
+          if (n >= CLOSE_ATTEMPT_CAP) {
+            // Give up for now, not for good: dropping the timer forces a full re-age before the next
+            // attempt, so a pane herdr cannot close costs 3 log lines per grace window, not one per tick.
+            failures.delete(key);
+            since.delete(key);
+          } else {
+            failures.set(key, n);
+          }
         }
       }));
     } finally {

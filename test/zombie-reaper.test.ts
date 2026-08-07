@@ -472,4 +472,68 @@ describe("startZombieReaper", () => {
     h.setClock(20_000); h.fire(); await flush();
     expect(h.closed).toEqual([]);
   });
+
+  it("stops retrying a failing close after 3 attempts and re-ages the candidate instead of abandoning it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const snap: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+      let clock = 0;
+      let attempts = 0;
+      let cb: ((s: Snapshot) => void) | null = null;
+      startZombieReaper({
+        poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+        storage: { getAllBoards: () => [boardWithLink()] },
+        envs: [getEnv("work-local")],
+        listPanes: () => Promise.resolve([{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }]),
+        closePane: () => { attempts++; return Promise.reject(new Error("herdr unreachable")); },
+        now: () => clock, graceMs: 20_000,
+      });
+      clock = 0; cb!(snap); await flush();                    // seed the timer
+      for (const t of [20_000, 20_001, 20_002, 20_003, 20_004]) {
+        clock = t; cb!(snap); await flush();
+      }
+      expect(attempts).toBe(3);                               // capped, not once per tick
+
+      // The candidate is not abandoned: after a full grace it is eligible again.
+      clock = 60_000; cb!(snap); await flush();               // re-seeds (timer was dropped at the cap)
+      clock = 80_000; cb!(snap); await flush();               // grace elapsed again
+      expect(attempts).toBe(4);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("resets the failure count after a close succeeds, so the next run gets a full 3 attempts", async () => {
+    // A weaker version of this test — fail once, succeed once, expect 2 — passes against the CURRENT
+    // code, which has no counter at all, and so proves nothing. This sequence discriminates: with a
+    // counter that survives success, attempt 4 would be the 3rd failure and trip the cap immediately,
+    // giving 4 total attempts. With the reset, failures start over and three more are allowed: 6.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const snap: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+      let clock = 0;
+      let attempts = 0;
+      let cb: ((s: Snapshot) => void) | null = null;
+      startZombieReaper({
+        poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+        storage: { getAllBoards: () => [boardWithLink()] },
+        envs: [getEnv("work-local")],
+        listPanes: () => Promise.resolve([{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }]),
+        closePane: () => {
+          attempts++;
+          return attempts === 3 ? Promise.resolve() : Promise.reject(new Error("transient"));
+        },
+        now: () => clock, graceMs: 20_000,
+      });
+      clock = 0; cb!(snap); await flush();                    // seed
+      for (const t of [20_000, 20_001, 20_002, 20_003, 20_004, 20_005, 20_006]) {
+        clock = t; cb!(snap); await flush();
+      }
+      // 1 fail, 2 fail, 3 SUCCESS (count reset), 4 fail, 5 fail, 6 fail → cap → timer dropped, 7th tick
+      // finds a re-seeded timer and does not attempt.
+      expect(attempts).toBe(6);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
