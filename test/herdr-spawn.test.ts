@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
-import { ENVIRONMENTS } from "../environments.ts";
+import { ENVIRONMENTS, getEnv } from "../environments.ts";
 import type { ExecFn } from "../server/herdr.ts";
 import { paneRun, paneGet, tabCreate, workspaceCreate, tabClose, tabRename, listPanes, listAllPanes } from "../server/herdr.ts";
 
@@ -170,6 +170,12 @@ describe("listAllPanes", () => {
     expect(panes[0]!.hasAgent).toBe(false);
   });
 
+  it("treats a lone agent_session as occupied (no `agent`, status unknown)", async () => {
+    const payload = JSON.stringify({ result: { panes: [{ agent_status: "unknown", cwd: "/x", pane_id: "w1:p7", tab_id: "w1:t7", workspace_id: "w1",
+      agent_session: { source: "herdr:claude", kind: "id", value: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" } }] } });
+    expect((await listAllPanes(env, makeExec(payload)))[0]!.hasAgent).toBe(true);
+  });
+
   it("calls `pane list` with no --workspace flag", async () => {
     const exec = makeExec(JSON.stringify({ result: { panes: [] } }));
     await listAllPanes(env, exec);
@@ -182,5 +188,42 @@ describe("listAllPanes", () => {
   it("returns [] on an unexpected shape rather than throwing (fail-safe: no evidence → no reap)", async () => {
     expect(await listAllPanes(env, makeExec("{}"))).toEqual([]);
     expect(await listAllPanes(env, makeExec(JSON.stringify({ result: { panes: [{ pane_id: "w1:p2" }] } })))).toEqual([]);
+  });
+});
+
+describe("listAllPanes — unparseable pane list warning", () => {
+  // The rate-limit Set in server/herdr.ts is module-global and keyed by env id; the "unexpected
+  // shape" test above already consumes ENVIRONMENTS[0] ("work-local"). Each test here uses an env
+  // id no earlier test has warned for, so the assertions below observe a clean rate-limit count
+  // rather than one already tripped by another test in this file.
+
+  it("warns once (rate-limited) on a malformed pane entry, matching the shape-warning text", async () => {
+    const malformedEnv = getEnv("personal-local");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const payload = JSON.stringify({ result: { panes: [{ pane_id: "w1:p2" }] } });
+      expect(await listAllPanes(malformedEnv, makeExec(payload))).toEqual([]);
+      expect(await listAllPanes(malformedEnv, makeExec(payload))).toEqual([]); // same env again
+      const matches = warn.mock.calls.flat().filter(
+        (a): a is string => typeof a === "string" && a.includes("pane list: unexpected shape"),
+      );
+      expect(matches).toHaveLength(1); // one warning total, not one per call
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("also warns when the container (result/panes) is missing outright, not just a malformed entry", async () => {
+    const missingContainerEnv = getEnv("work-remote");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      expect(await listAllPanes(missingContainerEnv, makeExec("{}"))).toEqual([]);
+      const matches = warn.mock.calls.flat().filter(
+        (a): a is string => typeof a === "string" && a.includes("pane list: unexpected shape"),
+      );
+      expect(matches).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

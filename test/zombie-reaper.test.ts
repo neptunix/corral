@@ -114,6 +114,16 @@ describe("detectZombies", () => {
     });
     expect(r.reap).toEqual([]);
   });
+
+  it("does not accept a same-id pane from a DIFFERENT env as evidence", () => {
+    const r = detectZombies({
+      detached: [link({ env: "a" })],
+      panesByEnv: new Map([["b", [pane()]]]),   // env b has w1:p2; env a's list is absent
+      now: 20_000, since: new Map([["a:w1:p2", 0]]), graceMs: 20_000,
+    });
+    expect(r.reap).toEqual([]);
+    expect(r.since.has("a:w1:p2")).toBe(false);
+  });
 });
 
 // ---- glue: startZombieReaper wires poller snapshots + storage + herdr into the pure detector ----
@@ -144,12 +154,12 @@ function harness(opts: {
   panes: PaneIdentity[];
 }): {
   fire: () => void;
-  closed: { paneId: string }[];
+  closed: { env: string; paneId: string }[];
   listCalls: number;
   setClock: (n: number) => void;
 } {
   let cb: ((s: Snapshot) => void) | null = null;
-  const closed: { paneId: string }[] = [];
+  const closed: { env: string; paneId: string }[] = [];
   let listCalls = 0;
   let clock = 0;
   startZombieReaper({
@@ -157,7 +167,7 @@ function harness(opts: {
     storage: { getAllBoards: () => opts.boards },
     envs: [getEnv("work-local")],
     listPanes: () => { listCalls++; return Promise.resolve(opts.panes); },
-    closePane: (_e, paneId) => { closed.push({ paneId }); return Promise.resolve(); },
+    closePane: (e, paneId) => { closed.push({ env: e.id, paneId }); return Promise.resolve(); },
     now: () => clock,
     graceMs: 20_000,
   });
@@ -180,7 +190,90 @@ describe("startZombieReaper", () => {
     h.setClock(0); h.fire(); await flush();
     expect(h.closed).toEqual([]);            // first sighting → timer seeded, no reap
     h.setClock(20_000); h.fire(); await flush();
-    expect(h.closed).toEqual([{ paneId: "w1:p2" }]);
+    expect(h.closed).toEqual([{ env: "work-local", paneId: "w1:p2" }]);
+  });
+
+  it("routes the pane-list fetch and the close to the env that actually owns the candidate, not always the first configured env", async () => {
+    // herdr numbers panes per session from w1:p1 upward, so the SAME paneId/tabId exists on nearly
+    // every environment. Only personal-local's pane list actually carries the candidate — if either
+    // call were misrouted to the first configured env (work-local), the close would land on the
+    // wrong host, or the candidate would look absent everywhere and never reap at all.
+    const closed: { env: string; paneId: string }[] = [];
+    const queriedEnvs: string[] = [];
+    let clock = 0;
+    let cb: ((s: Snapshot) => void) | null = null;
+    const snap: Snapshot = {
+      envs: { "work-local": { reachable: true }, "personal-local": { reachable: true } },
+      sessions: [],
+    };
+    const board: Board = {
+      id: "b", label: "B", columns: [],
+      tasks: [{
+        id: "t", title: "x", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1,
+        sessions: [
+          { env: "work-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID },
+          { env: "personal-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID2 },
+        ],
+      }],
+    };
+    startZombieReaper({
+      poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+      storage: { getAllBoards: () => [board] },
+      envs: [getEnv("work-local"), getEnv("personal-local")],
+      listPanes: (env) => {
+        queriedEnvs.push(env.id);
+        return Promise.resolve(
+          env.id === "personal-local" ? [{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }] : [],
+        );
+      },
+      closePane: (env, paneId) => { closed.push({ env: env.id, paneId }); return Promise.resolve(); },
+      now: () => clock, graceMs: 20_000,
+    });
+    clock = 0; cb!(snap); await flush();
+    clock = 20_000; cb!(snap); await flush();
+    // listPanes runs once per env per tick (two ticks here) — dedupe to the set of envs queried.
+    expect([...new Set(queriedEnvs)].sort()).toEqual(["personal-local", "work-local"]);
+    expect(closed).toEqual([{ env: "personal-local", paneId: "w1:p2" }]);
+  });
+
+  it("skips an unreachable env's candidates entirely even when a different env is reachable (per-env churn rail, not a fleet-wide OR)", async () => {
+    // work-local is down; personal-local is up. Reaping must stay scoped to personal-local — an
+    // env-wide reachability check that ORs across every env would also query and reap work-local
+    // while it cannot be trusted, defeating the churn rail described in the file header.
+    const closed: { env: string; paneId: string }[] = [];
+    const queriedEnvs: string[] = [];
+    let clock = 0;
+    let cb: ((s: Snapshot) => void) | null = null;
+    const snap: Snapshot = {
+      envs: { "work-local": { reachable: false, error: "down" }, "personal-local": { reachable: true } },
+      sessions: [],
+    };
+    const board: Board = {
+      id: "b", label: "B", columns: [],
+      tasks: [{
+        id: "t", title: "x", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1,
+        sessions: [
+          { env: "work-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID },
+          { env: "personal-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID2 },
+        ],
+      }],
+    };
+    startZombieReaper({
+      poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+      storage: { getAllBoards: () => [board] },
+      envs: [getEnv("work-local"), getEnv("personal-local")],
+      listPanes: (env) => {
+        queriedEnvs.push(env.id);
+        return Promise.resolve([{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }]);
+      },
+      closePane: (env, paneId) => { closed.push({ env: env.id, paneId }); return Promise.resolve(); },
+      now: () => clock, graceMs: 20_000,
+    });
+    clock = 0; cb!(snap); await flush();
+    clock = 20_000; cb!(snap); await flush();
+    // listPanes runs once per env per tick (two ticks here) — dedupe to the set of envs queried.
+    expect([...new Set(queriedEnvs)]).toEqual(["personal-local"]);
+    expect(closed).toEqual([{ env: "personal-local", paneId: "w1:p2" }]);
   });
 
   it("never reaps on an unreachable env (herdr down / restarting)", async () => {
