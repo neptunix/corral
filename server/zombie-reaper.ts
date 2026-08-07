@@ -31,7 +31,7 @@ export interface ReapDecision {
   readonly env: string;
   readonly paneId: string;
   readonly tabId: string;
-  /** First sighting as detached — lets the reap log say how long the tab lingered. */
+  /** First sighting as detached — lets the reap log say how long the pane lingered. */
   readonly firstSeenAt: number;
 }
 
@@ -91,14 +91,14 @@ export interface ZombieReaperOpts {
   readonly graceMs: number;
 }
 
-// Subscribe to poller snapshots and reap zombie tabs (a detached link whose herdr tab still lingers,
+// Subscribe to poller snapshots and reap zombie panes (a detached link whose herdr pane still lingers,
 // agentless, because Claude exited). Detection reuses the read-path liveness resolver, so it can never
 // diverge from what the board shows. herdr is only ever MUTATED here (the poller is otherwise
 // read-only), and only via `pane close`, which cascades tab → workspace. Two safety rails: an
 // unreachable env is skipped entirely (a herdr restart flips every link detached at once — we must not
 // reap then), and detectZombies verifies the pane itself — existence, tab/workspace membership, and no
-// agent — before any close. `since` (the per-tab grace clock) is retained across snapshots; an
-// in-flight guard serializes overlapping polls.
+// agent — before any close. `since` (the grace clock) and `failures` (the close-attempt counter) are
+// both keyed `env:paneId` and retained across snapshots; an in-flight guard serializes overlapping polls.
 export function startZombieReaper(opts: ZombieReaperOpts): () => void {
   const now = opts.now ?? ((): number => Date.now());
   const graceMs = opts.graceMs;

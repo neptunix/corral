@@ -15,7 +15,7 @@ const pane = (over: Partial<PaneInfo> = {}): PaneInfo => ({
 const panesByEnv = (panes: PaneInfo[]): Map<string, PaneInfo[]> => new Map([["e", panes]]);
 
 describe("detectZombies", () => {
-  it("reaps a detached candidate whose tab still exists once the grace window elapses", () => {
+  it("reaps a detached candidate whose pane still exists once the grace window elapses", () => {
     const r = detectZombies({
       detached: [link()], panesByEnv: panesByEnv([pane()]),
       now: 20_000, since: new Map([["e:w1:p2", 0]]), graceMs: 20_000,
@@ -23,7 +23,7 @@ describe("detectZombies", () => {
     expect(r.reap).toEqual([{ env: "e", paneId: "w1:p2", tabId: "w1:t2", firstSeenAt: 0 }]);
   });
 
-  it("does not reap when the stored tabId is absent from the tab list (herdr churn)", () => {
+  it("does not reap when the stored paneId is absent from the pane list (herdr churn)", () => {
     const r = detectZombies({
       detached: [link()], panesByEnv: panesByEnv([]),
       now: 20_000, since: new Map([["e:w1:p2", 0]]), graceMs: 20_000,
@@ -178,7 +178,7 @@ function harness(opts: {
 }
 
 describe("startZombieReaper", () => {
-  it("pane-closes a detached link whose tab lingers, once the grace elapses across snapshots", async () => {
+  it("pane-closes a detached link whose pane lingers, once the grace elapses across snapshots", async () => {
     // Empty sessions → the link is detached; the pane still exists in pane list → zombie.
     const h = harness({
       snapshot: { envs: { "work-local": { reachable: true } }, sessions: [] },

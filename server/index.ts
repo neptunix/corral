@@ -48,7 +48,7 @@ void (async () => {
   // Backfill stored links' Claude sessionId once the poller sees it (spawned links start null) — the
   // write-side half of persistent session identity; buildBoardState does the read-side churn-heal.
   startReconciler({ poller, storage });
-  // Close shell-only tabs left behind when a Claude session exits (detached link whose herdr tab still
+  // Close shell-only panes left behind when a Claude session exits (detached link whose herdr pane still
   // lingers). The ONLY place the poll loop mutates herdr — gated, guarded, and via pane close only.
   // Clamp + warning sit inside the gate: with the reaper off there is nothing to clamp or warn about.
   if (ZOMBIE_REAP_ENABLED) {
