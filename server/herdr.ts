@@ -268,6 +268,19 @@ const PaneListSchema = z.object({
   }).default({ panes: [] }),
 });
 
+const PaneListAllSchema = z.object({
+  result: z.object({
+    panes: z.array(z.object({
+      pane_id: z.string(),
+      tab_id: z.string(),
+      workspace_id: z.string(),
+      agent: z.string().optional(),
+      agent_status: z.string().optional(),
+      agent_session: AgentSessionSchema,
+    })).default([]),
+  }).default({ panes: [] }),
+});
+
 export async function paneRun(env: HerdrEnv, paneId: string, text: string, exec?: ExecFn): Promise<void> {
   await runHerdr(env, ["pane", "run", paneId, text],
     exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec });
@@ -355,6 +368,35 @@ export async function listPanes(
   const parsed = PaneListSchema.safeParse(raw);
   if (!parsed.success) return [];
   return parsed.data.result.panes.map((p) => ({ paneId: p.pane_id, cwd: p.cwd }));
+}
+
+export interface PaneIdentity {
+  readonly paneId: string;
+  readonly tabId: string;
+  readonly workspaceId: string;
+  readonly hasAgent: boolean;
+}
+
+/**
+ * Every pane herdr knows about, with its tab/workspace and whether an agent is registered on it.
+ * Distinct from `listPanes` above, which is workspace-scoped and carries `cwd` for spawn.
+ *
+ * `hasAgent` reports whether herdr shows ANY agent signal on the pane. It is NOT authoritative for
+ * absence: an agent started as a bare shell (`herdr agent start <name> -- bash`) is reported here
+ * exactly like a free pane. Occupancy is decided by the `agent list` index in the poller snapshot,
+ * which does list that case; this call supplies pane IDENTITY. An unparseable list yields [], which
+ * the reaper reads as "no evidence", so a shape change can only suppress reaping, never widen it.
+ */
+export async function listAllPanes(env: HerdrEnv, exec?: ExecFn): Promise<PaneIdentity[]> {
+  const raw = await herdrJson(env, ["pane", "list"], exec);
+  const parsed = PaneListAllSchema.safeParse(raw);
+  if (!parsed.success) return [];
+  return parsed.data.result.panes.map((p) => ({
+    paneId: p.pane_id,
+    tabId: p.tab_id,
+    workspaceId: p.workspace_id,
+    hasAgent: p.agent !== undefined || p.agent_session !== undefined || (p.agent_status ?? "unknown") !== "unknown",
+  }));
 }
 
 export async function tabClose(env: HerdrEnv, tabId: string, exec?: ExecFn): Promise<void> {

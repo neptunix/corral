@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import { ENVIRONMENTS } from "../environments.ts";
 import type { ExecFn } from "../server/herdr.ts";
-import { paneRun, paneGet, tabCreate, workspaceCreate, tabClose, tabRename, listPanes } from "../server/herdr.ts";
+import { paneRun, paneGet, tabCreate, workspaceCreate, tabClose, tabRename, listPanes, listAllPanes } from "../server/herdr.ts";
 
 const env = ENVIRONMENTS[0]!;
 
@@ -105,5 +105,66 @@ describe("tabRename", () => {
     await tabRename(env, "t1", "my label", exec);
     const args = (makeExec as unknown as { lastArgs: string[] }).lastArgs;
     expect(args).toEqual(["tab", "rename", "t1", "my label"]);
+  });
+});
+
+describe("listAllPanes", () => {
+  it("parses identity and marks a pane running an agent as occupied", async () => {
+    const payload = JSON.stringify({
+      result: {
+        panes: [{
+          agent: "claude",
+          agent_session: { agent: "claude", kind: "id", source: "herdr:claude", value: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" },
+          agent_status: "done",
+          cwd: "/proj", pane_id: "w1:p2", tab_id: "w1:t2", workspace_id: "w1",
+        }],
+      },
+    });
+    expect(await listAllPanes(env, makeExec(payload))).toEqual([
+      { paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: true },
+    ]);
+  });
+
+  it("marks a pane with no agent, no agent_session and unknown status as agentless", async () => {
+    const payload = JSON.stringify({
+      result: { panes: [{ agent_status: "unknown", cwd: "/x", pane_id: "w1:p1", tab_id: "w1:t1", workspace_id: "w1" }] },
+    });
+    expect(await listAllPanes(env, makeExec(payload))).toEqual([
+      { paneId: "w1:p1", tabId: "w1:t1", workspaceId: "w1", hasAgent: false },
+    ]);
+  });
+
+  it("treats any positive agent signal as occupied even without an `agent` string", async () => {
+    const payload = JSON.stringify({
+      result: { panes: [{ agent_status: "idle", cwd: "/x", pane_id: "w1:p3", tab_id: "w1:t3", workspace_id: "w1" }] },
+    });
+    const panes = await listAllPanes(env, makeExec(payload));
+    expect(panes[0]!.hasAgent).toBe(true);
+  });
+
+  it("KNOWN BLIND SPOT: a bash-style agent is indistinguishable from a free pane here", async () => {
+    // Verified against a live herdr: `herdr agent start <name> -- bash` yields a pane list entry with
+    // no `agent`, no `agent_session` and agent_status "unknown" — identical to an unoccupied pane.
+    // This is why occupancy is decided by the poller's `agent list` index, which DOES see it, and not
+    // by this field. Pinned as a test so the limitation cannot be forgotten.
+    const payload = JSON.stringify({
+      result: { panes: [{ agent_status: "unknown", cwd: "/x", pane_id: "w1:p4", tab_id: "w1:t4", workspace_id: "w1" }] },
+    });
+    const panes = await listAllPanes(env, makeExec(payload));
+    expect(panes[0]!.hasAgent).toBe(false);
+  });
+
+  it("calls `pane list` with no --workspace flag", async () => {
+    const exec = makeExec(JSON.stringify({ result: { panes: [] } }));
+    await listAllPanes(env, exec);
+    const args = (makeExec as unknown as { lastArgs: string[] }).lastArgs;
+    expect(args).toContain("pane");
+    expect(args).toContain("list");
+    expect(args).not.toContain("--workspace");
+  });
+
+  it("returns [] on an unexpected shape rather than throwing (fail-safe: no evidence → no reap)", async () => {
+    expect(await listAllPanes(env, makeExec("{}"))).toEqual([]);
+    expect(await listAllPanes(env, makeExec(JSON.stringify({ result: { panes: [{ pane_id: "w1:p2" }] } })))).toEqual([]);
   });
 });
