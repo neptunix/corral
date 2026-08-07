@@ -9,7 +9,7 @@ import { createApi } from "./api.ts";
 import { createAttentionStore } from "./attention-store.ts";
 import { sweepBriefRoot } from "./brief.ts";
 import { createGit } from "./git.ts";
-import { closePane, listTabs, listWorkspaces, readPane, workspaceClose } from "./herdr.ts";
+import { closePane, listAllPanes, listWorkspaces, readPane, workspaceClose } from "./herdr.ts";
 import { assertLoopback } from "./host-guard.ts";
 import { createPoller } from "./poller.ts";
 import { formatReport, resolveReapGrace, runPreflight } from "./preflight.ts";
@@ -54,7 +54,7 @@ void (async () => {
   if (ZOMBIE_REAP_ENABLED) {
     const reapGrace = resolveReapGrace(ZOMBIE_REAP_GRACE_MS, CHEAP_INTERVAL_MS, LIST_TIMEOUT);
     if (reapGrace.message !== null) console.error(reapGrace.message);
-    startZombieReaper({ poller, storage, envs: ENVS, listTabs, closePane, graceMs: reapGrace.ms });
+    startZombieReaper({ poller, storage, envs: ENVS, listPanes: listAllPanes, closePane, graceMs: reapGrace.ms });
   }
 
   const app = createApi({

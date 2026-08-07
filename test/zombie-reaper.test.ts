@@ -3,54 +3,45 @@ import type { Snapshot } from "@shared/schema";
 import { describe, expect, it, vi } from "vitest";
 
 import { getEnv } from "../environments.ts";
-import { detectZombies, startZombieReaper, type ReapCandidateLink, type TabInfo } from "../server/zombie-reaper.ts";
+import type { PaneIdentity } from "../server/herdr.ts";
+import { detectZombies, startZombieReaper, type PaneInfo, type ReapCandidateLink } from "../server/zombie-reaper.ts";
 
 const link = (over: Partial<ReapCandidateLink> = {}): ReapCandidateLink => ({
-  env: "e", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "task-a", workspaceId: "w1", ...over,
+  env: "e", paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", ...over,
 });
-const tab = (over: Partial<TabInfo> = {}): TabInfo => ({
-  tabId: "w1:t2", label: "task-a", workspaceId: "w1", ...over,
+const pane = (over: Partial<PaneInfo> = {}): PaneInfo => ({
+  paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false, ...over,
 });
-const tabsByEnv = (tabs: TabInfo[]): Map<string, TabInfo[]> => new Map([["e", tabs]]);
+const panesByEnv = (panes: PaneInfo[]): Map<string, PaneInfo[]> => new Map([["e", panes]]);
 
 describe("detectZombies", () => {
   it("reaps a detached candidate whose tab still exists once the grace window elapses", () => {
     const r = detectZombies({
-      detached: [link()], tabsByEnv: tabsByEnv([tab()]),
-      now: 20_000, since: new Map([["e:w1:t2", 0]]), graceMs: 20_000,
+      detached: [link()], panesByEnv: panesByEnv([pane()]),
+      now: 20_000, since: new Map([["e:w1:p2", 0]]), graceMs: 20_000,
     });
     expect(r.reap).toEqual([{ env: "e", paneId: "w1:p2", tabId: "w1:t2", firstSeenAt: 0 }]);
   });
 
   it("does not reap when the stored tabId is absent from the tab list (herdr churn)", () => {
     const r = detectZombies({
-      detached: [link()], tabsByEnv: tabsByEnv([]),
-      now: 20_000, since: new Map([["e:w1:t2", 0]]), graceMs: 20_000,
+      detached: [link()], panesByEnv: panesByEnv([]),
+      now: 20_000, since: new Map([["e:w1:p2", 0]]), graceMs: 20_000,
     });
     expect(r.reap).toEqual([]);
   });
 
   it("does not reap when the tab's workspaceId disagrees (id reuse after restart)", () => {
     const r = detectZombies({
-      detached: [link()], tabsByEnv: tabsByEnv([tab({ workspaceId: "wDIFFERENT" })]),
-      now: 20_000, since: new Map([["e:w1:t2", 0]]), graceMs: 20_000,
+      detached: [link()], panesByEnv: panesByEnv([pane({ workspaceId: "wDIFFERENT" })]),
+      now: 20_000, since: new Map([["e:w1:p2", 0]]), graceMs: 20_000,
     });
     expect(r.reap).toEqual([]);
   });
 
-  it("reaps even when the herdr tab was renamed since spawn (stored label is stale)", () => {
-    // corral itself renames herdr tabs to the Claude session name, so link.tabLabel goes stale — the
-    // guard must NOT compare it, only the stable tabId + workspaceId.
-    const r = detectZombies({
-      detached: [link({ tabLabel: "test-corral-b" })], tabsByEnv: tabsByEnv([tab({ label: "test-corral-5" })]),
-      now: 20_000, since: new Map([["e:w1:t2", 0]]), graceMs: 20_000,
-    });
-    expect(r.reap).toEqual([{ env: "e", paneId: "w1:p2", tabId: "w1:t2", firstSeenAt: 0 }]);
-  });
-
   it("ignores a link with an empty tabId", () => {
     const r = detectZombies({
-      detached: [link({ tabId: "" })], tabsByEnv: tabsByEnv([tab({ tabId: "" })]),
+      detached: [link({ tabId: "" })], panesByEnv: panesByEnv([pane({ tabId: "" })]),
       now: 20_000, since: new Map([["e:", 0]]), graceMs: 20_000,
     });
     expect(r.reap).toEqual([]);
@@ -58,44 +49,78 @@ describe("detectZombies", () => {
 
   it("seeds a fresh timer (now) on first detection and does not reap yet", () => {
     const r = detectZombies({
-      detached: [link()], tabsByEnv: tabsByEnv([tab()]),
+      detached: [link()], panesByEnv: panesByEnv([pane()]),
       now: 1000, since: new Map(), graceMs: 20_000,
     });
     expect(r.reap).toEqual([]);
-    expect(r.since.get("e:w1:t2")).toBe(1000);
+    expect(r.since.get("e:w1:p2")).toBe(1000);
   });
 
   it("preserves the earlier first-seen timestamp across calls (does not restart the clock)", () => {
     const r = detectZombies({
-      detached: [link()], tabsByEnv: tabsByEnv([tab()]),
-      now: 5000, since: new Map([["e:w1:t2", 1000]]), graceMs: 20_000,
+      detached: [link()], panesByEnv: panesByEnv([pane()]),
+      now: 5000, since: new Map([["e:w1:p2", 1000]]), graceMs: 20_000,
     });
     expect(r.reap).toEqual([]);            // 5000 - 1000 = 4000 < 20000
-    expect(r.since.get("e:w1:t2")).toBe(1000); // kept, not reset to 5000
+    expect(r.since.get("e:w1:p2")).toBe(1000); // kept, not reset to 5000
   });
 
   it("drops the timer when a previously-seen candidate no longer qualifies", () => {
     const r = detectZombies({
-      detached: [link()], tabsByEnv: tabsByEnv([]), // tab gone this round
-      now: 30_000, since: new Map([["e:w1:t2", 0]]), graceMs: 20_000,
+      detached: [link()], panesByEnv: panesByEnv([]), // pane gone this round
+      now: 30_000, since: new Map([["e:w1:p2", 0]]), graceMs: 20_000,
     });
     expect(r.reap).toEqual([]);
-    expect(r.since.has("e:w1:t2")).toBe(false);
+    expect(r.since.has("e:w1:p2")).toBe(false);
   });
 
   it("reaps multiple independent zombies once each has aged past the grace", () => {
     const r = detectZombies({
       detached: [
-        link({ paneId: "w1:p2", tabId: "w1:t2", tabLabel: "task-a", workspaceId: "w1" }),
-        link({ paneId: "w2:p3", tabId: "w2:t3", tabLabel: "other-a", workspaceId: "w2" }),
+        link({ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1" }),
+        link({ paneId: "w2:p3", tabId: "w2:t3", workspaceId: "w2" }),
       ],
-      tabsByEnv: tabsByEnv([tab(), tab({ tabId: "w2:t3", label: "other-a", workspaceId: "w2" })]),
-      now: 20_000, since: new Map([["e:w1:t2", 0], ["e:w2:t3", 0]]), graceMs: 20_000,
+      panesByEnv: panesByEnv([pane(), pane({ paneId: "w2:p3", tabId: "w2:t3", workspaceId: "w2" })]),
+      now: 20_000, since: new Map([["e:w1:p2", 0], ["e:w2:p3", 0]]), graceMs: 20_000,
     });
     expect(r.reap).toEqual([
       { env: "e", paneId: "w1:p2", tabId: "w1:t2", firstSeenAt: 0 },
       { env: "e", paneId: "w2:p3", tabId: "w2:t3", firstSeenAt: 0 },
     ]);
+  });
+
+  it("does not reap when the stored pane is absent from the pane list (the tab outlived its pane)", () => {
+    // The reported bug: tab w1:t2 still exists, but pane w1:p2 does not. Closing it fails forever.
+    const r = detectZombies({
+      detached: [link()], panesByEnv: panesByEnv([pane({ paneId: "w1:pQ" })]),
+      now: 20_000, since: new Map([["e:w1:p2", 0]]), graceMs: 20_000,
+    });
+    expect(r.reap).toEqual([]);
+    expect(r.since.has("e:w1:p2")).toBe(false);   // and the timer is dropped, so it cannot re-fire
+  });
+
+  it("does not reap when the pane now lives in a different tab", () => {
+    const r = detectZombies({
+      detached: [link()], panesByEnv: panesByEnv([pane({ tabId: "w1:t9" })]),
+      now: 20_000, since: new Map([["e:w1:p2", 0]]), graceMs: 20_000,
+    });
+    expect(r.reap).toEqual([]);
+  });
+
+  it("does not reap when the pane's workspaceId disagrees (id reuse after state loss)", () => {
+    const r = detectZombies({
+      detached: [link()], panesByEnv: panesByEnv([pane({ workspaceId: "wDIFFERENT" })]),
+      now: 20_000, since: new Map([["e:w1:p2", 0]]), graceMs: 20_000,
+    });
+    expect(r.reap).toEqual([]);
+  });
+
+  it("does not reap a pane that has an agent registered on it", () => {
+    const r = detectZombies({
+      detached: [link()], panesByEnv: panesByEnv([pane({ hasAgent: true })]),
+      now: 20_000, since: new Map([["e:w1:p2", 0]]), graceMs: 20_000,
+    });
+    expect(r.reap).toEqual([]);
   });
 });
 
@@ -121,12 +146,10 @@ function boardWithLink(over: Partial<{ tabId: string; paneId: string; sessionId:
   };
 }
 
-const rawTab = (o: { tab_id: string; label: string; workspace_id: string }): { tab_id: string; label: string; workspace_id: string } => o;
-
 function harness(opts: {
   snapshot: Snapshot;
   boards: Board[];
-  tabs: { tab_id: string; label: string; workspace_id: string }[];
+  panes: PaneIdentity[];
 }): {
   fire: () => void;
   closed: { paneId: string }[];
@@ -141,7 +164,7 @@ function harness(opts: {
     poller: { getSnapshot: () => opts.snapshot, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
     storage: { getAllBoards: () => opts.boards },
     envs: [getEnv("work-local")],
-    listTabs: () => { listCalls++; return Promise.resolve(opts.tabs); },
+    listPanes: () => { listCalls++; return Promise.resolve(opts.panes); },
     closePane: (_e, paneId) => { closed.push({ paneId }); return Promise.resolve(); },
     now: () => clock,
     graceMs: 20_000,
@@ -156,11 +179,11 @@ function harness(opts: {
 
 describe("startZombieReaper", () => {
   it("pane-closes a detached link whose tab lingers, once the grace elapses across snapshots", async () => {
-    // Empty sessions → the link is detached; the tab still exists in tab list → zombie.
+    // Empty sessions → the link is detached; the pane still exists in pane list → zombie.
     const h = harness({
       snapshot: { envs: { "work-local": { reachable: true } }, sessions: [] },
       boards: [boardWithLink()],
-      tabs: [rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })],
+      panes: [{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }],
     });
     h.setClock(0); h.fire(); await flush();
     expect(h.closed).toEqual([]);            // first sighting → timer seeded, no reap
@@ -172,12 +195,12 @@ describe("startZombieReaper", () => {
     const h = harness({
       snapshot: { envs: { "work-local": { reachable: false, error: "down" } }, sessions: [] },
       boards: [boardWithLink()],
-      tabs: [rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })],
+      panes: [{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }],
     });
     h.setClock(0); h.fire(); await flush();
     h.setClock(20_000); h.fire(); await flush();
     expect(h.closed).toEqual([]);
-    expect(h.listCalls).toBe(0);             // did not even query tabs on an unreachable env
+    expect(h.listCalls).toBe(0);             // did not even query panes on an unreachable env
   });
 
   it("does NOT reap a pane now occupied by a DIFFERENT live session (shell reused after Claude exited)", async () => {
@@ -192,16 +215,16 @@ describe("startZombieReaper", () => {
         recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
       }] },
       boards: [boardWithLink({ sessionId: SID })], // link.sessionId = S1 (ended)
-      tabs: [rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })],
+      panes: [{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }],
     });
     h.setClock(0); h.fire(); await flush();
     h.setClock(20_000); h.fire(); await flush();
     expect(h.closed).toEqual([]);
   });
 
-  it("does NOT reap a pane a session takes over DURING the listTabs await (TOCTOU)", async () => {
+  it("does NOT reap a pane a session takes over DURING the listPanes await (TOCTOU)", async () => {
     // The pane is an agentless zombie when candidates are chosen, but a session starts in it while we
-    // await listTabs. Reaping on the now-stale decision would kill it — the close must re-check.
+    // await listPanes. Reaping on the now-stale decision would kill it — the close must re-check.
     const S2 = "cccccccc-dddd-eeee-ffff-000000000000";
     const zombie: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
     const reused: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [{
@@ -217,12 +240,12 @@ describe("startZombieReaper", () => {
       poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
       storage: { getAllBoards: () => [boardWithLink({ sessionId: SID })] },
       envs: [getEnv("work-local")],
-      listTabs: () => { if (clock >= 20_000) snap = reused; return Promise.resolve([rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })]); },
+      listPanes: () => { if (clock >= 20_000) snap = reused; return Promise.resolve([{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }]); },
       closePane: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); },
       now: () => clock, graceMs: 20_000,
     });
     clock = 0; cb!(zombie); await flush();          // seed the timer (pane still empty)
-    clock = 20_000; cb!(zombie); await flush();      // listTabs flips the pane to a live session mid-tick
+    clock = 20_000; cb!(zombie); await flush();      // listPanes flips the pane to a live session mid-tick
     expect(closed).toEqual([]);
   });
 
@@ -235,12 +258,12 @@ describe("startZombieReaper", () => {
       poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
       storage: { getAllBoards: () => [boardWithLink()] },
       envs: [getEnv("work-local")],
-      listTabs: () => { listCalls++; return new Promise((res) => { release = () => { res([rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })]); }; }); },
+      listPanes: () => { listCalls++; return new Promise((res) => { release = () => { res([{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }]); }; }); },
       closePane: () => Promise.resolve(),
       now: () => 0, graceMs: 20_000,
     });
-    cb!(snap); await flush();  // tick 1 reaches listTabs and parks there (inFlight = true)
-    cb!(snap); await flush();  // tick 2 must short-circuit before touching listTabs
+    cb!(snap); await flush();  // tick 1 reaches listPanes and parks there (inFlight = true)
+    cb!(snap); await flush();  // tick 2 must short-circuit before touching listPanes
     expect(listCalls).toBe(1);
     release(); await flush();
   });
@@ -262,7 +285,10 @@ describe("startZombieReaper", () => {
       poller: { getSnapshot: () => empty, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
       storage: { getAllBoards: () => [board] },
       envs: [getEnv("work-local")],
-      listTabs: () => Promise.resolve([rawTab({ tab_id: "w1:t2", label: "z", workspace_id: "w1" }), rawTab({ tab_id: "w2:t3", label: "z", workspace_id: "w2" })]),
+      listPanes: () => Promise.resolve([
+        { paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false },
+        { paneId: "w2:p3", tabId: "w2:t3", workspaceId: "w2", hasAgent: false },
+      ]),
       closePane: (_e, paneId) => {
         if (paneId === "w1:p2") return Promise.reject(new Error("boom"));
         closed.push(paneId);
@@ -307,9 +333,9 @@ describe("startZombieReaper", () => {
       poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
       storage: { getAllBoards: () => [board] },
       envs: [getEnv("work-local")],
-      listTabs: () => Promise.resolve([
-        rawTab({ tab_id: "w1:t2", label: "z", workspace_id: "w1" }),
-        rawTab({ tab_id: "w2:t3", label: "z", workspace_id: "w2" }),
+      listPanes: () => Promise.resolve([
+        { paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false },
+        { paneId: "w2:p3", tabId: "w2:t3", workspaceId: "w2", hasAgent: false },
       ]),
       closePane: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); },
       now: () => clock, graceMs: 20_000,
@@ -334,7 +360,7 @@ describe("startZombieReaper", () => {
       poller: { getSnapshot: () => empty, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
       storage: { getAllBoards: () => [boardWithLink()] },
       envs: [getEnv("work-local")],
-      listTabs: () => Promise.resolve([rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })]),
+      listPanes: () => Promise.resolve([{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }]),
       closePane: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); },
       now: () => clock, graceMs: 20_000,
     });
@@ -353,7 +379,7 @@ describe("startZombieReaper", () => {
       const h = harness({
         snapshot: { envs: { "work-local": { reachable: true } }, sessions: [] },
         boards: [boardWithLink()],
-        tabs: [rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })],
+        panes: [{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }],
       });
       h.setClock(0); h.fire(); await flush();
       h.setClock(20_000); h.fire(); await flush();
@@ -378,7 +404,7 @@ describe("startZombieReaper", () => {
         poller: { getSnapshot: () => empty, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
         storage: { getAllBoards: () => [boardWithLink()] },
         envs: [getEnv("work-local")],
-        listTabs: () => Promise.resolve([rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })]),
+        listPanes: () => Promise.resolve([{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }]),
         closePane: () => Promise.reject(new Error("boom")),
         now: () => clock, graceMs: 20_000,
       });
@@ -402,7 +428,45 @@ describe("startZombieReaper", () => {
     };
     const h = harness({
       snapshot: live, boards: [boardWithLink()],
-      tabs: [rawTab({ tab_id: "w1:t2", label: "task-a", workspace_id: "w1" })],
+      panes: [{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }],
+    });
+    h.setClock(0); h.fire(); await flush();
+    h.setClock(20_000); h.fire(); await flush();
+    expect(h.closed).toEqual([]);
+  });
+
+  it("issues no herdr command at all when the link's pane is gone but its tab lingers", async () => {
+    // Regression for the endless `pane close … pane_not_found` loop: the tab-only guard authorised a
+    // close against a pane herdr had never heard of, once per tick, forever.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const h = harness({
+        snapshot: { envs: { "work-local": { reachable: true } }, sessions: [] },
+        boards: [boardWithLink()],                                   // link points at w1:p2
+        panes: [{ paneId: "w1:pQ", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }], // tab alive, pane replaced
+      });
+      h.setClock(0); h.fire(); await flush();
+      h.setClock(20_000); h.fire(); await flush();
+      h.setClock(40_000); h.fire(); await flush();
+      expect(h.closed).toEqual([]);
+      expect(warn.mock.calls.flat().filter((a) => typeof a === "string" && a.includes("zombie-reaper"))).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does NOT reap a pane running a non-Claude agent that pane list reports as free", async () => {
+    // A bash-style agent (`herdr agent start <name> -- bash`) is indistinguishable from a free pane in
+    // `pane list` — verified against a live herdr. The poller's agent-list index is what sees it, so
+    // this proves occupancy authority sits there and not on PaneInfo.hasAgent.
+    const h = harness({
+      snapshot: { envs: { "work-local": { reachable: true } }, sessions: [{
+        env: "work-local", paneId: "w1:p2", status: "unknown", agent: "", cwd: "/c",
+        tab: "task-a", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: null,
+        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+      }] },
+      boards: [boardWithLink({ sessionId: SID })],                 // our own session S1 is gone
+      panes: [{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }], // list says free
     });
     h.setClock(0); h.fire(); await flush();
     h.setClock(20_000); h.fire(); await flush();

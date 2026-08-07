@@ -422,12 +422,3 @@ export async function listWorkspaces(
   if (!parsed.success) return [];
   return parsed.data.result.workspaces;
 }
-
-export async function listTabs(
-  env: HerdrEnv, exec?: ExecFn,
-): Promise<{ tab_id: string; label: string; workspace_id: string }[]> {
-  const raw = await herdrJson(env, ["tab", "list"], exec);
-  const parsed = TabListSchema.safeParse(raw);
-  if (!parsed.success) return [];
-  return parsed.data.result.tabs;
-}

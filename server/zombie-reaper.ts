@@ -2,25 +2,26 @@ import type { Board } from "@shared/board-schema";
 import type { Snapshot } from "@shared/schema";
 
 import type { HerdrEnv } from "../environments.ts";
+import type { PaneIdentity } from "./herdr.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 
 export interface ReapCandidateLink {
   readonly env: string;
   readonly paneId: string;
   readonly tabId: string;
-  readonly tabLabel: string;
   readonly workspaceId: string;
 }
 
-export interface TabInfo {
+export interface PaneInfo {
+  readonly paneId: string;
   readonly tabId: string;
-  readonly label: string;
   readonly workspaceId: string;
+  readonly hasAgent: boolean;
 }
 
 export interface DetectInput {
   readonly detached: readonly ReapCandidateLink[];
-  readonly tabsByEnv: ReadonlyMap<string, readonly TabInfo[]>;
+  readonly panesByEnv: ReadonlyMap<string, readonly PaneInfo[]>;
   readonly now: number;
   readonly since: ReadonlyMap<string, number>;
   readonly graceMs: number;
@@ -40,20 +41,21 @@ export interface DetectOutput {
 }
 
 export function detectZombies(input: DetectInput): DetectOutput {
-  const { detached, tabsByEnv, now, since, graceMs } = input;
+  const { detached, panesByEnv, now, since, graceMs } = input;
   const nextSince = new Map<string, number>();
   const reap: ReapDecision[] = [];
   for (const link of detached) {
     if (link.tabId === "") continue;
-    // Guard on the STABLE coordinates (workspaceId + tabId): the stored tab must still exist. A herdr
-    // restart reassigns ids, so a missing tab — or a same-id tab in a different workspace — is not ours;
-    // skip it (and don't seed a timer) so churn is never mistaken for an exited Claude. We deliberately
-    // do NOT compare the label: corral renames herdr tabs to the Claude session name, so link.tabLabel
-    // goes stale — comparing it would leave every renamed session's zombie tab uncollected.
-    const tabs = tabsByEnv.get(link.env) ?? [];
-    const matches = tabs.some((t) => t.tabId === link.tabId && t.workspaceId === link.workspaceId);
-    if (!matches) continue;
-    const key = `${link.env}:${link.tabId}`;
+    // Verify the PANE we are about to close, not the tab. herdr allocates pane and tab numbers from
+    // per-workspace counters that only move forward and are never returned to the pool (see ADR 0003),
+    // so a pane missing from the list is gone permanently and a pane whose tab/workspace disagrees was
+    // never ours. Either way: skip, seed no timer, issue no command. An agent on the pane means a live
+    // session — ours or a stranger's — and is never a zombie.
+    const pane = (panesByEnv.get(link.env) ?? []).find((p) => p.paneId === link.paneId);
+    if (pane === undefined) continue;
+    if (pane.tabId !== link.tabId || pane.workspaceId !== link.workspaceId) continue;
+    if (pane.hasAgent) continue;
+    const key = `${link.env}:${link.paneId}`;
     const first = since.get(key) ?? now;
     nextSince.set(key, first);
     if (now - first >= graceMs) {
@@ -75,7 +77,7 @@ export interface ZombieReaperOpts {
   readonly poller: ReaperPoller;
   readonly storage: ReaperStorage;
   readonly envs: readonly HerdrEnv[];
-  readonly listTabs: (env: HerdrEnv) => Promise<{ tab_id: string; label: string; workspace_id: string }[]>;
+  readonly listPanes: (env: HerdrEnv) => Promise<PaneIdentity[]>;
   readonly closePane: (env: HerdrEnv, paneId: string) => Promise<void>;
   readonly now?: () => number;
   /** Required: forces every caller through resolveReapGrace, so the clamp cannot be bypassed. */
@@ -87,8 +89,9 @@ export interface ZombieReaperOpts {
 // diverge from what the board shows. herdr is only ever MUTATED here (the poller is otherwise
 // read-only), and only via `pane close`, which cascades tab → workspace. Two safety rails: an
 // unreachable env is skipped entirely (a herdr restart flips every link detached at once — we must not
-// reap then), and detectZombies' workspaceId+tabId guard rejects a reassigned id. `since` (the
-// per-tab grace clock) is retained across snapshots; an in-flight guard serializes overlapping polls.
+// reap then), and detectZombies verifies the pane itself — existence, tab/workspace membership, and no
+// agent — before any close. `since` (the per-tab grace clock) is retained across snapshots; an
+// in-flight guard serializes overlapping polls.
 export function startZombieReaper(opts: ZombieReaperOpts): () => void {
   const now = opts.now ?? ((): number => Date.now());
   const graceMs = opts.graceMs;
@@ -121,34 +124,30 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
             // but reaping would kill that session. Skip it, mirroring the /close route's pane_reused guard.
             if (index.liveMap.has(`${link.env}:${link.paneId}`)) continue;
             const arr = byEnv.get(link.env) ?? [];
-            arr.push({
-              env: link.env, paneId: link.paneId, tabId: link.tabId,
-              tabLabel: link.tabLabel, workspaceId: link.workspaceId,
-            });
+            arr.push({ env: link.env, paneId: link.paneId, tabId: link.tabId, workspaceId: link.workspaceId });
             byEnv.set(link.env, arr);
           }
         }
       }
       if (byEnv.size === 0) { since = new Map(); return; }
 
-      // Fetch the live tab list ONLY for reachable envs with detached candidates. Skipping unreachable
-      // envs is the churn rail: their tabs are unknown, so nothing there is ever reaped.
-      const tabsByEnv = new Map<string, TabInfo[]>();
+      // Fetch the live pane list ONLY for reachable envs with detached candidates. Skipping unreachable
+      // envs is the churn rail: their panes are unknown, so nothing there is ever reaped.
+      const panesByEnv = new Map<string, PaneInfo[]>();
       await Promise.all([...byEnv.keys()].map(async (envId) => {
         if (snapshot.envs[envId]?.reachable !== true) return;
         const env = opts.envs.find((e) => e.id === envId);
         if (env === undefined) return;
         try {
-          const tabs = await opts.listTabs(env);
-          tabsByEnv.set(envId, tabs.map((t) => ({ tabId: t.tab_id, label: t.label, workspaceId: t.workspace_id })));
+          panesByEnv.set(envId, await opts.listPanes(env));
         } catch { /* a failed list just means no reap for this env this round */ }
       }));
 
       const detached = [...byEnv.values()].flat();
-      const result = detectZombies({ detached, tabsByEnv, now: now(), since, graceMs });
+      const result = detectZombies({ detached, panesByEnv, now: now(), since, graceMs });
       since = result.since;
 
-      // Re-read liveness: a poll may have landed during the (possibly slow, remote-SSH) listTabs await
+      // Re-read liveness: a poll may have landed during the (possibly slow, remote-SSH) listPanes await
       // and put a session in the pane. Covers only that await window — staleness is the grace's job.
       const fresh = buildLiveIndex(opts.poller.getSnapshot().sessions);
       await Promise.all(result.reap.map(async (r) => {
