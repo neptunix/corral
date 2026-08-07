@@ -40,11 +40,23 @@ export interface DetectOutput {
   readonly since: Map<string, number>;
 }
 
+/**
+ * Pure decision: which detached candidates are safe to reap, given one `pane list` snapshot.
+ *
+ * NOT self-sufficient. `pane.hasAgent === false` here is not evidence of absence: a bash-style agent
+ * (`herdr agent start <name> -- bash`) appears in `pane list` byte-identically to a free pane (see
+ * `PaneIdentity.hasAgent` in server/herdr.ts). Safety depends entirely on the caller having already
+ * dropped any link whose pane the poller's `agent list` index (`index.liveMap`) shows occupied —
+ * this function has no way to reject a pane that index would have caught.
+ */
 export function detectZombies(input: DetectInput): DetectOutput {
   const { detached, panesByEnv, now, since, graceMs } = input;
   const nextSince = new Map<string, number>();
   const reap: ReapDecision[] = [];
   for (const link of detached) {
+    // `AttachBodySchema` (server/api.ts) defaults an omitted tabId to "" — a link attached without one
+    // is therefore permanently unreapable. Pre-existing and correct per ADR 0003: tab membership below
+    // is a required identity guard and "" can never satisfy it, so this only short-circuits early.
     if (link.tabId === "") continue;
     // Verify the PANE we are about to close, not the tab. herdr allocates pane and tab numbers from
     // per-workspace counters that only move forward and are never returned to the pool (see ADR 0003),
@@ -104,6 +116,8 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
   const graceMs = opts.graceMs;
   let since = new Map<string, number>();
   const failures = new Map<string, { window: number; count: number }>();
+  // One warning per env per process for a failing `listPanes` — see the catch below.
+  const warnedListFailures = new Set<string>();
   // Keeps `failures` bounded and window-scoped exactly like `since`: a key whose grace window ended
   // (candidate left detection) or restarted (re-seeded after a gap) no longer matches `since.get(key)`,
   // so its stale count is dropped rather than bleeding into a later, unrelated window.
@@ -130,6 +144,11 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
 
       // Detached links (link.live would be null) that still carry a tabId, grouped by env.
       const byEnv = new Map<string, ReapCandidateLink[]>();
+      // Several links can point at the same pane by design (api.ts's AttachBodySchema allows
+      // re-attaching a task to a pane another link already holds). Without this, two detached links on
+      // one pane become two ReapDecisions and two concurrent `closePane` calls — the loser gets
+      // `pane_not_found` and books a spurious failure against a pane the winner already reaped.
+      const seenPanes = new Set<string>();
       for (const board of opts.storage.getAllBoards()) {
         for (const task of board.tasks) {
           for (const link of task.sessions) {
@@ -139,6 +158,9 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
             // re-ran `claude` in the lingering shell) — resolveLiveRow still reports our link detached,
             // but reaping would kill that session. Skip it, mirroring the /close route's pane_reused guard.
             if (index.liveMap.has(`${link.env}:${link.paneId}`)) continue;
+            const key = `${link.env}:${link.paneId}`;
+            if (seenPanes.has(key)) continue;
+            seenPanes.add(key);
             const arr = byEnv.get(link.env) ?? [];
             arr.push({ env: link.env, paneId: link.paneId, tabId: link.tabId, workspaceId: link.workspaceId });
             byEnv.set(link.env, arr);
@@ -156,7 +178,16 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
         if (env === undefined) return;
         try {
           panesByEnv.set(envId, await opts.listPanes(env));
-        } catch { /* a failed list just means no reap for this env this round */ }
+        } catch (err) {
+          // With no entry in panesByEnv, detectZombies skips every candidate in THIS env and drops
+          // their grace timers too (`panesByEnv.get(link.env) ?? []` reads as "pane gone"), so an env
+          // whose list call flakes never accumulates grace — it re-seeds from zero once it recovers.
+          // Rate-limited to once per env per process; this can fail every tick otherwise.
+          if (!warnedListFailures.has(envId)) {
+            warnedListFailures.add(envId);
+            console.warn(`[zombie-reaper] pane list failed env=${envId}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
       }));
 
       const detached = [...byEnv.values()].flat();

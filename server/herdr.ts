@@ -377,26 +377,43 @@ export interface PaneIdentity {
   readonly hasAgent: boolean;
 }
 
+// One warning per env per process for an unparseable `pane list` — see the safeParse branch below.
+const warnedPaneListShape = new Set<string>();
+
 /**
  * Every pane herdr knows about, with its tab/workspace and whether an agent is registered on it.
  * Distinct from `listPanes` above, which is workspace-scoped and carries `cwd` for spawn.
  *
- * `hasAgent` reports whether herdr shows ANY agent signal on the pane. It is NOT authoritative for
- * absence: an agent started as a bare shell (`herdr agent start <name> -- bash`) is reported here
- * exactly like a free pane. Occupancy is decided by the `agent list` index in the poller snapshot,
- * which does list that case; this call supplies pane IDENTITY. An unparseable list yields [], which
- * the reaper reads as "no evidence", so a shape change can only suppress reaping, never widen it.
+ * `hasAgent` reports whether herdr shows ANY agent signal on the pane, treating an empty `agent`
+ * string and an empty/missing `agent_status` the same as absent (herdr's own default for a
+ * non-claude pane, per `AgentListSchema` above — a free pane reporting "" must not read as
+ * occupied). It is still NOT authoritative for absence: an agent started as a bare shell
+ * (`herdr agent start <name> -- bash`) is reported here exactly like a free pane. Occupancy is
+ * decided by the `agent list` index in the poller snapshot, which does list that case; this call
+ * supplies pane IDENTITY. An unparseable list yields [], which the reaper reads as "no evidence", so
+ * a shape change can only suppress reaping, never widen it.
  */
 export async function listAllPanes(env: HerdrEnv, exec?: ExecFn): Promise<PaneIdentity[]> {
   const raw = await herdrJson(env, ["pane", "list"], exec);
   const parsed = PaneListAllSchema.safeParse(raw);
-  if (!parsed.success) return [];
-  return parsed.data.result.panes.map((p) => ({
-    paneId: p.pane_id,
-    tabId: p.tab_id,
-    workspaceId: p.workspace_id,
-    hasAgent: p.agent !== undefined || p.agent_session !== undefined || (p.agent_status ?? "unknown") !== "unknown",
-  }));
+  if (!parsed.success) {
+    // Silent before: an env whose `pane list` shape drifts loses reaping forever with no signal.
+    // Rate-limited to once per env per process — this can fire every poll tick otherwise.
+    if (!warnedPaneListShape.has(env.id)) {
+      warnedPaneListShape.add(env.id);
+      console.warn(`[herdr] pane list: unexpected shape env=${env.id}: ${JSON.stringify(raw).slice(0, 200)}`);
+    }
+    return [];
+  }
+  return parsed.data.result.panes.map((p) => {
+    const status = p.agent_status ?? "unknown";
+    return {
+      paneId: p.pane_id,
+      tabId: p.tab_id,
+      workspaceId: p.workspace_id,
+      hasAgent: (p.agent !== undefined && p.agent !== "") || p.agent_session !== undefined || (status !== "unknown" && status !== ""),
+    };
+  });
 }
 
 export async function tabClose(env: HerdrEnv, tabId: string, exec?: ExecFn): Promise<void> {

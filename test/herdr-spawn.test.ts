@@ -142,6 +142,22 @@ describe("listAllPanes", () => {
     expect(panes[0]!.hasAgent).toBe(true);
   });
 
+  it("treats an empty `agent` string as absent (herdr's own default for a non-claude pane)", async () => {
+    const payload = JSON.stringify({
+      result: { panes: [{ agent: "", agent_status: "unknown", cwd: "/x", pane_id: "w1:p5", tab_id: "w1:t5", workspace_id: "w1" }] },
+    });
+    const panes = await listAllPanes(env, makeExec(payload));
+    expect(panes[0]!.hasAgent).toBe(false);
+  });
+
+  it('treats an empty `agent_status` the same as "unknown"', async () => {
+    const payload = JSON.stringify({
+      result: { panes: [{ agent_status: "", cwd: "/x", pane_id: "w1:p6", tab_id: "w1:t6", workspace_id: "w1" }] },
+    });
+    const panes = await listAllPanes(env, makeExec(payload));
+    expect(panes[0]!.hasAgent).toBe(false);
+  });
+
   it("KNOWN BLIND SPOT: a bash-style agent is indistinguishable from a free pane here", async () => {
     // Verified against a live herdr: `herdr agent start <name> -- bash` yields a pane list entry with
     // no `agent`, no `agent_session` and agent_status "unknown" — identical to an unoccupied pane.

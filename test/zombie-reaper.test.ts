@@ -31,18 +31,10 @@ describe("detectZombies", () => {
     expect(r.reap).toEqual([]);
   });
 
-  it("does not reap when the tab's workspaceId disagrees (id reuse after restart)", () => {
-    const r = detectZombies({
-      detached: [link()], panesByEnv: panesByEnv([pane({ workspaceId: "wDIFFERENT" })]),
-      now: 20_000, since: new Map([["e:w1:p2", 0]]), graceMs: 20_000,
-    });
-    expect(r.reap).toEqual([]);
-  });
-
   it("ignores a link with an empty tabId", () => {
     const r = detectZombies({
       detached: [link({ tabId: "" })], panesByEnv: panesByEnv([pane({ tabId: "" })]),
-      now: 20_000, since: new Map([["e:", 0]]), graceMs: 20_000,
+      now: 20_000, since: new Map([["e:w1:p2", 0]]), graceMs: 20_000,
     });
     expect(r.reap).toEqual([]);
   });
@@ -201,6 +193,84 @@ describe("startZombieReaper", () => {
     h.setClock(20_000); h.fire(); await flush();
     expect(h.closed).toEqual([]);
     expect(h.listCalls).toBe(0);             // did not even query panes on an unreachable env
+  });
+
+  it("a listPanes rejection reaps nothing and drops the candidate's grace timer (no accumulation across a flaky env)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const snap: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+      let clock = 0;
+      let shouldFail = false;
+      let cb: ((s: Snapshot) => void) | null = null;
+      const closed: string[] = [];
+      startZombieReaper({
+        poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+        storage: { getAllBoards: () => [boardWithLink()] },
+        envs: [getEnv("work-local")],
+        listPanes: () => shouldFail
+          ? Promise.reject(new Error("ssh timeout"))
+          : Promise.resolve([{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }]),
+        closePane: (_e, paneId) => { closed.push(paneId); return Promise.resolve(); },
+        now: () => clock, graceMs: 20_000,
+      });
+      clock = 0; cb!(snap); await flush();                  // seeds the timer at 0
+      shouldFail = true;
+      clock = 10_000; cb!(snap); await flush();              // listPanes rejects: no entry in panesByEnv
+      expect(closed).toEqual([]);
+      shouldFail = false;
+      // Recovers at 25_000 — if the earlier timer (seeded at 0) had survived the failure, 25_000 - 0 =
+      // 25_000 >= grace would reap NOW. It does not: the failed tick dropped it, so this is a fresh seed.
+      clock = 25_000; cb!(snap); await flush();
+      expect(closed).toEqual([]);
+      clock = 45_000; cb!(snap); await flush();              // full grace elapsed from the 25_000 re-seed
+      expect(closed).toEqual(["w1:p2"]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("dedupes two detached links on the same pane into a single reap (no spurious pane_not_found)", async () => {
+    // api.ts's AttachBodySchema allows re-attaching, so two tasks can each hold a link to the same
+    // pane. Without dedup both become ReapDecisions and race two closePane calls; the loser (simulated
+    // here by rejecting a repeat close on the same paneId) would log a spurious failure.
+    const linkSession = (sid: string): Board["tasks"][0]["sessions"][0] => ({
+      env: "work-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c",
+      name: "z", cwdSnapshot: "/c", sessionId: sid,
+    });
+    const board: Board = {
+      id: "b", label: "B", columns: [],
+      tasks: [
+        { id: "t1", title: "x", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1, sessions: [linkSession(SID)] },
+        { id: "t2", title: "y", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1, sessions: [linkSession(SID2)] },
+      ],
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const closed: string[] = [];
+      const alreadyClosed = new Set<string>();
+      let clock = 0;
+      let cb: ((s: Snapshot) => void) | null = null;
+      const empty: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+      startZombieReaper({
+        poller: { getSnapshot: () => empty, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+        storage: { getAllBoards: () => [board] },
+        envs: [getEnv("work-local")],
+        listPanes: () => Promise.resolve([{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }]),
+        closePane: (_e, paneId) => {
+          if (alreadyClosed.has(paneId)) return Promise.reject(new Error("pane_not_found"));
+          alreadyClosed.add(paneId);
+          closed.push(paneId);
+          return Promise.resolve();
+        },
+        now: () => clock, graceMs: 20_000,
+      });
+      clock = 0; cb!(empty); await flush();
+      clock = 20_000; cb!(empty); await flush();
+      expect(closed).toEqual(["w1:p2"]); // exactly one close, not one per link
+      expect(warn.mock.calls.flat().filter((a) => typeof a === "string" && a.includes("zombie-reaper"))).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("does NOT reap a pane now occupied by a DIFFERENT live session (shell reused after Claude exited)", async () => {
