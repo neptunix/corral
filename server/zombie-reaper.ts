@@ -46,6 +46,14 @@ export function detectZombies(input: DetectInput): DetectOutput {
   const { detached, panesByEnv, now, since, graceMs } = input;
   const nextSince = new Map<string, number>();
   const reap: ReapDecision[] = [];
+  // Several links can point at the same pane by design (api.ts's AttachBodySchema allows re-attaching
+  // a task to a pane another link already holds). Two links must still yield ONE decision: otherwise
+  // two concurrent `closePane` calls race, and the loser gets `pane_not_found` and books a spurious
+  // failure against a pane the winner already reaped. Collapsing here rather than at collection is
+  // deliberate — a duplicate carrying a stale tabId must not consume the pane's only slot and hide the
+  // sibling link that still names it correctly. (`nextSince` is keyed the same way, so it collapses
+  // on its own.)
+  const decided = new Set<string>();
   for (const link of detached) {
     // `AttachBodySchema` (server/api.ts) defaults an omitted tabId to "" — a link attached without one
     // is therefore permanently unreapable. Pre-existing and correct per ADR 0003: tab membership below
@@ -63,7 +71,8 @@ export function detectZombies(input: DetectInput): DetectOutput {
     const key = `${link.env}:${link.paneId}`;
     const first = since.get(key) ?? now;
     nextSince.set(key, first);
-    if (now - first >= graceMs) {
+    if (now - first >= graceMs && !decided.has(key)) {
+      decided.add(key);
       reap.push({ env: link.env, paneId: link.paneId, tabId: link.tabId, firstSeenAt: first });
     }
   }
@@ -111,14 +120,6 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
   const failures = new Map<string, { window: number; count: number }>();
   // One warning per env per process for a failing `listPanes` — see the catch below.
   const warnedListFailures = new Set<string>();
-  // Keeps `failures` bounded and window-scoped exactly like `since`: a key whose grace window ended
-  // (candidate left detection) or restarted (re-seeded after a gap) no longer matches `since.get(key)`,
-  // so its stale count is dropped rather than bleeding into a later, unrelated window.
-  const pruneFailures = (): void => {
-    for (const [key, f] of failures) {
-      if (since.get(key) !== f.window) failures.delete(key);
-    }
-  };
   let lastTick: number | null = null;
   let inFlight = false;
 
@@ -137,11 +138,6 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
 
       // Detached links (link.live would be null) that still carry a tabId, grouped by env.
       const byEnv = new Map<string, ReapCandidateLink[]>();
-      // Several links can point at the same pane by design (api.ts's AttachBodySchema allows
-      // re-attaching a task to a pane another link already holds). Without this, two detached links on
-      // one pane become two ReapDecisions and two concurrent `closePane` calls — the loser gets
-      // `pane_not_found` and books a spurious failure against a pane the winner already reaped.
-      const seenPanes = new Set<string>();
       for (const board of opts.storage.getAllBoards()) {
         for (const task of board.tasks) {
           for (const link of task.sessions) {
@@ -151,16 +147,13 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
             // re-ran `claude` in the lingering shell) — resolveLiveRow still reports our link detached,
             // but reaping would kill that session. Skip it, mirroring the /close route's pane_reused guard.
             if (index.liveMap.has(`${link.env}:${link.paneId}`)) continue;
-            const key = `${link.env}:${link.paneId}`;
-            if (seenPanes.has(key)) continue;
-            seenPanes.add(key);
             const arr = byEnv.get(link.env) ?? [];
             arr.push({ env: link.env, paneId: link.paneId, tabId: link.tabId, workspaceId: link.workspaceId });
             byEnv.set(link.env, arr);
           }
         }
       }
-      if (byEnv.size === 0) { since = new Map(); pruneFailures(); return; }
+      if (byEnv.size === 0) { since = new Map(); return; }
 
       // Fetch the live pane list ONLY for reachable envs with detached candidates. Skipping unreachable
       // envs is the churn rail: their panes are unknown, so nothing there is ever reaped.
@@ -186,7 +179,6 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
       const detached = [...byEnv.values()].flat();
       const result = detectZombies({ detached, panesByEnv, now: now(), since, graceMs });
       since = result.since;
-      pruneFailures();
 
       // Re-read liveness: a poll may have landed during the (possibly slow, remote-SSH) listPanes await
       // and put a session in the pane. Covers only that await window — staleness is the grace's job.
@@ -206,6 +198,9 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
         } catch (err) {
           console.warn(`[zombie-reaper] pane close failed env=${r.env} pane=${r.paneId}: ${err instanceof Error ? err.message : String(err)}`);
           const prev = failures.get(key);
+          // The window stamp is what scopes the cap: a count booked under an earlier grace window has
+          // a different `window` value, so it restarts at 1 here rather than eating into this window's
+          // budget. No separate pruning pass is needed — the stale entry is simply never read again.
           const n = prev?.window === r.firstSeenAt ? prev.count + 1 : 1;
           if (n >= CLOSE_ATTEMPT_CAP) {
             // Give up for now, not for good: dropping the timer forces a full re-age before the next

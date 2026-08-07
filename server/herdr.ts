@@ -390,17 +390,12 @@ const warnedPaneListShape = new Set<string>();
  * Every pane herdr knows about, with its tab/workspace and whether an agent is registered on it.
  * Distinct from `listPanes` above, which is workspace-scoped and carries `cwd` for spawn.
  *
- * `hasAgent` reports whether herdr shows ANY agent signal on the pane, treating an empty `agent`
- * string and an empty/missing `agent_status` the same as absent. This is defensive hardening, not
- * a mirror of observed herdr behaviour: verified live, a `pane list` entry with no agent omits the
- * `agent` key entirely rather than sending "" — `""` is only a shape `AgentListSchema` above
- * produces, via its own `.default("")`, on the *different* `agent list` call. Guarded here anyway
- * because failing toward "absent" is the safe direction if `pane list` ever did emit it. It is
- * still NOT authoritative for absence: an agent started as a bare shell
- * (`herdr agent start <name> -- bash`) is reported here exactly like a free pane. Occupancy is
- * decided by the `agent list` index in the poller snapshot, which does list that case; this call
- * supplies pane IDENTITY. An unparseable list yields [], which the reaper reads as "no evidence", so
- * a shape change can only suppress reaping, never widen it.
+ * `hasAgent` reports whether herdr shows ANY agent signal on the pane: an `agent` string, an
+ * `agent_session`, or an `agent_status` other than "unknown". It is NOT authoritative for absence:
+ * an agent started as a bare shell (`herdr agent start <name> -- bash`) is reported here exactly like
+ * a free pane. Occupancy is decided by the `agent list` index in the poller snapshot, which does list
+ * that case; this call supplies pane IDENTITY. An unparseable list yields [], which the reaper reads
+ * as "no evidence", so a shape change can only suppress reaping, never widen it.
  */
 export async function listAllPanes(env: HerdrEnv, exec?: ExecFn): Promise<PaneIdentity[]> {
   const raw = await herdrJson(env, ["pane", "list"], exec);
@@ -414,15 +409,12 @@ export async function listAllPanes(env: HerdrEnv, exec?: ExecFn): Promise<PaneId
     }
     return [];
   }
-  return parsed.data.result.panes.map((p) => {
-    const status = p.agent_status ?? "unknown";
-    return {
-      paneId: p.pane_id,
-      tabId: p.tab_id,
-      workspaceId: p.workspace_id,
-      hasAgent: (p.agent !== undefined && p.agent !== "") || p.agent_session !== undefined || (status !== "unknown" && status !== ""),
-    };
-  });
+  return parsed.data.result.panes.map((p) => ({
+    paneId: p.pane_id,
+    tabId: p.tab_id,
+    workspaceId: p.workspace_id,
+    hasAgent: p.agent !== undefined || p.agent_session !== undefined || (p.agent_status ?? "unknown") !== "unknown",
+  }));
 }
 
 export async function tabClose(env: HerdrEnv, tabId: string, exec?: ExecFn): Promise<void> {
