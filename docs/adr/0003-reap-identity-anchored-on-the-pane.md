@@ -36,13 +36,18 @@ identical in v0.7.1 and v0.8.0), because the fix's safety depends on it:
 - All three counters only ever move **forward**. Workspace ids come from a
   process-global `AtomicU64`; tab and pane numbers from per-workspace counters
   advanced as `next = max(next, number + 1)`. Closing a pane unregisters it from
-  the public-number map and **never returns its number to the pool**. herdr asserts
-  this at runtime (`next_public_tab_number > max_tab_number`, the pane equivalent,
-  and a duplicate-number assert).
+  the public-number map and **never returns its number to the pool**.
 - The counters survive a herdr restart: on restore they are recomputed as
   `max(persisted numbers) + 1` (`src/persist/restore.rs`).
-- herdr asserts that its public pane map exactly matches its live panes, so
-  `pane list` is authoritative: a pane absent from it is absent from herdr's state.
+- Both of the above are read off the **release path** — the code that runs in the
+  shipped binary. The matching invariants (`next_public_tab_number >
+  max_tab_number`, its pane equivalent, a duplicate-number check, and "the public
+  pane map matches the live panes") are asserted only in herdr's own **test
+  suite**: they live in `assert_invariants_for_test`, whose definition and every
+  call site sit inside `#[cfg(test)]` (checked in v0.8.0). The running daemon
+  performs no such self-check, so no corral guard may be skipped on the belief that
+  it does. `pane list` is treated as authoritative because of the forward-only
+  numbering, not because of a runtime assert.
 
 Two consequences. A pane id is a **stable identity for the lifetime of the herdr
 session's persisted state** — a pane that has disappeared can never be re-created
@@ -74,8 +79,10 @@ is unchanged; the payload is not. Global `pane list` returns `cwd`, `foreground_
 `terminal_id`, `revision`, `focused` and labels for every pane on the host (26 on the
 machine this was measured on), where `tab list` returned three fields per tab.
 Immaterial in practice, but it crosses SSH on remote environments. It also carries
-agent state directly, making it fresher evidence than the poller snapshot (up to one
-poll interval stale) that the previous code consulted.
+agent state directly — a convenient extra *skip* signal, and nothing more. It is
+explicitly **not** treated as newer evidence than the poller snapshot: reply arrival
+order is not state order (see the Rationale), so neither of the two agent-list
+guards below may be dropped in its favour.
 
 A close that still fails is retried at most **3 times per grace window**: on the
 third failure the candidate's grace timer is dropped, so it must age through a full
@@ -115,7 +122,11 @@ in the original design of this change and restored after review:
   — no `agent`, no `agent_session`, `agent_status: "unknown"`. `agent list` does
   list it, because a missing `agent` string defaults to `""`. So the two calls carry
   different authority: `pane list` decides **identity**, `agent list` decides
-  **occupancy**, and the reap needs both.
+  **occupancy**, and the reap needs both. The complementary state was observed live
+  the same way: a pane whose Claude has **exited** reports exactly that shape too and
+  is absent from `agent list`, so the reap path's `hasAgent === false` condition does
+  accept the one state the reaper exists to act on — that entry is pinned as a
+  fixture in `test/herdr-spawn.test.ts`.
 - The re-read of the snapshot immediately before closing. The tempting argument for
   deleting it — that a fresh `pane list` is strictly newer evidence — is false:
   response *arrival* order is not state order. A `pane list` reply can be generated
