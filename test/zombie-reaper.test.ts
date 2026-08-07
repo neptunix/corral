@@ -494,8 +494,10 @@ describe("startZombieReaper", () => {
       }
       expect(attempts).toBe(3);                               // capped, not once per tick
 
-      // The candidate is not abandoned: after a full grace it is eligible again.
-      clock = 60_000; cb!(snap); await flush();               // re-seeds (timer was dropped at the cap)
+      // The candidate is not abandoned: after a full grace it is eligible again. (This jump also
+      // exceeds graceMs itself, so the tick-gap branch would re-seed even without the cap — the
+      // attempts===3 assertion above is what isolates the cap's own behaviour.)
+      clock = 60_000; cb!(snap); await flush();               // re-seeds
       clock = 80_000; cb!(snap); await flush();               // grace elapsed again
       expect(attempts).toBe(4);
     } finally {
@@ -532,6 +534,44 @@ describe("startZombieReaper", () => {
       // 1 fail, 2 fail, 3 SUCCESS (count reset), 4 fail, 5 fail, 6 fail → cap → timer dropped, 7th tick
       // finds a re-seeded timer and does not attempt.
       expect(attempts).toBe(6);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not let a stale failure count from an earlier grace window shrink a later one", async () => {
+    // The link's own episode ends mid-window (a different session takes over the pane), then a
+    // genuinely new episode starts later. The failure count must not survive the gap — the new window
+    // gets a full 3 attempts, not 3 minus whatever had already failed before the break.
+    const S2 = "ffffffff-1111-2222-3333-444444444444";
+    const empty: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
+    const live: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [{
+      env: "work-local", paneId: "w1:p2", status: "idle", agent: "claude", cwd: "/c",
+      tab: "task-a", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: S2,
+      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+    }] };
+    let snap: Snapshot = empty;
+    let clock = 0;
+    let attempts = 0;
+    let cb: ((s: Snapshot) => void) | null = null;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      startZombieReaper({
+        poller: { getSnapshot: () => snap, onSnapshot: (fn) => { cb = fn; return () => void 0; } },
+        storage: { getAllBoards: () => [boardWithLink()] },
+        envs: [getEnv("work-local")],
+        listPanes: () => Promise.resolve([{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }]),
+        closePane: () => { attempts++; return Promise.reject(new Error("herdr unreachable")); },
+        now: () => clock, graceMs: 20_000,
+      });
+      clock = 0; cb!(snap); await flush();                       // seed
+      clock = 20_000; cb!(snap); await flush();                  // attempt 1, fails (count 1)
+      snap = live; clock = 20_001; cb!(snap); await flush();     // a different session takes the pane: episode ends
+      snap = empty; clock = 20_002; cb!(snap); await flush();    // pane free again: a genuinely new episode
+      for (const t of [40_002, 40_003, 40_004, 40_005]) {
+        clock = t; cb!(snap); await flush();
+      }
+      expect(attempts).toBe(4);                                  // 1 from window 1, a full 3 from window 2
     } finally {
       warn.mockRestore();
     }

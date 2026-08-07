@@ -103,7 +103,15 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
   const now = opts.now ?? ((): number => Date.now());
   const graceMs = opts.graceMs;
   let since = new Map<string, number>();
-  const failures = new Map<string, number>();
+  const failures = new Map<string, { window: number; count: number }>();
+  // Keeps `failures` bounded and window-scoped exactly like `since`: a key whose grace window ended
+  // (candidate left detection) or restarted (re-seeded after a gap) no longer matches `since.get(key)`,
+  // so its stale count is dropped rather than bleeding into a later, unrelated window.
+  const pruneFailures = (): void => {
+    for (const [key, f] of failures) {
+      if (since.get(key) !== f.window) failures.delete(key);
+    }
+  };
   let lastTick: number | null = null;
   let inFlight = false;
 
@@ -137,7 +145,7 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
           }
         }
       }
-      if (byEnv.size === 0) { since = new Map(); return; }
+      if (byEnv.size === 0) { since = new Map(); pruneFailures(); return; }
 
       // Fetch the live pane list ONLY for reachable envs with detached candidates. Skipping unreachable
       // envs is the churn rail: their panes are unknown, so nothing there is ever reaped.
@@ -154,6 +162,7 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
       const detached = [...byEnv.values()].flat();
       const result = detectZombies({ detached, panesByEnv, now: now(), since, graceMs });
       since = result.since;
+      pruneFailures();
 
       // Re-read liveness: a poll may have landed during the (possibly slow, remote-SSH) listPanes await
       // and put a session in the pane. Covers only that await window — staleness is the grace's job.
@@ -172,14 +181,15 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
           }));
         } catch (err) {
           console.warn(`[zombie-reaper] pane close failed env=${r.env} pane=${r.paneId}: ${err instanceof Error ? err.message : String(err)}`);
-          const n = (failures.get(key) ?? 0) + 1;
+          const prev = failures.get(key);
+          const n = prev?.window === r.firstSeenAt ? prev.count + 1 : 1;
           if (n >= CLOSE_ATTEMPT_CAP) {
             // Give up for now, not for good: dropping the timer forces a full re-age before the next
             // attempt, so a pane herdr cannot close costs 3 log lines per grace window, not one per tick.
             failures.delete(key);
             since.delete(key);
           } else {
-            failures.set(key, n);
+            failures.set(key, { window: r.firstSeenAt, count: n });
           }
         }
       }));
