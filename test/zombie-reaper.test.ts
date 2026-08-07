@@ -4,15 +4,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import { getEnv } from "../environments.ts";
 import type { PaneIdentity } from "../server/herdr.ts";
-import { detectZombies, startZombieReaper, type PaneInfo, type ReapCandidateLink } from "../server/zombie-reaper.ts";
+import { detectZombies, startZombieReaper, type ReapCandidateLink } from "../server/zombie-reaper.ts";
 
 const link = (over: Partial<ReapCandidateLink> = {}): ReapCandidateLink => ({
   env: "e", paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", ...over,
 });
-const pane = (over: Partial<PaneInfo> = {}): PaneInfo => ({
+const pane = (over: Partial<PaneIdentity> = {}): PaneIdentity => ({
   paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false, ...over,
 });
-const panesByEnv = (panes: PaneInfo[]): Map<string, PaneInfo[]> => new Map([["e", panes]]);
+const panesByEnv = (panes: PaneIdentity[]): Map<string, PaneIdentity[]> => new Map([["e", panes]]);
 
 describe("detectZombies", () => {
   it("reaps a detached candidate whose pane still exists once the grace window elapses", () => {
@@ -528,7 +528,7 @@ describe("startZombieReaper", () => {
   it("does NOT reap a pane running a non-Claude agent that pane list reports as free", async () => {
     // A bash-style agent (`herdr agent start <name> -- bash`) is indistinguishable from a free pane in
     // `pane list` — verified against a live herdr. The poller's agent-list index is what sees it, so
-    // this proves occupancy authority sits there and not on PaneInfo.hasAgent.
+    // this proves occupancy authority sits there and not on PaneIdentity.hasAgent.
     const h = harness({
       snapshot: { envs: { "work-local": { reachable: true } }, sessions: [{
         env: "work-local", paneId: "w1:p2", status: "unknown", agent: "", cwd: "/c",

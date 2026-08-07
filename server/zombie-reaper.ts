@@ -12,16 +12,9 @@ export interface ReapCandidateLink {
   readonly workspaceId: string;
 }
 
-export interface PaneInfo {
-  readonly paneId: string;
-  readonly tabId: string;
-  readonly workspaceId: string;
-  readonly hasAgent: boolean;
-}
-
 export interface DetectInput {
   readonly detached: readonly ReapCandidateLink[];
-  readonly panesByEnv: ReadonlyMap<string, readonly PaneInfo[]>;
+  readonly panesByEnv: ReadonlyMap<string, readonly PaneIdentity[]>;
   readonly now: number;
   readonly since: ReadonlyMap<string, number>;
   readonly graceMs: number;
@@ -171,7 +164,7 @@ export function startZombieReaper(opts: ZombieReaperOpts): () => void {
 
       // Fetch the live pane list ONLY for reachable envs with detached candidates. Skipping unreachable
       // envs is the churn rail: their panes are unknown, so nothing there is ever reaped.
-      const panesByEnv = new Map<string, PaneInfo[]>();
+      const panesByEnv = new Map<string, PaneIdentity[]>();
       await Promise.all([...byEnv.keys()].map(async (envId) => {
         if (snapshot.envs[envId]?.reachable !== true) return;
         const env = opts.envs.find((e) => e.id === envId);

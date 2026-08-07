@@ -268,6 +268,12 @@ const PaneListSchema = z.object({
   }).default({ panes: [] }),
 });
 
+// No `.default()` on `result`/`panes` (unlike the sibling PaneListSchema above): a missing or
+// renamed container must fail safeParse and hit the warn branch in listAllPanes below, not
+// silently parse as zero panes — that silence is exactly the failure mode the warning exists to
+// catch (a shape drift would otherwise disable reaping for the env with no signal). Accepted
+// trade-off: a herdr host with genuinely zero panes that omits `panes` also warns once per env;
+// harmless — the return value is still `[]` either way, and an empty host has nothing to reap.
 const PaneListAllSchema = z.object({
   result: z.object({
     panes: z.array(z.object({
@@ -277,8 +283,8 @@ const PaneListAllSchema = z.object({
       agent: z.string().optional(),
       agent_status: z.string().optional(),
       agent_session: AgentSessionSchema,
-    })).default([]),
-  }).default({ panes: [] }),
+    })),
+  }),
 });
 
 export async function paneRun(env: HerdrEnv, paneId: string, text: string, exec?: ExecFn): Promise<void> {
