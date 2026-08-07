@@ -142,7 +142,7 @@ describe("listAllPanes", () => {
     expect(panes[0]!.hasAgent).toBe(true);
   });
 
-  it("treats an empty `agent` string as absent (herdr's own default for a non-claude pane)", async () => {
+  it("treats an empty `agent` string as absent (defensive: herdr's `pane list` omits the key entirely rather than sending \"\")", async () => {
     const payload = JSON.stringify({
       result: { panes: [{ agent: "", agent_status: "unknown", cwd: "/x", pane_id: "w1:p5", tab_id: "w1:t5", workspace_id: "w1" }] },
     });

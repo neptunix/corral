@@ -391,9 +391,12 @@ const warnedPaneListShape = new Set<string>();
  * Distinct from `listPanes` above, which is workspace-scoped and carries `cwd` for spawn.
  *
  * `hasAgent` reports whether herdr shows ANY agent signal on the pane, treating an empty `agent`
- * string and an empty/missing `agent_status` the same as absent (herdr's own default for a
- * non-claude pane, per `AgentListSchema` above — a free pane reporting "" must not read as
- * occupied). It is still NOT authoritative for absence: an agent started as a bare shell
+ * string and an empty/missing `agent_status` the same as absent. This is defensive hardening, not
+ * a mirror of observed herdr behaviour: verified live, a `pane list` entry with no agent omits the
+ * `agent` key entirely rather than sending "" — `""` is only a shape `AgentListSchema` above
+ * produces, via its own `.default("")`, on the *different* `agent list` call. Guarded here anyway
+ * because failing toward "absent" is the safe direction if `pane list` ever did emit it. It is
+ * still NOT authoritative for absence: an agent started as a bare shell
  * (`herdr agent start <name> -- bash`) is reported here exactly like a free pane. Occupancy is
  * decided by the `agent list` index in the poller snapshot, which does list that case; this call
  * supplies pane IDENTITY. An unparseable list yields [], which the reaper reads as "no evidence", so
