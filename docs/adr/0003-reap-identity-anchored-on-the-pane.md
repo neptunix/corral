@@ -2,7 +2,7 @@
 
 ## Context
 
-The zombie reaper closes the herdr tab a corral session left behind when its Claude
+The zombie reaper closes the herdr pane a corral session left behind when its Claude
 exited. It decided what to close from two different sources: a link was a reap
 candidate when its stored **tab** id still appeared in `herdr tab list`, but the
 close it then issued was `herdr pane close <paneId>` — a **pane**. Nothing verified
@@ -69,10 +69,13 @@ Anything else — pane absent, pane now in a different tab, pane occupied — is
 skipped silently, seeds no grace timer, and issues no herdr command. The grace
 clock is keyed on `env:paneId`, the identity that is actually unique.
 
-`pane list` replaces the `tab list` call one-for-one, so the per-tick cost is
-unchanged. It also carries agent state directly, making it fresher evidence than
-the poller snapshot (up to one poll interval stale) that the previous code
-consulted.
+`pane list` replaces the `tab list` call one-for-one, so the call *count* per tick
+is unchanged; the payload is not. Global `pane list` returns `cwd`, `foreground_cwd`,
+`terminal_id`, `revision`, `focused` and labels for every pane on the host (26 on the
+machine this was measured on), where `tab list` returned three fields per tab.
+Immaterial in practice, but it crosses SSH on remote environments. It also carries
+agent state directly, making it fresher evidence than the poller snapshot (up to one
+poll interval stale) that the previous code consulted.
 
 A close that still fails is retried at most **3 times per grace window**: on the
 third failure the candidate's grace timer is dropped, so it must age through a full
