@@ -4,21 +4,30 @@ import { api } from "../web/src/lib/api.ts";
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
-function captureFetch(): { bodies: unknown[] } {
+// Captures the URL and method as well as the body. Asserting only the body lets the client POST to
+// the wrong endpoint — or GET it — with every test still green, because the stub answers any request
+// with a valid SpawnResult.
+function captureFetch(): { bodies: unknown[]; urls: string[]; methods: (string | undefined)[] } {
   const bodies: unknown[] = [];
-  vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
+  const urls: string[] = [];
+  const methods: (string | undefined)[] = [];
+  vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+    urls.push(url);
+    methods.push(init?.method);
     bodies.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
     return Promise.resolve(new Response(JSON.stringify({ env: "e", paneId: "p", name: "n" }), {
       status: 200, headers: { "Content-Type": "application/json" },
     }));
   });
-  return { bodies };
+  return { bodies, urls, methods };
 }
 
 describe("api.tasks.spawn", () => {
-  it("sends the chosen model", async () => {
-    const { bodies } = captureFetch();
+  it("POSTs the chosen model to the task's spawn route", async () => {
+    const { bodies, urls, methods } = captureFetch();
     await api.tasks.spawn("b", "t", "work-local", null, "corral", "fable", false);
+    expect(urls[0]).toBe("/api/boards/b/tasks/t/spawn");
+    expect(methods[0]).toBe("POST");
     expect(bodies[0]).toEqual({ env: "work-local", targetWorkspaceId: null, repo: "corral", model: "fable" });
   });
 

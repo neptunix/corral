@@ -52,9 +52,24 @@ describe("composeSessionName", () => {
       .toBe("my-task-rc-toggle-a");
   });
 
-  it("never emits more than NAME_MAX characters", () => {
-    const out = composeSessionName("a".repeat(32), "b".repeat(32), free) ?? "";
-    expect(out.length).toBeLessThanOrEqual(NAME_MAX);
+  // Asserts the EXACT string, not `length <= NAME_MAX`. The bound is enforced twice over (the slice
+  // and NAME_RE's {0,55}), so a length assertion survives every single mutation to the truncation
+  // machinery and moves its own goalpost when NAME_MAX changes. Pinning where the cut lands is the
+  // only assertion that fails when truncation breaks.
+  it("cuts the composed name to exactly NAME_MAX characters", () => {
+    const out = composeSessionName("a".repeat(32), "b".repeat(32), free);
+    expect(out).toBe(`${"a".repeat(32)}-${"b".repeat(23)}`); // 32 + 1 + 23 = 56 = NAME_MAX
+    expect(out).toHaveLength(NAME_MAX);
+  });
+
+  // The primary candidate is re-trimmed after the slice, so a cut landing on a dash cannot emit a
+  // trailing-dash name as `--name` / `--remote-control` / the tab label. NAME_RE permits a trailing
+  // dash, so nothing else in the file would catch losing that re-trim.
+  it("re-trims a dash the truncation cut lands on", () => {
+    // joined is 32×a + "-" + 22×b + "-" + 5×c; index 55 — the last character the slice keeps — is the
+    // second dash, so the untrimmed cut would end in "-".
+    const out = composeSessionName("a".repeat(32), `${"b".repeat(22)} ${"c".repeat(5)}`, free);
+    expect(out).toBe(`${"a".repeat(32)}-${"b".repeat(22)}`);
   });
 
   // THE invariant two spec revisions got backwards: the string tested for freeness must be the
@@ -70,13 +85,18 @@ describe("composeSessionName", () => {
   });
 
   // Pre-trimming the base by 2 is what stops truncation from eating the letter that disambiguates.
+  // Asserts the EXACT string: `length <= NAME_MAX` plus `endsWith("-a")` also holds for the BROKEN
+  // output, because dropping the pre-trim makes every lettered candidate fail NAME_RE and the
+  // function falls through to the `<taskSlug>-<letter>` family — which still ends in "-a" and is
+  // still short enough. The requested name vanishes entirely and only the exact string notices.
   it("keeps the disambiguating letter when the joined name is already at the cap", () => {
     const slug = "a".repeat(32);
     const requested = "b".repeat(32);
     const first = composeSessionName(slug, requested, free) ?? "";
-    const second = composeSessionName(slug, requested, except([first])) ?? "";
-    expect(second.length).toBeLessThanOrEqual(NAME_MAX);
-    expect(second.endsWith("-a")).toBe(true);
+    const second = composeSessionName(slug, requested, except([first]));
+    // 32 + 1 + 21 + 2 = 56: the base is pre-trimmed by 2 so "-a" still fits inside NAME_MAX.
+    expect(second).toBe(`${"a".repeat(32)}-${"b".repeat(21)}-a`);
+    expect(second).toHaveLength(NAME_MAX);
   });
 
   it("returns null when nothing is both free and valid, so the route can 409", () => {
