@@ -111,9 +111,11 @@ describe("createIdentity", () => {
     expect(calls).toBe(2);
   });
 
-  it("returns the card coordinates when bound", async () => {
+  it("returns the whole card when bound, not just its coordinates", async () => {
+    // The full card, so corral_task_update reads `columns` and corral_task_read reads `description`
+    // off this same forced read rather than issuing a second one.
     const id = createIdentity(client(resolvedBody), ctx);
-    await expect(id.requireCard()).resolves.toEqual({ boardId: "board", taskId: "t_abcdefg" });
+    await expect(id.requireCard()).resolves.toEqual(resolvedBody.task);
   });
 
   it("tells the caller to bind when unbound", async () => {

@@ -17,6 +17,9 @@ of them, and how to hand work over without losing it.
 - **Column ids come only from the bound card**, as `task.columns`. An unbound session sees none, so
   `corral_task_update`'s `status` cannot be guessed before binding — and column ids are per board, not
   global.
+- **`corral_whoami` shows the description as a preview, not the value.** One line, plus its line and
+  character counts. `corral_task_read` is the full text. The counts are the useful part on a repeat
+  call: unchanged counts mean the log has not moved since you last read it.
 - **There is no "list all boards" tool.** `corral_task_bind` with no arguments is the only listing,
   and it hides cards in closed columns. A card you cannot see there cannot be bound to.
 - **Metrics can be legitimately absent.** Right after a pane starts, `session id`, `model`, `ctx` and
@@ -33,8 +36,8 @@ of them, and how to hand work over without losing it.
 ### Starting up
 
 1. `corral_whoami`.
-2. **Bound** → the card is the assignment. Its description is the running log of what earlier sessions
-   on this card did; start from it, not from zero.
+2. **Bound** → the card is the assignment. `corral_task_read` for its description — the running log of
+   what earlier sessions on this card did. Start from it, not from zero.
 3. **Unbound** → `corral_task_bind` with no arguments, then bind to the card this work belongs to. If
    nothing fits, say so and ask — the tools cannot create a card.
 
@@ -44,9 +47,10 @@ Write at real boundaries — a decision made, a phase finished, a blocker hit �
 per file edited. Move `status` when the work actually changes state; the operator reads column
 position before reading anything else.
 
-`corral_task_update` warns that `description` replaces the whole field. The practice that makes that
-safe: re-read it in the same turn you write it, and append around what you were shown rather than
-retyping the whole log from memory.
+`corral_task_update` replaces `description` wholesale. The practice that makes that safe:
+`corral_task_read` in the same turn you write, and append around what it returned rather than
+retyping the log from memory. `corral_whoami`'s preview is not enough to write back from — that is
+what it means by PREVIEW.
 
 ### Handing off before context runs out
 

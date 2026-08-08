@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { closedColumnIds } from "../../shared/board-schema.ts";
 import type { CorralClient, TaskPatch } from "../client.ts";
-import { formatTaskPicker, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
+import { formatCardDetail, formatTaskPicker, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
 import type { Identity } from "../identity.ts";
 import { runTool, toolText } from "./reply.ts";
 
@@ -91,11 +91,14 @@ export function bindHandler(deps: TaskDeps, args: BindArgs): Promise<string> {
   });
 }
 
+export function readHandler(deps: TaskDeps): Promise<string> {
+  return runTool(async () => formatCardDetail(await deps.identity.requireCard()));
+}
+
 export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string> {
   return runTool(async () => {
     const card = await deps.identity.requireCard();
-    const me = await deps.identity.load();
-    const columns = me.task === null ? [] : me.task.columns.map((c) => c.id);
+    const columns = card.columns.map((c) => c.id);
     if (args.status !== undefined && !columns.includes(args.status)) {
       // args.status and each column id are compared raw above (a real validation against the real
       // column ids), but firewalled here — this text is what gets echoed back into the reply.
@@ -129,15 +132,27 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
   );
 
   server.registerTool(
+    "corral_task_read",
+    {
+      title: "Read this session's card in full",
+      description:
+        "Read the FULL description of the card THIS session is bound to — corral_whoami shows only a one-line preview of it. Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. Read-only.",
+      inputSchema: {},
+      annotations: { readOnlyHint: true },
+    },
+    async () => toolText(await readHandler(deps)),
+  );
+
+  server.registerTool(
     "corral_task_update",
     {
       title: "Update this session's card",
       description:
-        "Update the card THIS session is bound to. Use `status` for the coarse board state (it must be one of the column ids corral_whoami reports) and `description` as the running progress log. Cannot target another card — there is no task id argument. WARNING: `description` is a full-replacement write, but corral_whoami — the only way this tool surfaces the current value back to a session — renders it bounded (at most 60 lines, 300 chars each); if corral_whoami showed a 'TRUNCATED' description, replacing it wholesale from that view WILL silently delete content you never saw. Append to or edit around what you can see, or accept the loss deliberately — do not round-trip a truncated view as if it were complete.",
+        "Update the card THIS session is bound to; cannot target another card. `status` is the coarse board state and must be one of the column ids corral_whoami reports. `description` is the running progress log and is a FULL-REPLACEMENT write — read the current value with corral_task_read first and edit around it, or you will silently delete what you never saw.",
       inputSchema: {
         title: z.string().optional(),
         description: z.string().optional().describe(
-          "full replacement body; the progress log lives here. This OVERWRITES the whole field — corral_whoami's rendering of it is bounded and may be truncated, so a blind read-then-write can destroy content outside what was shown.",
+          "full replacement body; the progress log lives here. OVERWRITES the whole field — read it with corral_task_read first.",
         ),
         status: z.string().optional().describe("a column id from corral_whoami's task.columns"),
         priority: z.enum(PRIORITIES).nullable().optional().describe("null clears the priority"),
