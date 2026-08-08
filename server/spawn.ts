@@ -10,9 +10,65 @@ import {
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
+// The ONE string used as the herdr tab label, the card's link name and `claude --name`. 56 is a
+// readability bound for a tab label and the /resume picker — NOT a size chosen so that any slug plus
+// any name fits. A 32-char slug with a 30-char name IS truncated, which is precisely why truncation
+// happens before the freeness test in composeSessionName.
+export const NAME_MAX = 56;
+const NAME_RE = /^[a-z0-9][a-z0-9-]{0,55}$/;
+
+// A task's Nth spawned session gets `${slug}-<letter>` — a human-readable label so a card's sessions
+// are distinguishable. Exported because server/api.ts picks `sessionSuffix` from the same list: two
+// copies could drift, and then the chosen letter and the composed fallback name would disagree.
+export const SESSION_LETTERS: readonly string[] =
+  Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i));
+
+const fit = (s: string): string => s.slice(0, NAME_MAX).replace(/-+$/, "");
+
+/** Slug, or "" when nothing usable survives — callers read "" as "not supplied". */
+export function slugify(text: string, max: number): string {
+  const s = text.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, max)
+    .replace(/-+$/, "");
+  return /^[a-z0-9][a-z0-9-]*$/.test(s) ? s : "";
+}
+
+// UNCHANGED. An earlier revision truncated this to 24 characters, which silently changed the slug for
+// every card title over 32 characters and broke the idempotent-rejoin key for cards that already
+// exist. Other call sites depend on both the 32 and the "task" fallback.
 export function sanitizeSlug(title: string): string {
   const s = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
   return SLUG_RE.test(s) ? s : "task";
+}
+
+/**
+ * Compose the session name from the card slug and the caller's requested name, returning the first
+ * candidate `isFree` accepts, or null when none is both free and valid (the route then 409s).
+ *
+ * INVARIANT: the string handed to `isFree` is byte-identical to the string returned. Every candidate
+ * passes through `fit()` BEFORE the test, never after — two design revisions had this backwards and
+ * could hand back a truncated name that collided with one already on the card. `isFree` is a callback
+ * rather than a Set so that rule lives in exactly one place and is unit-testable without the route.
+ */
+export function composeSessionName(
+  taskSlug: string,
+  requested: string,
+  isFree: (name: string) => boolean,
+): string | null {
+  const nameSlug = slugify(requested, 32);
+  const candidates: string[] = [];
+  if (nameSlug !== "") {
+    const joined = `${taskSlug}-${nameSlug}`;
+    candidates.push(fit(joined));
+    // Pre-trimmed by 2 so the disambiguating letter can never be the part truncation eats.
+    const base = joined.slice(0, NAME_MAX - 2).replace(/-+$/, "");
+    for (const letter of SESSION_LETTERS) candidates.push(`${base}-${letter}`);
+  }
+  // Always ≤34 chars (taskSlug is ≤32), so `fit` would be a no-op. This is today's `${slug}-${suffix}`.
+  for (const letter of SESSION_LETTERS) candidates.push(`${taskSlug}-${letter}`);
+  return candidates.find((c) => NAME_RE.test(c) && isFree(c)) ?? null;
 }
 
 export interface SpawnOpts {
