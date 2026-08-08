@@ -607,7 +607,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     expect(call.sessionSuffix).toBe("d");
   });
 
-  it("409s with session_cap only when all a–z suffixes are taken (not at 3)", async () => {
+  it("409s with session_cap once the card holds 26 sessions", async () => {
     const allLetters = Array.from({ length: 26 }, (_, i) => `my-task-${String.fromCharCode(97 + i)}`);
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, allLetters);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
@@ -682,6 +682,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     });
     // exactOptionalPropertyTypes: absent must mean ABSENT, not `undefined` — spawn.ts branches on
     // `opts.model === undefined`, and "inherit the last-used model" is the default.
+    expect(spawn).toHaveBeenCalledOnce();
     expect(Object.hasOwn(spawn.mock.calls[0]?.[0] ?? {}, "model")).toBe(false);
   });
 
@@ -723,6 +724,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
       body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
     });
     // ABSENT, not `false` — exactOptionalPropertyTypes makes those different types.
+    expect(off.spawn).toHaveBeenCalledOnce();
     expect(Object.hasOwn(off.spawn.mock.calls[0]?.[0] ?? {}, "remoteControl")).toBe(false);
   });
 

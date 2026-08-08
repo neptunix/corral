@@ -951,7 +951,9 @@ export function createApi(opts: {
       remoteControl: z.boolean().optional(),
     }).safeParse(body);
     if (!parsed.success) {
-      const field = parsed.error.issues[0]?.path.join(".") ?? "body";
+      // A non-object body yields an issue with path [] — "".join(".") is "", not undefined, so ?? never fires.
+      const path = parsed.error.issues[0]?.path.join(".") ?? "";
+      const field = path === "" ? "body" : path;
       return c.json({ error: { code: "validation", message: `invalid "${field}"` } }, 400);
     }
 
@@ -997,8 +999,9 @@ export function createApi(opts: {
     }
     // Still picked, and still passed: SpawnOpts.sessionSuffix is the tab-label fallback for callers
     // that supply no sessionName. Same letter list composeSessionName's final candidates use, so the
-    // chosen letter and the composed fallback name cannot disagree. The `?? "a"` is unreachable while
-    // a name is composed — with every letter taken, composeSessionName returns null and we 409 below.
+    // chosen letter and the composed fallback name cannot disagree. The `?? "a"` is unreachable: the
+    // SPAWN_CAP check above guarantees fewer than 26 sessions, so usedNames can't hold all 26
+    // `${slug}-<letter>` strings and `find` always hits.
     const sessionSuffix = SESSION_LETTERS.find((sfx) => !usedNames.has(`${slug}-${sfx}`)) ?? "a";
     // One string for tab label, link name and `claude --name`. The uniqueness test happens inside
     // composeSessionName against the string it will actually return — see the invariant there.

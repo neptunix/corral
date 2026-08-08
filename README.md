@@ -27,11 +27,14 @@ you work on, and lets you respond in place.
 ## Quick start
 
 Prerequisites: Node ≥ 20.11, [herdr ≥ 0.7.1](https://github.com/ogulcancelik/herdr) on this
-machine (and on any remote box you add), and `jq` — **required** if you want the live Claude
-metrics (model / context % / cost / rate-limit windows). The metrics *capture* is optional;
-`jq` is not optional *for* it. Both helper scripts hard-depend on `jq` and are deliberately
-best-effort, so without it they write nothing and log nothing: the cards just show no metrics,
-which is indistinguishable from "no data yet".
+machine (and on any remote box you add), Claude Code on every machine you spawn sessions on,
+and `jq` — **required** if you want the live Claude metrics (model / context % / cost /
+rate-limit windows). The metrics *capture* is optional; `jq` is not optional *for* it. Both
+helper scripts hard-depend on `jq` and are deliberately best-effort, so without it they write
+nothing and log nothing: the cards just show no metrics, which is indistinguishable from "no
+data yet". corral appends `--name` (and, when chosen, `--model` / `--remote-control`) to every
+non-resume launch; this has only been verified against Claude Code 2.1.226 — an older CLI
+lacking one of these flags will fail the launch visibly in the pane.
 
 ```bash
 # 0. prerequisite check — without jq the metrics capture silently does nothing

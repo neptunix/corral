@@ -89,7 +89,7 @@ export interface SpawnOpts {
   readonly targetWorkspaceId?: string | null;     // null/absent = create a new workspace
   readonly repoPath?: string | null;              // resolved env.repos[repo]; required to create
   /** The one string used as the herdr tab label, `--name`, and `--remote-control`'s name. Composed by
-   *  the route (Task 1's composeSessionName); when absent the tab falls back to `<taskSlug>-<suffix>`. */
+   *  the route (composeSessionName); when absent the tab falls back to `<taskSlug>-<suffix>`. */
   readonly sessionName?: string;
   /** Shape-validated in the spawn route's body schema (A.5). corral keeps no allowlist. */
   readonly model?: string;
