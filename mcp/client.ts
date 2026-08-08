@@ -97,7 +97,7 @@ export interface CorralClient {
   boards(): Promise<z.infer<typeof BoardSchema>[]>;
   patchTask(a: { boardId: string; taskId: string; patch: TaskPatch }): Promise<z.infer<typeof TaskSchema>>;
   attach(a: { boardId: string; taskId: string; env: string; paneId: string; name: string }): Promise<void>;
-  spawn(a: { boardId: string; taskId: string; env: string; brief: string; targetWorkspaceId?: string | undefined }): Promise<{ env: string; paneId: string; name: string }>;
+  spawn(a: { boardId: string; taskId: string; env: string; brief: string; name?: string | undefined; model?: string | undefined; remoteControl?: boolean | undefined; targetWorkspaceId?: string | undefined }): Promise<{ env: string; paneId: string; name: string }>;
   closeSession(a: { boardId: string; taskId: string; env: string; paneId: string; sessionId: string | null; deferred?: boolean | undefined }): Promise<void>;
 }
 
@@ -140,6 +140,9 @@ export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralC
         post({
           env: a.env,
           brief: a.brief,
+          ...(a.name === undefined ? {} : { name: a.name }),
+          ...(a.model === undefined ? {} : { model: a.model }),
+          ...(a.remoteControl === undefined ? {} : { remoteControl: a.remoteControl }),
           ...(a.targetWorkspaceId === undefined ? {} : { targetWorkspaceId: a.targetWorkspaceId }),
         }),
         SpawnResultSchema,

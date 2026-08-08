@@ -284,6 +284,25 @@ describe("spawnHandler", () => {
     expect(calls).toEqual(["personal-local"]);
     expect(out).toContain("personal-local");
   });
+
+  it("forwards name, model and remoteControl to the client", async () => {
+    const seen: { name?: string | undefined; model?: string | undefined; remoteControl?: boolean | undefined }[] = [];
+    const c = stub({
+      spawn: async (a) => { seen.push({ name: a.name, model: a.model, remoteControl: a.remoteControl }); return { env: a.env, paneId: "w1:p2", name: "t-rc" }; },
+    });
+    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", name: "rc toggle", model: "fable", remoteControl: true });
+    expect(seen).toEqual([{ name: "rc toggle", model: "fable", remoteControl: true }]);
+  });
+
+  it("leaves all three absent when the caller supplies none", async () => {
+    const seen: Record<string, unknown>[] = [];
+    const c = stub({ spawn: async (a) => { seen.push({ ...a }); return { env: a.env, paneId: "w1:p2", name: "t-a" }; } });
+    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
+    expect(Object.hasOwn(seen[0] ?? {}, "name")).toBe(false);
+    expect(Object.hasOwn(seen[0] ?? {}, "model")).toBe(false);
+    // Absent, not `false`: Remote Control is off by default, and the route reads absence as off.
+    expect(Object.hasOwn(seen[0] ?? {}, "remoteControl")).toBe(false);
+  });
 });
 
 describe("closeHandler", () => {
