@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { closedColumnIds } from "../../shared/board-schema.ts";
 import type { CorralClient, TaskPatch } from "../client.ts";
-import { formatCardDetail, formatTaskPicker, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
+import { formatCardDetail, formatStatusRefusal, formatTaskPicker, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
 import type { Identity } from "../identity.ts";
 import { runTool, toolText } from "./reply.ts";
 
@@ -100,9 +100,10 @@ export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string>
     const card = await deps.identity.requireCard();
     const columns = card.columns.map((c) => c.id);
     if (args.status !== undefined && !columns.includes(args.status)) {
-      // args.status and each column id are compared raw above (a real validation against the real
-      // column ids), but firewalled here — this text is what gets echoed back into the reply.
-      return `"${safeText(args.status)}" is not a column on this board. Valid status values: ${columns.map(safeText).join(", ")}`;
+      // Compared raw above (a real validation against the real column ids), firewalled for the
+      // reply by digest.ts — which caps the list as well as each id, because the count is
+      // caller-controlled too.
+      return formatStatusRefusal(args.status, columns);
     }
     const patch: TaskPatch = {
       ...(args.title === undefined ? {} : { title: args.title }),

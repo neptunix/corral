@@ -267,9 +267,15 @@ export function formatTaskPicker(boards: readonly Board[]): string {
   return emit(parts);
 }
 
-function lineCount(raw: string): string {
+/**
+ * The `<N> lines, <M> chars` fragment, in ONE place because both renderings of it must stay
+ * byte-identical: the skill tells a session to compare corral_whoami's counts against what
+ * corral_task_read reported to decide whether a re-read is needed, and a format change made in one
+ * call site only would break that comparison silently, with nothing failing.
+ */
+function counts(raw: string): string {
   const n = splitLines(raw).length;
-  return `${String(n)} line${n === 1 ? "" : "s"}`;
+  return `${String(n)} line${n === 1 ? "" : "s"}, ${String(raw.length)} chars`;
 }
 
 /**
@@ -285,7 +291,7 @@ function lineCount(raw: string): string {
 function describePreview(raw: string): string {
   if (raw === "") return "description: (empty)";
   const preview = truncate(oneLine(raw), DESCRIPTION_PREVIEW_MAX);
-  return `description (${lineCount(raw)}, ${String(raw.length)} chars — PREVIEW, call corral_task_read for the full text): "${preview}"`;
+  return `description (${counts(raw)} — PREVIEW, call corral_task_read for the full text): "${preview}"`;
 }
 
 /**
@@ -311,7 +317,11 @@ function renderFullDescription(raw: string): string[] {
   let budget = TASK_DESCRIPTION_FULL_MAX;
   let truncated = false;
   for (const line of all) {
-    if (budget <= 0) break;
+    // Stop while a whole gutter still fits, not at zero: `truncate` would otherwise cut INSIDE the
+    // prefix and emit a row reading "  |…" or " …". No caller bytes reach such a row, so it is not an
+    // escape — but the block header promises every line below carries the gutter, and a session that
+    // mechanically strips it would carry the stub into a full-replacement write.
+    if (budget <= DESCRIPTION_LINE_PREFIX.length) break;
     // Each split segment carries no terminator of its own, so `emit`'s sweep is a no-op on it —
     // splitting first is what preserves the structure that sweep would otherwise flatten.
     const full = `${DESCRIPTION_LINE_PREFIX}${line}`;
@@ -320,12 +330,15 @@ function renderFullDescription(raw: string): string[] {
     shown.push(kept);
     budget -= kept.length + 1; // +1: the newline `emit` will join with, charged to the same budget.
   }
+  // Both assignments are load-bearing and neither implies the other: the one above is the only
+  // signal when the LAST line is the one cut (nothing is dropped, so the count check is false), and
+  // this one is the only signal when the budget runs out exactly at a line boundary with lines left.
   if (shown.length < all.length) truncated = true;
   // The prefix is stated to the CONSUMER, not just to maintainers in the comment above. This reply
   // is the only full read a session has, and corral_task_update replaces the field wholesale — so a
   // session that copies back what it was shown, gutter and all, silently grows the stored value by
   // four characters per line on every handoff.
-  const header = `description (${lineCount(raw)}, ${String(raw.length)} chars${
+  const header = `description (${counts(raw)}${
     truncated ? ", TRUNCATED" : ""
   }; each line below carries a leading "${DESCRIPTION_LINE_PREFIX}" added by this tool — strip it before writing back):`;
   const out = [header, ...shown];
@@ -335,6 +348,26 @@ function renderFullDescription(raw: string): string[] {
     );
   }
   return out;
+}
+
+/**
+ * corral_task_update's "that is not a column on this board" refusal.
+ *
+ * It lives here rather than in the tool because it renders the same caller-settable column-id list
+ * formatWhoami caps at WHOAMI_COLUMNS_MAX, and for the same reason: `columns` is an unbounded array
+ * of unbounded strings on the board PATCH body, and the server takes no auth on loopback. Built in
+ * the tool it bypassed `emit` entirely, so one refused call against a 20 000-column board returned
+ * two megabytes on a single line. Routing it through this module is what makes the bound hold by
+ * construction — the invariant `emit`'s doc comment states — instead of by someone remembering.
+ */
+export function formatStatusRefusal(status: string, columns: readonly string[]): string {
+  const shown = columns.slice(0, WHOAMI_COLUMNS_MAX);
+  const dropped = columns.length - shown.length;
+  return emit([
+    `"${truncate(oneLine(status), TASK_TITLE_MAX)}" is not a column on this board. Valid status values: ${
+      shown.map((c) => truncate(oneLine(c), TASK_TITLE_MAX)).join(", ")
+    }${dropped > 0 ? `, … ${String(dropped)} more (limit=${String(WHOAMI_COLUMNS_MAX)})` : ""}`,
+  ]);
 }
 
 /**
