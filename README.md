@@ -169,6 +169,11 @@ Each entry describes one place corral can see and spawn sessions into:
   arguments, which the config schema rejects outright, so wrap any flags in a script; and it must
   be an **executable file on `PATH`**, never a shell function or alias, because sessions are
   spawned into a non-interactive shell that never reads your `.bashrc`/`.zshrc`.
+  corral now appends `--name <session-name>` — plus `--model <model>` and `--remote-control
+  <session-name>` when those are chosen — to every launch except `--resume`, so the command **must
+  forward its arguments**. The `exec … claude "$@"` wrapper shown under *Multiple Claude accounts* below
+  already does. One that hard-codes its arguments drops the flags: the session starts, but with Claude's
+  auto-generated name, the last-used model and no Remote Control.
 - `claudeConfigDirs` — which `~/.claude*` dirs corral scans on this box for recap and the
   statusline metrics (local defaults to `~/.claude`; set it for profile-split or remote — see
   the statusline section).

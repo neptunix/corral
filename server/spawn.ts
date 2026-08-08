@@ -88,6 +88,14 @@ export interface SpawnOpts {
   readonly sessionSuffix?: string;                // tab suffix a|b|c for a task's Nth session (default "a")
   readonly targetWorkspaceId?: string | null;     // null/absent = create a new workspace
   readonly repoPath?: string | null;              // resolved env.repos[repo]; required to create
+  /** The one string used as the herdr tab label, `--name`, and `--remote-control`'s name. Composed by
+   *  the route (Task 1's composeSessionName); when absent the tab falls back to `<taskSlug>-<suffix>`. */
+  readonly sessionName?: string;
+  /** Shape-validated in the spawn route's body schema (A.5). corral keeps no allowlist. */
+  readonly model?: string;
+  /** Start with Remote Control connected. Default OFF — this connects the session to claude.ai, so it
+   *  is an explicit per-spawn decision on both the UI and MCP paths (spec A.1). */
+  readonly remoteControl?: boolean;
   // Injectable for testing
   readonly listFn?: (env: HerdrEnv, exec?: ExecFn) => Promise<SessionRow[]>;
   readonly paneGetFn?: (env: HerdrEnv, paneId: string, exec?: ExecFn) => Promise<{ paneId: string; tabId: string; workspaceId: string; cwd: string }>;
@@ -120,7 +128,27 @@ function defaultWorkspaceList(_env: HerdrEnv): Promise<{ workspace_id: string; l
 export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
   const { env, taskSlug, cwd, repo, assignedPaneIds } = opts;
   const spawnCommand = opts.spawnCommand ?? "claude";
+
+  const sessionSuffix = opts.sessionSuffix ?? "a";
+  // The tab herdr label and the card `name` must agree with the idempotency key, else re-spawn can't
+  // rejoin. `sessionName` is the composed one-string when the route supplied it (A.2); the suffix form
+  // is the fallback for callers that supply none.
+  const tabName = opts.sessionName ?? `${taskSlug}-${sessionSuffix}`;
+
+  // Flags, in a fixed order so tests can assert exact strings. --remote-control ALWAYS carries the
+  // name: its argument is optional, so a bare flag would consume the positional brief that follows and
+  // start a session with no prompt (spec Findings). Passing the name fills the slot.
+  const flags = [
+    "--name", tabName,
+    ...(opts.model !== undefined ? ["--model", opts.model] : []),
+    ...(opts.remoteControl === true ? ["--remote-control", tabName] : []),
+  ];
+  const launch = `${spawnCommand} ${quote(flags)}`;
+
   const command = opts.resumeSessionId !== undefined
+    // Resume sends NO flags: the name lives in the transcript and the model is restored with the
+    // session, so re-sending either would overwrite a choice the user may have made since; and a
+    // resumed session must not silently re-connect to claude.ai (spec A.4).
     ? `${spawnCommand} --resume ${opts.resumeSessionId}`
     : opts.briefPath !== undefined
       // Three things happen inside the ONE substitution, in order:
@@ -130,10 +158,10 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
       //   rm -f — delete the file, caused by the read rather than racing it on a timer. `rm` prints
       //           nothing, so it does not contribute to the expansion.
       // The server-side unlink (server/api.ts) remains only as a backstop for a pane that never
-      // runs this command at all.
-      ? `${spawnCommand} "$(cat ${quote([opts.briefPath])} || printf '%s' ${quote([BRIEF_FALLBACK])}; rm -f ${quote([opts.briefPath])})"`
-      : spawnCommand;
-  const sessionSuffix = opts.sessionSuffix ?? "a";
+      // runs this command at all. ADR-0002 §5 decided this shape deliberately — do NOT move the `rm`
+      // out of the substitution (spec A.7 is withdrawn).
+      ? `${launch} "$(cat ${quote([opts.briefPath])} || printf '%s' ${quote([BRIEF_FALLBACK])}; rm -f ${quote([opts.briefPath])})"`
+      : launch;
   const targetWorkspaceId = opts.targetWorkspaceId ?? null;
   const repoPath = opts.repoPath ?? null;
 
@@ -147,10 +175,6 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
   const doTabRename = opts.tabRenameFn ?? tabRename;
   const doTabClose = opts.tabCloseFn ?? tabClose;
   const doWorkspaceClose = opts.workspaceCloseFn ?? workspaceClose;
-
-  // The tab herdr label and the card `name` must agree with the idempotency key, else re-spawn can't
-  // rejoin. The caller (api spawn endpoint) picks the next free a|b|c suffix for the task's Nth session.
-  const tabName = `${taskSlug}-${sessionSuffix}`;
 
   // Step 1: resolve the target workspace (join existing, or create a new one at repoPath).
   let workspaceId: string;

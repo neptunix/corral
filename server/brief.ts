@@ -38,7 +38,9 @@ export function briefByteLength(text: string): number {
 export async function writeBrief(root: string, text: string): Promise<string> {
   await mkdir(root, { recursive: true });
   const dest = path.join(root, `${nanoid()}.md`);
-  writeAtomic(dest, text);
+  // 0o600: a brief is agent-authored handoff text under os.tmpdir(). On Linux that is /tmp (mode 1777),
+  // so at a default umask this file would be world-readable for as long as it exists.
+  writeAtomic(dest, text, 0o600);
   return dest;
 }
 

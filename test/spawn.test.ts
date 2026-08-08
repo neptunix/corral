@@ -46,7 +46,7 @@ describe("spawnSession — create new workspace", () => {
     expect(fns.workspaceCreateFn).toHaveBeenCalledWith(localEnv, "/repos/corral", "corral");
     expect(fns.tabRenameFn).toHaveBeenCalledWith(localEnv, "w1:t1", "my-task-a"); // root tab renamed
     expect(fns.tabCreateFn).not.toHaveBeenCalled();       // no second tab → no empty leftover
-    expect(fns.paneRunFn).toHaveBeenCalledWith(localEnv, "w1:p1", "claude-personal", undefined);
+    expect(fns.paneRunFn).toHaveBeenCalledWith(localEnv, "w1:p1", "claude-personal --name my-task-a", undefined);
     // No idempotency scan on the create-new path (a fresh workspace has no tabs to rejoin).
     expect(fns.listPanesFn).not.toHaveBeenCalled();
   });
@@ -236,5 +236,90 @@ describe("spawnSession — cleanup on failure", () => {
     })).rejects.toThrow(/pane run/);
     expect(fns.tabCloseFn).toHaveBeenCalledWith(localEnv, "w1:t2"); // the tab we created in the existing ws
     expect(fns.workspaceCloseFn).not.toHaveBeenCalled();           // the joined workspace is left intact
+  });
+});
+
+describe("spawnSession — launch flags", () => {
+  it("names the session and the tab with the same string", async () => {
+    const fns = baseFns();
+    await spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/proj", repo: "corral", assignedPaneIds: new Set(),
+      targetWorkspaceId: null, repoPath: "/repos/corral",
+      sessionName: "my-task-auth", ...fns,
+    });
+    expect(fns.paneRunFn).toHaveBeenCalledWith(localEnv, "w1:p1", "claude --name my-task-auth", undefined);
+    expect(fns.tabRenameFn).toHaveBeenCalledWith(localEnv, "w1:t1", "my-task-auth");
+  });
+
+  it("adds --model when one is chosen", async () => {
+    const fns = baseFns();
+    await spawnSession({
+      env: localEnv, taskSlug: "t", cwd: "/proj", repo: "corral", assignedPaneIds: new Set(),
+      targetWorkspaceId: null, repoPath: "/repos/corral",
+      sessionName: "t-a", model: "fable", ...fns,
+    });
+    expect(fns.paneRunFn).toHaveBeenCalledWith(localEnv, "w1:p1", "claude --name t-a --model fable", undefined);
+  });
+
+  // shell-quote BACKSLASH-escapes brackets; it does NOT wrap them in single quotes. Verified:
+  //   node -e "console.log(require('shell-quote').quote(['claude-sonnet-5[1m]']))"
+  //   → claude-sonnet-5\[1m\]
+  // The brackets are glob characters, which is the whole reason the command goes through quote().
+  it("escapes a model's [1m] context-window suffix", async () => {
+    const fns = baseFns();
+    await spawnSession({
+      env: localEnv, taskSlug: "t", cwd: "/proj", repo: "corral", assignedPaneIds: new Set(),
+      targetWorkspaceId: null, repoPath: "/repos/corral",
+      sessionName: "t-a", model: "claude-sonnet-5[1m]", ...fns,
+    });
+    const cmd = (fns.paneRunFn as unknown as { mock: { calls: string[][] } }).mock.calls[0]![2]!;
+    expect(cmd).toContain("--model claude-sonnet-5\\[1m\\]");
+  });
+
+  // --remote-control takes an OPTIONAL argument, so a bare flag before the positional brief would eat
+  // the brief as the RC session name and start a session with no prompt (spec Findings). Passing the
+  // name fills the slot — which is why no `--` separator is needed. Same string as --name, so the
+  // session found on a phone carries the label of the card row it belongs to.
+  it("passes the session name to --remote-control so it cannot swallow the brief", async () => {
+    const fns = baseFns();
+    await spawnSession({
+      env: localEnv, taskSlug: "t", cwd: "/proj", repo: "corral", assignedPaneIds: new Set(),
+      targetWorkspaceId: null, repoPath: "/repos/corral",
+      sessionName: "t-mgr", remoteControl: true, briefPath: "/briefs/x.md", ...fns,
+    });
+    const cmd = (fns.paneRunFn as unknown as { mock: { calls: string[][] } }).mock.calls[0]![2]!;
+    expect(cmd).toContain("--remote-control t-mgr");
+    expect(cmd.indexOf("--remote-control t-mgr")).toBeLessThan(cmd.indexOf('"$(cat'));
+    expect(cmd).toContain('"$(cat /briefs/x.md');
+  });
+
+  it("omits --remote-control unless it was asked for", async () => {
+    const fns = baseFns();
+    await spawnSession({
+      env: localEnv, taskSlug: "t", cwd: "/proj", repo: "corral", assignedPaneIds: new Set(),
+      targetWorkspaceId: null, repoPath: "/repos/corral",
+      sessionName: "t-a", ...fns,
+    });
+    expect(fns.paneRunFn).toHaveBeenCalledWith(localEnv, "w1:p1", "claude --name t-a", undefined);
+  });
+
+  it("sends no flags at all on resume", async () => {
+    const fns = baseFns();
+    await spawnSession({
+      env: localEnv, taskSlug: "t", cwd: "/proj", repo: "corral", assignedPaneIds: new Set(),
+      targetWorkspaceId: null, repoPath: "/repos/corral",
+      sessionName: "t-a", model: "opus", remoteControl: true, resumeSessionId: "u-1", ...fns,
+    });
+    expect(fns.paneRunFn).toHaveBeenCalledWith(localEnv, "w1:p1", "claude --resume u-1", undefined);
+  });
+
+  it("falls back to <slug>-<suffix> for the tab when no sessionName is given", async () => {
+    const fns = baseFns();
+    const r = await spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/proj", repo: "corral", assignedPaneIds: new Set(),
+      targetWorkspaceId: null, repoPath: "/repos/corral",
+      sessionSuffix: "b", ...fns,
+    });
+    expect(r.tabLabel).toBe("my-task-b");
   });
 });
