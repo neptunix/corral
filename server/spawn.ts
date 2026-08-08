@@ -17,10 +17,8 @@ const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 export const NAME_MAX = 56;
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,55}$/;
 
-// A task's Nth spawned session gets `${slug}-<letter>` — a human-readable label so a card's sessions
-// are distinguishable. Exported because server/api.ts picks `sessionSuffix` from the same list: two
-// copies could drift, and then the chosen letter and the composed fallback name would disagree.
-export const SESSION_LETTERS: readonly string[] =
+// The a-z candidate letters a card's sessions are distinguished by: `${slug}-<letter>`.
+const SESSION_LETTERS: readonly string[] =
   Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i));
 
 /** Slug, or "" when nothing usable survives — callers read "" as "not supplied". */
@@ -85,7 +83,6 @@ export interface SpawnOpts {
   // only this server-generated, shell-quoted path does. Local environments only (the route enforces
   // that): the file lives on the corral host, and `cat` would otherwise run on a remote box.
   readonly briefPath?: string;
-  readonly sessionSuffix?: string;                // tab suffix a|b|c for a task's Nth session (default "a")
   readonly targetWorkspaceId?: string | null;     // null/absent = create a new workspace
   readonly repoPath?: string | null;              // resolved env.repos[repo]; required to create
   /** The one string used as the herdr tab label, `--name`, and `--remote-control`'s name. Composed by
@@ -129,11 +126,10 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
   const { env, taskSlug, cwd, repo, assignedPaneIds } = opts;
   const spawnCommand = opts.spawnCommand ?? "claude";
 
-  const sessionSuffix = opts.sessionSuffix ?? "a";
-  // The tab herdr label and the card `name` must agree with the idempotency key, else re-spawn can't
-  // rejoin. `sessionName` is the composed one-string when the route supplied it (A.2); the suffix form
-  // is the fallback for callers that supply none.
-  const tabName = opts.sessionName ?? `${taskSlug}-${sessionSuffix}`;
+  // The tab herdr label must agree with the idempotency key, else re-spawn can't rejoin. `sessionName`
+  // is the composed one-string when the route supplied it; `<taskSlug>-a` is the fallback for the
+  // resume path, which supplies no name.
+  const tabName = opts.sessionName ?? `${taskSlug}-a`;
 
   // Flags, in a fixed order so tests can assert exact strings. --remote-control ALWAYS carries the
   // name: its argument is optional, so a bare flag would consume the positional brief that follows and

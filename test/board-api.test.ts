@@ -590,8 +590,8 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
       body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
     });
     expect(res.status).toBe(200);
-    const call = spawn.mock.calls[0]?.[0] as { sessionSuffix: string };
-    expect(call.sessionSuffix).toBe("b");
+    const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
+    expect(call.sessionName).toBe("my-task-b");
     const body = await res.json() as { name: string };
     expect(body.name).toBe("my-task-b");
   });
@@ -603,8 +603,8 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
       body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
     });
     expect(res.status).toBe(200);
-    const call = spawn.mock.calls[0]?.[0] as { sessionSuffix: string };
-    expect(call.sessionSuffix).toBe("d");
+    const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
+    expect(call.sessionName).toBe("my-task-d");
   });
 
   it("409s with session_cap once the card holds 26 sessions", async () => {
@@ -639,9 +639,8 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
     });
-    const call = spawn.mock.calls[0]?.[0] as { sessionName: string; sessionSuffix: string };
+    const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
     expect(call.sessionName).toBe("my-task-b");
-    expect(call.sessionSuffix).toBe("b"); // the letter and the name agree
   });
 
   it("appends a letter when the composed name is already on the card", async () => {

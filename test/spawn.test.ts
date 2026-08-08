@@ -195,7 +195,7 @@ describe("spawnSession — session suffix (Nth session)", () => {
     fns.listFn = vi.fn().mockResolvedValue([makeRow("w1:p9", "my-task-a", "corral")]);
     const result = await spawnSession({
       env: localEnv, taskSlug: "my-task", cwd: "/x", repo: "corral",
-      assignedPaneIds: new Set(), targetWorkspaceId: "w1", repoPath: null, sessionSuffix: "b", ...fns,
+      assignedPaneIds: new Set(), targetWorkspaceId: "w1", repoPath: null, sessionName: "my-task-b", ...fns,
     });
     expect(result.idempotent).toBe(false);
     expect(fns.tabCreateFn).toHaveBeenCalledWith(localEnv, "w1", "/proj", "my-task-b");
@@ -313,14 +313,14 @@ describe("spawnSession — launch flags", () => {
     expect(fns.paneRunFn).toHaveBeenCalledWith(localEnv, "w1:p1", "claude --resume u-1", undefined);
   });
 
-  it("falls back to <slug>-<suffix> for the tab when no sessionName is given", async () => {
+  it("falls back to <slug>-a for the tab when no sessionName is given", async () => {
     const fns = baseFns();
     const r = await spawnSession({
       env: localEnv, taskSlug: "my-task", cwd: "/proj", repo: "corral", assignedPaneIds: new Set(),
       targetWorkspaceId: null, repoPath: "/repos/corral",
-      sessionSuffix: "b", ...fns,
+      ...fns,
     });
-    expect(r.tabLabel).toBe("my-task-b");
+    expect(r.tabLabel).toBe("my-task-a");
   });
 
   // The join path (targetWorkspaceId set) is what every named spawn from corral_spawn actually takes

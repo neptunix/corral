@@ -27,7 +27,7 @@ import { isLoopbackHost } from "./host-guard.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
 import { isSessionBound, resolveLinkIndex } from "./session-binding.ts";
-import { composeSessionName, NAME_MAX, sanitizeSlug, SESSION_LETTERS, slugify } from "./spawn.ts";
+import { composeSessionName, NAME_MAX, sanitizeSlug, slugify } from "./spawn.ts";
 import type { SpawnOpts, SpawnResult } from "./spawn.ts";
 import { aggregateAccounts } from "./statusline.ts";
 import type { Storage } from "./storage.ts";
@@ -997,12 +997,6 @@ export function createApi(opts: {
     if (task.sessions.length >= SPAWN_CAP) {
       return c.json({ error: { code: "session_cap", message: `task already has ${String(SPAWN_CAP)} sessions — remove or unlink one first` } }, 409);
     }
-    // Still picked, and still passed: SpawnOpts.sessionSuffix is the tab-label fallback for callers
-    // that supply no sessionName. Same letter list composeSessionName's final candidates use, so the
-    // chosen letter and the composed fallback name cannot disagree. The `?? "a"` is unreachable: the
-    // SPAWN_CAP check above guarantees fewer than 26 sessions, so usedNames can't hold all 26
-    // `${slug}-<letter>` strings and `find` always hits.
-    const sessionSuffix = SESSION_LETTERS.find((sfx) => !usedNames.has(`${slug}-${sfx}`)) ?? "a";
     // One string for tab label, link name and `claude --name`. The uniqueness test happens inside
     // composeSessionName against the string it will actually return — see the invariant there.
     const sessionName = composeSessionName(slug, parsed.data.name ?? "", (n) => !usedNames.has(n));
@@ -1038,7 +1032,7 @@ export function createApi(opts: {
     });
     // Keep a handle to the spawn so a timeout can tear down whatever it eventually creates (below).
     const spawnPromise = opts.spawn({
-      env: targetEnv, taskSlug: slug, sessionSuffix, sessionName,
+      env: targetEnv, taskSlug: slug, sessionName,
       cwd: task.sessions[0]?.cwdSnapshot ?? process.cwd(),
       repo: newSpaceRepo, assignedPaneIds,
       spawnCommand: targetEnv.spawnCommand,
