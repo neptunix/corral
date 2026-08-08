@@ -615,8 +615,13 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
       body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
     });
     expect(res.status).toBe(409);
-    const err = await res.json() as { error: { code: string } };
+    const err = await res.json() as { error: { code: string; message: string } };
     expect(err.error.code).toBe("session_cap");
+    // Asserts the MESSAGE, not just the code. This fixture fills every a–z name, so BOTH 409 branches
+    // can fire and they share the `session_cap` code — on the code alone the test passed even with the
+    // counted cap disabled, because the "no free session name" branch answered instead. The message is
+    // what tells the two apart.
+    expect(err.error.message).toContain("already has 26 sessions");
     expect(spawn).not.toHaveBeenCalled();
   });
 
@@ -1123,8 +1128,12 @@ describe("POST resume", () => {
     expect(res.status).toBe(200);
     expect((seen as { sessionName?: string }).sessionName).toBe("x-a");
     // The flags themselves are spawn.ts's job (test/spawn.test.ts pins that resume sends none); what
-    // the route owns is passing the NAME, so the recreated tab is not silently relabelled `<slug>-a`.
+    // the route owns is passing the NAME — so the recreated tab is not silently relabelled `<slug>-a`
+    // — and passing NO launch-flag option at all. Both are asserted: checking only `model` let the
+    // route start sending `remoteControl: true`, silently re-connecting a resumed session to
+    // claude.ai, with this test still green.
     expect((seen as { model?: string }).model).toBeUndefined();
+    expect((seen as { remoteControl?: boolean }).remoteControl).toBeUndefined();
   });
 
   // link.name is `""` on legacy links (server/api.ts:118 heals it to the paneId for DISPLAY only —

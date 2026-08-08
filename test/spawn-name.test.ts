@@ -4,7 +4,6 @@ import { composeSessionName, NAME_MAX, sanitizeSlug, slugify } from "../server/s
 
 const free = (): boolean => true;
 const except = (taken: readonly string[]) => (n: string): boolean => !taken.includes(n);
-const NAME_RE = /^[a-z0-9][a-z0-9-]{0,55}$/;
 
 describe("slugify", () => {
   it("lowercases, collapses runs of non-alphanumerics, trims both ends", () => {
@@ -103,14 +102,19 @@ describe("composeSessionName", () => {
     expect(composeSessionName("my-task", "rc toggle", () => false)).toBeNull();
   });
 
-  it("every emitted name matches the launch-flag charset", () => {
-    const cases: readonly (readonly [string, string])[] = [
-      ["my-task", "rc toggle"], ["my-task", ""], ["a".repeat(32), "b".repeat(32)], ["task", "!!!"],
-    ];
-    for (const [slug, requested] of cases) {
-      const out = composeSessionName(slug, requested, free);
-      expect(out).not.toBeNull();
-      expect(NAME_RE.test(out ?? "")).toBe(true);
-    }
+  // Pins the EXACT reduction of each input, not `NAME_RE.test(out)`. Two reasons the old shape could
+  // not fail: it re-declared its own copy of production's (unexported) NAME_RE, so the two could
+  // drift apart silently; and none of its fixtures contained a character the charset rules actually
+  // have to remove, so dropping `.toLowerCase()` or the `[^a-z0-9]+` collapse left it green.
+  it.each([
+    ["RC Toggle UI!", "my-task-rc-toggle-ui"],       // uppercase + trailing punctuation
+    ["MiXeD CaSe", "my-task-mixed-case"],            // uppercase only
+    ["café/naïve", "my-task-caf-na-ve"],             // non-ASCII letters are dropped, not transliterated
+    ["  spaced   out  ", "my-task-spaced-out"],      // runs of spaces collapse to one dash
+    ["trailing---", "my-task-trailing"],             // a trailing dash run is trimmed off
+    ["日本語", "my-task-a"],                          // nothing usable survives → letter fallback
+    ["!!!", "my-task-a"],
+  ])("reduces %j to the launch-flag charset as %j", (requested, expected) => {
+    expect(composeSessionName("my-task", requested, free)).toBe(expected);
   });
 });
