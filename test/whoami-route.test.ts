@@ -17,7 +17,7 @@ const snap: Snapshot = {
     env: "work-local", paneId: "w1:p1", status: "working", agent: "claude", cwd: "/repo",
     tab: "api-refactor-a", workspace: "repo", tabId: "tab1", workspaceId: "ws1",
     sessionId: "11111111-2222-3333-4444-555555555555",
-    recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+    recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
   }],
 };
 const attention: AttentionMap = {

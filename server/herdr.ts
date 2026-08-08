@@ -203,6 +203,10 @@ export async function listSessions(env: HerdrEnv, exec?: ExecFn): Promise<Sessio
       recapStatus: null,
       statusline: null,
       statuslineStatus: null,
+      claudeStatus: null,
+      waitingFor: null,
+      remoteControl: null,
+      registryStatus: null,
     };
   });
 }

@@ -113,7 +113,7 @@ describe("fleetHandler", () => {
         sessions: Array.from({ length: 60 }, (_, i) => ({
           env: "work-local", paneId: `w1:p${String(i)}`, status: "idle", agent: "claude", cwd: "/r",
           tab: `s${String(i)}`, workspace: "w", sessionId: null,
-          recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+          recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
         })),
       }),
     });
@@ -129,7 +129,7 @@ describe("fleetHandler", () => {
         sessions: Array.from({ length: 60 }, (_, i) => ({
           env: "work-local", paneId: `w1:p${String(i)}`, status: "idle", agent: "claude", cwd: "/r",
           tab: `s${String(i)}`, workspace: "w", sessionId: null,
-          recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+          recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
         })),
       }),
     });
@@ -149,10 +149,10 @@ describe("fleetHandler defaults and filters", () => {
   const mixed = {
     envs: { "work-local": { reachable: true } },
     sessions: [
-      { env: "work-local", paneId: "w1:p1", status: "working", agent: "claude", cwd: "/r", tab: "s1", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null },
-      { env: "work-local", paneId: "w1:p2", status: "idle", agent: "claude", cwd: "/r", tab: "s2", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null },
-      { env: "work-local", paneId: "w1:p3", status: "blocked", agent: "claude", cwd: "/r", tab: "s3", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null },
-      { env: "work-local", paneId: "w1:p4", status: "done", agent: "claude", cwd: "/r", tab: "s4", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null },
+      { env: "work-local", paneId: "w1:p1", status: "working", agent: "claude", cwd: "/r", tab: "s1", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null },
+      { env: "work-local", paneId: "w1:p2", status: "idle", agent: "claude", cwd: "/r", tab: "s2", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null },
+      { env: "work-local", paneId: "w1:p3", status: "blocked", agent: "claude", cwd: "/r", tab: "s3", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null },
+      { env: "work-local", paneId: "w1:p4", status: "done", agent: "claude", cwd: "/r", tab: "s4", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null },
     ],
   };
 
@@ -204,7 +204,7 @@ describe("fleetHandler defaults and filters", () => {
         sessions: Array.from({ length: 25 }, (_, i) => ({
           env: "work-local", paneId: `w1:p${String(i)}`, status: "idle", agent: "claude", cwd: "/r",
           tab: `s${String(i)}`, workspace: "w", sessionId: null,
-          recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+          recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
         })),
       }),
     });
@@ -220,7 +220,7 @@ describe("fleetHandler defaults and filters", () => {
         sessions: [{
           env: "work-local", paneId: "w1:p1", status: "idle", agent: "claude", cwd: "/r",
           tab: "s1", workspace: "w", sessionId: null,
-          recap: longRecap, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+          recap: longRecap, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
         }],
       }),
     });

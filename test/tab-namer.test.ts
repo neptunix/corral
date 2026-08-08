@@ -7,7 +7,7 @@ function row(paneId: string, tabId: string, tab: string): SessionRow {
   return {
     env: "e1", paneId, status: "working", agent: "claude", cwd: "/x",
     tab, workspace: "ws", tabId, workspaceId: "w1", sessionId: null,
-    recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+    recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
   };
 }
 function sl(session_name: string | null, name_source: string | null): StatuslineData {

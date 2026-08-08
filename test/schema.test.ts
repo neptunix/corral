@@ -1,4 +1,4 @@
-import { StatuslineDataSchema, SessionRowSchema, AccountUsageSchema, UploadResponseSchema, UPLOAD_MAX_BYTES, EnvStateSchema } from "@shared/schema";
+import { StatuslineDataSchema, StatuslineStatusSchema, SessionRowSchema, RegistryStatusSchema, AccountUsageSchema, UploadResponseSchema, UPLOAD_MAX_BYTES, EnvStateSchema } from "@shared/schema";
 import { describe, it, expect } from "vitest";
 
 import { AttentionMapSchema, AttentionRecordSchema, PaneReadSchema, SnapshotSchema } from "../shared/schema.ts";
@@ -146,5 +146,55 @@ describe("upload schema", () => {
   it("accepts an EnvState with kind and without kind", () => {
     expect(EnvStateSchema.parse({ reachable: true, kind: "local" }).kind).toBe("local");
     expect(EnvStateSchema.parse({ reachable: true }).kind).toBeUndefined();
+  });
+});
+
+describe("SessionRow — Claude's own session state", () => {
+  const base = {
+    env: "e", paneId: "p1", status: "idle", agent: "claude", cwd: "/", tab: "t", workspace: "w",
+  };
+
+  it("SessionRow defaults the four registry fields to null", () => {
+    const row = SessionRowSchema.parse(base);
+    expect(row.claudeStatus).toBeNull();
+    expect(row.waitingFor).toBeNull();
+    expect(row.registryStatus).toBeNull();
+    // null, NOT false: "we have no record for this session" is not "Remote Control is off".
+    expect(row.remoteControl).toBeNull();
+  });
+
+  it("SessionRow carries registry state when present", () => {
+    const row = SessionRowSchema.parse({
+      ...base,
+      claudeStatus: "waiting", waitingFor: "input needed", remoteControl: true, registryStatus: "ok",
+    });
+    expect(row.claudeStatus).toBe("waiting");
+    expect(row.waitingFor).toBe("input needed");
+    expect(row.remoteControl).toBe(true);
+    expect(row.registryStatus).toBe("ok");
+  });
+
+  it("carries remoteControl: false distinctly from the null default", () => {
+    expect(SessionRowSchema.parse({ ...base, remoteControl: false }).remoteControl).toBe(false);
+  });
+
+  it("rejects an unknown registryStatus — it is the drift detector, not a free-text field", () => {
+    expect(SessionRowSchema.safeParse({ ...base, registryStatus: "probably-fine" }).success).toBe(false);
+  });
+
+  // Every member is asserted by name. A `toEqual(RegistryStatusSchema.options)` would compare the
+  // schema against itself and stay green through any edit to it.
+  it("RegistryStatus admits exactly the six documented states", () => {
+    for (const s of ["ok", "no-session-ref", "no-config-dirs", "not-found", "bad-schema", "read-error"]) {
+      expect(RegistryStatusSchema.safeParse(s).success).toBe(true);
+    }
+    expect(RegistryStatusSchema.options).toHaveLength(6);
+  });
+
+  // `no-config-dirs` is the member StatuslineStatus does NOT have, and the reason this is a separate
+  // enum rather than a reuse. If it ever disappears, readRegistry's zero-dirs branch has no status.
+  it("RegistryStatus has no-config-dirs, which StatuslineStatus does not", () => {
+    expect(RegistryStatusSchema.safeParse("no-config-dirs").success).toBe(true);
+    expect(StatuslineStatusSchema.safeParse("no-config-dirs").success).toBe(false);
   });
 });

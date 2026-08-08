@@ -168,7 +168,7 @@ describe("POST /api/boards/:bid/tasks/:tid/attach — label enrichment", () => {
       sessions: [{
         env: "work-local", paneId: "w1-1", status: "working", agent: "claude",
         cwd: "/repo/x", tab: "jira", workspace: "demo-api",
-        sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
       }],
     };
     const app = makeApiWithSnapshot(tmpDir, snapshot);
@@ -209,7 +209,7 @@ describe("POST /api/boards/:bid/tasks/:tid/attach — label enrichment", () => {
       sessions: [{
         env: "work-local", paneId: "w2-1", status: "working", agent: "claude",
         cwd: "/repo/y", tab: "", workspace: "demo-api",
-        sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
       }],
     };
     const app = makeApiWithSnapshot(tmpDir, snapshot);
@@ -231,7 +231,7 @@ describe("POST /api/boards/:bid/tasks/:tid/attach — sessionId persistence", ()
       sessions: [{
         env: "work-local", paneId: "w1-1", status: "working", agent: "claude",
         cwd: "/repo/x", tab: "jira", workspace: "demo-api",
-        sessionId: "uuid-att", recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        sessionId: "uuid-att", recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
       }],
     };
     const app = makeApiWithSnapshot(tmpDir, snapshot);
@@ -252,7 +252,7 @@ describe("POST /api/boards/:bid/tasks/:tid/detach — remove one session link", 
       sessions: [{
         env: "work-local", paneId: "w1-1", status: "working", agent: "claude",
         cwd: "/repo/x", tab: "jira", workspace: "demo-api",
-        sessionId: "uuid-d", recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        sessionId: "uuid-d", recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
       }],
     };
     const app = makeApiWithSnapshot(tmpDir, snapshot);
@@ -295,7 +295,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
       sessions: [{
         env: "work-local", paneId: "new-9", status: "working", agent: "claude",
         cwd: "/repo", tab: "jira", workspace: "ws",
-        sessionId: "uuid-9", recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        sessionId: "uuid-9", recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
       }],
     };
     const app = makeApiWithSnapshot(tmpDir, snapshot);
@@ -335,7 +335,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
       envs: { "work-local": { reachable: true } },
       sessions: [{
         env: "work-local", paneId: "p2", status: "working", agent: "claude",
-        cwd: "/r", tab: "t", workspace: "w", sessionId: "uuid-A", recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        cwd: "/r", tab: "t", workspace: "w", sessionId: "uuid-A", recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
       }],
     };
     const app = makeApiWithSnapshot(tmpDir, snapshot);
@@ -397,7 +397,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
       sessions: [{
         env: "work-local", paneId: "wQ:p4", status: "done", agent: "claude",
         cwd: "/repo", tab: "jira", workspace: "ws",
-        sessionId: "uuid-new", recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        sessionId: "uuid-new", recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
       }],
     };
     const app = makeApiWithSnapshot(tmpDir, snapshot);
@@ -982,7 +982,7 @@ describe("GET /api/state — live label preference", () => {
         env: "work-local", paneId: "w1:p1", status: "working", agent: "claude",
         cwd: "/c", tab: "renamed-live", workspace: "ws-live",
         sessionId: "11111111-2222-3333-4444-555555555555",
-        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
       }],
     };
     const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage });
@@ -1262,7 +1262,7 @@ function makeLiveRow(o: { paneId: string; sessionId: string | null; tabId: strin
     env: "work-local", paneId: o.paneId, status: "working", agent: "claude",
     cwd: o.cwd ?? "/c", tab: "t", workspace: "w",
     tabId: o.tabId, workspaceId: o.workspaceId ?? "w1",
-    sessionId: o.sessionId, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+    sessionId: o.sessionId, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
   };
 }
 

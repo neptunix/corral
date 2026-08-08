@@ -9,7 +9,7 @@ const A: HerdrEnv = { id: "a", label: "A", kind: "local", claudeConfigDirs: [], 
 const B: HerdrEnv = { id: "b", label: "B", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
 const row = (env: string, paneId: string): SessionRow => ({
   env, paneId, status: "working", agent: "claude", cwd: "/x", tab: "t", workspace: "w",
-  sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+  sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
 });
 
 describe("createPoller", () => {
@@ -97,7 +97,7 @@ describe("createPoller tab rename", () => {
     const rows = [{
       env: env.id, paneId: "p1", status: "working", agent: "claude", cwd: "/x",
       tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId: "11111111-2222-3333-4444-555555555555",
-      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
     }];
     const statusline: StatuslineFn = () => Promise.resolve({
       data: {
@@ -131,7 +131,7 @@ const OTHER_UUID = "b24be66a-9f6a-5ca9-c531-3857fc1ca5e9";
 
 function rowWithSession(env: string, paneId: string, sessionId: string): SessionRow {
   return { env, paneId, status: "working", agent: "claude", cwd: "/x", tab: "t", workspace: "w",
-    sessionId, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null };
+    sessionId, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null };
 }
 
 describe("createPoller — recap sweep", () => {
@@ -258,7 +258,7 @@ const noop = (): void => {};
 const E: HerdrEnv = { id: "e1", label: "E1", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
 const mkRow = (status: string): SessionRow => ({
   env: "e1", paneId: "p", status, agent: "claude", cwd: "/x", tab: "t", workspace: "w",
-  sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+  sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
 });
 const NOOP_MAP: AttentionMap = {};
 
@@ -299,7 +299,7 @@ describe("createPoller initial sweep kick", () => {
   const liveRow: SessionRow = {
     env: A.id, paneId: "p1", status: "working", agent: "claude", cwd: "/x",
     tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId: SID,
-    recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+    recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
   };
   const userStatusline: StatuslineFn = () => Promise.resolve({
     data: {

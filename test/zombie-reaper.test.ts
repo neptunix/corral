@@ -462,7 +462,7 @@ describe("startZombieReaper", () => {
     const occupied: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [{
       env: "work-local", paneId: "w1:p2", status: "idle", agent: "claude", cwd: "/c",
       tab: "task-a", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: S2,
-      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
     }] };
     const free: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
     let snap: Snapshot = occupied;
@@ -495,7 +495,7 @@ describe("startZombieReaper", () => {
       snapshot: { envs: { "work-local": { reachable: true } }, sessions: [{
         env: "work-local", paneId: "w1:p2", status: "idle", agent: "claude", cwd: "/c",
         tab: "task-a", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: S2,
-        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
       }] },
       boards: [boardWithLink({ sessionId: SID })], // link.sessionId = S1 (ended)
       panes: [{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }],
@@ -513,7 +513,7 @@ describe("startZombieReaper", () => {
     const reused: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [{
       env: "work-local", paneId: "w1:p2", status: "idle", agent: "claude", cwd: "/c",
       tab: "task-a", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: S2,
-      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
     }] };
     let snap: Snapshot = zombie;
     let clock = 0;
@@ -606,7 +606,7 @@ describe("startZombieReaper", () => {
     const aLive: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [{
       env: "work-local", paneId: "w1:p2", status: "working", agent: "claude", cwd: "/c",
       tab: "z", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: SID,
-      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
     }] };
     let snap: Snapshot = empty;
     let clock = 0;
@@ -706,7 +706,7 @@ describe("startZombieReaper", () => {
       sessions: [{
         env: "work-local", paneId: "w1:p2", status: "idle", agent: "claude", cwd: "/c",
         tab: "task-a", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: SID,
-        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
       }],
     };
     const h = harness({
@@ -750,7 +750,7 @@ describe("startZombieReaper", () => {
       snapshot: { envs: { "work-local": { reachable: true } }, sessions: [{
         env: "work-local", paneId: "w1:p2", status: "unknown", agent: "", cwd: "/c",
         tab: "task-a", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: null,
-        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
       }] },
       boards: [boardWithLink({ sessionId: SID })],                 // our own session S1 is gone
       panes: [{ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", hasAgent: false }], // list says free
@@ -838,7 +838,7 @@ describe("startZombieReaper", () => {
     const live: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [{
       env: "work-local", paneId: "w1:p2", status: "idle", agent: "claude", cwd: "/c",
       tab: "task-a", workspace: "c", tabId: "w1:t2", workspaceId: "w1", sessionId: S2,
-      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
     }] };
     let snap: Snapshot = empty;
     let clock = 0;

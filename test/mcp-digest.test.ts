@@ -38,7 +38,7 @@ function row(over: Partial<SessionRow>): SessionRow {
   return {
     env: "work-local", paneId: "w1:p1", status: "working", agent: "claude", cwd: "/repo",
     tab: "api-refactor-a", workspace: "repo", sessionId: null,
-    recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, ...over,
+    recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, ...over,
   };
 }
 
