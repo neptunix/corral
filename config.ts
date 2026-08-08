@@ -46,6 +46,22 @@ export const STATUSLINE_STALE_MS = intFromEnv("STATUSLINE_STALE_MS", 120000, { m
 // statusline sweep, so it is effective only when STATUSLINE_ENABLED is also on.
 export const TAB_RENAME_ENABLED = process.env.TAB_RENAME_ENABLED !== "false";
 
+// Claude session registry (<claude-config-dir>/sessions/<pid>.json). Read directly rather than through
+// the statusline capture: the session itself rewrites this file on every state change, so it is the
+// freshest view of a session that exists outside the session.
+export const CLAUDE_REGISTRY_READ_TIMEOUT_MS = intFromEnv("CLAUDE_REGISTRY_READ_TIMEOUT_MS", 8000, { min: 1 });
+// Applies to the received stream on the remote path and to the sum of file sizes on the local one.
+export const CLAUDE_REGISTRY_MAX_BYTES = intFromEnv("CLAUDE_REGISTRY_MAX_BYTES", 262144, { min: 1 });
+// Files for DEAD sessions are never cleaned up, so the count grows with history rather than with the
+// number of live sessions. This cap is what flattens the read cost: MEASURED on the author's box, a
+// full read is ~1.8 ms at 35 files but 29.5 ms at 1000, while the same 1000 read under this cap is
+// 11.5 ms — the excess being one stat() per candidate for the newest-first sort, which is what keeps
+// live sessions from being evicted by dead ones. A truncated read is reported, never silent.
+export const CLAUDE_REGISTRY_MAX_FILES = intFromEnv("CLAUDE_REGISTRY_MAX_FILES", 200, { min: 1 });
+// `CLAUDE_REGISTRY_POLL_MS` is added in the task where the interval that uses it lives. There is no
+// coalescing window and no re-check interval: those belonged to an fs.watch watcher the design
+// removed in favour of a plain interval.
+
 // Delay before the FIRST statusline sweep after start(). The sweep can't run at t=0 (it would race the
 // initial poll and see no rows), so it is kicked once after this short delay — by which point the first
 // poll has populated the rows — then runs every RECAP_INTERVAL_MS. Keeps startup renames near-instant.
