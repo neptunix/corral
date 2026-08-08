@@ -995,7 +995,7 @@ export function createApi(opts: {
     const slug = sanitizeSlug(task.title);
     const usedNames = new Set(task.sessions.map((s) => s.name));
     if (task.sessions.length >= SPAWN_CAP) {
-      return c.json({ error: { code: "session_cap", message: `task already has ${String(SPAWN_CAP)} sessions — attach or remove one first` } }, 409);
+      return c.json({ error: { code: "session_cap", message: `task already has ${String(SPAWN_CAP)} sessions — remove or unlink one first` } }, 409);
     }
     // Still picked, and still passed: SpawnOpts.sessionSuffix is the tab-label fallback for callers
     // that supply no sessionName. Same letter list composeSessionName's final candidates use, so the

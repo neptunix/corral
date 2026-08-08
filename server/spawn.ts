@@ -23,8 +23,6 @@ const NAME_RE = /^[a-z0-9][a-z0-9-]{0,55}$/;
 export const SESSION_LETTERS: readonly string[] =
   Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i));
 
-const fit = (s: string): string => s.slice(0, NAME_MAX).replace(/-+$/, "");
-
 /** Slug, or "" when nothing usable survives — callers read "" as "not supplied". */
 export function slugify(text: string, max: number): string {
   const s = text.toLowerCase()
@@ -48,9 +46,10 @@ export function sanitizeSlug(title: string): string {
  * candidate `isFree` accepts, or null when none is both free and valid (the route then 409s).
  *
  * INVARIANT: the string handed to `isFree` is byte-identical to the string returned. Every candidate
- * passes through `fit()` BEFORE the test, never after — two design revisions had this backwards and
- * could hand back a truncated name that collided with one already on the card. `isFree` is a callback
- * rather than a Set so that rule lives in exactly one place and is unit-testable without the route.
+ * is truncated to NAME_MAX and re-trimmed BEFORE the test, never after — two design revisions had
+ * this backwards and could hand back a truncated name that collided with one already on the card.
+ * `isFree` is a callback rather than a Set so that rule lives in exactly one place and is
+ * unit-testable without the route.
  */
 export function composeSessionName(
   taskSlug: string,
@@ -61,12 +60,13 @@ export function composeSessionName(
   const candidates: string[] = [];
   if (nameSlug !== "") {
     const joined = `${taskSlug}-${nameSlug}`;
-    candidates.push(fit(joined));
+    candidates.push(joined.slice(0, NAME_MAX).replace(/-+$/, ""));
     // Pre-trimmed by 2 so the disambiguating letter can never be the part truncation eats.
     const base = joined.slice(0, NAME_MAX - 2).replace(/-+$/, "");
     for (const letter of SESSION_LETTERS) candidates.push(`${base}-${letter}`);
   }
-  // Always ≤34 chars (taskSlug is ≤32), so `fit` would be a no-op. This is today's `${slug}-${suffix}`.
+  // Always ≤34 chars (taskSlug is ≤32), so the NAME_MAX slice above is a no-op here. This is today's
+  // `${slug}-${suffix}`.
   for (const letter of SESSION_LETTERS) candidates.push(`${taskSlug}-${letter}`);
   return candidates.find((c) => NAME_RE.test(c) && isFree(c)) ?? null;
 }

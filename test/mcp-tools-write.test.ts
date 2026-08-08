@@ -298,6 +298,7 @@ describe("spawnHandler", () => {
     const seen: Record<string, unknown>[] = [];
     const c = stub({ spawn: async (a) => { seen.push({ ...a }); return { env: a.env, paneId: "w1:p2", name: "t-a" }; } });
     await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
+    expect(seen).toHaveLength(1);
     expect(Object.hasOwn(seen[0] ?? {}, "name")).toBe(false);
     expect(Object.hasOwn(seen[0] ?? {}, "model")).toBe(false);
     // Absent, not `false`: Remote Control is off by default, and the route reads absence as off.

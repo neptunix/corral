@@ -322,4 +322,21 @@ describe("spawnSession — launch flags", () => {
     });
     expect(r.tabLabel).toBe("my-task-b");
   });
+
+  // The join path (targetWorkspaceId set) is what every named spawn from corral_spawn actually takes
+  // (mcp/tools/session.ts sends targetWorkspaceId: me.session.workspaceId for a same-env handoff), so
+  // sessionName needs its own coverage here — the tab is CREATED, not renamed, and tabName also drives
+  // the idempotent-rejoin scan. A live `<slug>-a` tab must NOT be mistaken for this distinct session.
+  it("creates the joined workspace's tab under the composed name, and does not rejoin <slug>-a", async () => {
+    const fns = baseFns();
+    fns.listPanesFn = vi.fn().mockResolvedValue([{ paneId: "w1:p9", cwd: "/proj" }]);
+    fns.listFn = vi.fn().mockResolvedValue([makeRow("w1:p9", "my-task-a", "corral")]);
+    const r = await spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/x", repo: "corral", assignedPaneIds: new Set(),
+      targetWorkspaceId: "w1", repoPath: null, sessionName: "my-task-rc-toggle-ui", ...fns,
+    });
+    expect(r.idempotent).toBe(false);
+    expect(fns.tabCreateFn).toHaveBeenCalledWith(localEnv, "w1", "/proj", "my-task-rc-toggle-ui");
+    expect(r.tabLabel).toBe("my-task-rc-toggle-ui");
+  });
 });

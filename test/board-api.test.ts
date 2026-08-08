@@ -1163,7 +1163,9 @@ describe("POST resume", () => {
         result: undefined,
       };
     });
-    await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/resume", { method: "POST" });
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/resume", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(seen).toBeDefined();
     expect(Object.hasOwn(seen ?? {}, "sessionName")).toBe(false);
   });
 });
