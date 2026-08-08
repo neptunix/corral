@@ -605,16 +605,28 @@ describe("formatWhoami", () => {
       expect(out).toContain("1 line, 9 chars");
     });
 
-    it("bounds the preview text itself, however large the stored description is", () => {
+    it("caps the preview at exactly 120 chars, both sides of the cut", () => {
+      // Pinned exactly, like the recap budget in the fleet tests — a `toBeLessThan(300)` here would
+      // pass at 120, 200 and 250 alike, leaving the whole point of the preview unpinned.
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : { ...resolved.task, description: "y".repeat(500) },
+      });
+      expect(out).toContain(`"${"y".repeat(120)}…"`);
+      expect(out).not.toContain("y".repeat(121));
+    });
+
+    it("measures that 120-char cap against COLLAPSED text, and still reports the true counts", () => {
+      // 500 lines of "line N": if the cap were applied before collapsing, the preview would carry
+      // 120 lines' worth of text rather than 120 characters.
       const description = Array.from({ length: 500 }, (_, i) => `line ${String(i)}`).join("\n");
       const out = formatWhoami({
         ...resolved,
         task: resolved.task === null ? null : { ...resolved.task, description },
       });
       const line = out.split("\n").find((l) => l.startsWith("description"));
-      // The preview is capped at 120 chars of collapsed text; the counts still report the truth.
       expect(line).toContain(`500 lines, ${String(description.length)} chars`);
-      expect(line?.length).toBeLessThan(300);
+      expect(out.split("\n").filter((l) => l.startsWith("description"))).toHaveLength(1);
       expect(out).not.toContain("line 499");
     });
   });
@@ -665,11 +677,39 @@ describe("formatCardDetail", () => {
 
   it("renders the full description with real line structure, each line inside the prefixed block", () => {
     const out = formatCardDetail(task);
-    expect(out).toContain(`description (2 lines, ${String(task.description.length)} chars):`);
+    expect(out).toContain(`description (2 lines, ${String(task.description.length)} chars`);
     expect(out).toContain("  | did the thing");
     expect(out).toContain("  | next: do the other thing");
     expect(out).not.toContain("TRUNCATED");
     expect(out.toUpperCase()).not.toContain("WARNING");
+  });
+
+  it("tells the caller the gutter is the tool's, not the card's, and must be stripped before writing back", () => {
+    // This reply is the only full read a session has, and corral_task_update replaces the field
+    // wholesale — so a session that copies the rendering back verbatim would add four characters per
+    // line, every handoff, compounding. The prefix has to be declared, not inferred.
+    const header = formatCardDetail(task).split("\n").find((l) => l.startsWith("description"));
+    expect(header).toContain('"  | "');
+    expect(header).toContain("strip it before writing back");
+  });
+
+  it("bounds the card header line at LINE_MAX, not at the description's wide budget", () => {
+    // `status` is a column id: an unconstrained z.string() on the task PATCH body, and the server
+    // takes no auth on loopback. Only the description block earned the 40k budget — a 50k status
+    // must not ride the same exemption onto the header line.
+    const out = formatCardDetail({ ...task, status: "s".repeat(50_000) });
+    const header = out.split("\n")[0] ?? "";
+    expect(header.startsWith("card: ")).toBe(true);
+    expect(header.length).toBeLessThanOrEqual(2001);
+    expect(header.endsWith("…")).toBe(true);
+  });
+
+  it("renders a description line of exactly the total cap without shaving the gutter off it", () => {
+    // Pins CARD_DETAIL_LINE_MAX's derivation (cap + prefix length + ellipsis). Were it set to the
+    // bare 40_000, this line would come back four characters short, silently.
+    const out = formatCardDetail({ ...task, description: "F".repeat(40_000) });
+    expect(out).toContain(`  | ${"F".repeat(40_000)}`);
+    expect(out).not.toContain("TRUNCATED");
   });
 
   it("renders the empty description as (empty), not an empty block", () => {

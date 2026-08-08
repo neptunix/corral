@@ -50,7 +50,8 @@ position before reading anything else.
 `corral_task_update` replaces `description` wholesale. The practice that makes that safe:
 `corral_task_read` in the same turn you write, and append around what it returned rather than
 retyping the log from memory. `corral_whoami`'s preview is not enough to write back from — that is
-what it means by PREVIEW.
+what it means by PREVIEW. Note that `corral_task_read` indents each line with a `  | ` gutter of its
+own; strip it before writing back, or the card grows four characters per line every handoff.
 
 ### Handing off before context runs out
 
