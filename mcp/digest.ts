@@ -65,11 +65,13 @@ const WHOAMI_COLUMNS_MAX = 20;
 // 1000 would silently start cutting valid rows.
 const LINE_MAX = 2000;
 // renderFullDescription bounds its own RENDERED block against TASK_DESCRIPTION_FULL_MAX, so emit's
-// per-line pass over formatCardDetail exists for the terminator sweep, not to cut anything. This
-// ceiling is therefore just the largest line that function can hand back — the whole budget spent on
-// one line, plus the ellipsis `truncate` appends when it cuts. Anything smaller would silently shave
-// a line the budget had already accepted.
-const CARD_DETAIL_LINE_MAX = TASK_DESCRIPTION_FULL_MAX + 1;
+// per-line pass over formatCardDetail is there for the terminator sweep, not to cut anything: no line
+// it can hand back exceeds this. What this value protects against is the DEFAULT — LINE_MAX would
+// shave a long, legitimate description line at 2000, which is exactly the silent cut corral_task_read
+// exists to avoid. Equal to the budget, with no slack for truncate's ellipsis: a 40_001-char line cut
+// here yields the identical string, so slack would be unobservable, and an unobservable term reads as
+// a guarantee nobody can check.
+const CARD_DETAIL_LINE_MAX = TASK_DESCRIPTION_FULL_MAX;
 
 export function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}…`;
