@@ -31,7 +31,7 @@ describe("spawn with a brief", () => {
       env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
       spawnCommand: "claude", repoPath: "/repo", ...stubs,
     });
-    expect(ran).toEqual(["claude"]);
+    expect(ran).toEqual(["claude --name task-a"]);
   });
 
   it("reads the brief through the pane's shell rather than inlining it", async () => {
@@ -41,7 +41,7 @@ describe("spawn with a brief", () => {
       spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
     });
     expect(ran).toEqual([
-      `claude "$(cat /data/briefs/abc123.md || printf '%s' '${BRIEF_FALLBACK}'; rm -f /data/briefs/abc123.md)"`,
+      `claude --name task-a "$(cat /data/briefs/abc123.md || printf '%s' '${BRIEF_FALLBACK}'; rm -f /data/briefs/abc123.md)"`,
     ]);
   });
 
@@ -114,7 +114,7 @@ describe("spawn with a brief", () => {
     // shell-quote wraps the path in double quotes and backslash-escapes `$` and `` ` `` so the
     // command substitution and backticks cannot be interpreted by the shell that runs `cat`.
     const q = "\"/data/briefs/a;b\\$(c)\\`d\\`e'f.md\"";
-    expect(ran[0]).toBe(`claude "$(cat ${q} || printf '%s' '${BRIEF_FALLBACK}'; rm -f ${q})"`);
+    expect(ran[0]).toBe(`claude --name task-a "$(cat ${q} || printf '%s' '${BRIEF_FALLBACK}'; rm -f ${q})"`);
     // The hostile substrings must never appear raw/unescaped — that would mean the shell could
     // execute `c` (via `$(c)` or backticks) or terminate the `cat` command early via `;`.
     expect(ran[0]).not.toContain("cat /data/briefs/a;b$(c)");

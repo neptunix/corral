@@ -152,6 +152,29 @@ describe("corral client", () => {
     expect(result).toEqual({ env: "work-local", paneId: "w2:p3", name: "task-a" });
   });
 
+  it("sends name, model and remoteControl in the spawn body when supplied", async () => {
+    const bodies: unknown[] = [];
+    const client = createClient("http://127.0.0.1:8787", async (_input, init) => {
+      bodies.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
+      return jsonResponse({ env: "work-local", paneId: "w2:p3", name: "task-rc" });
+    });
+    await client.spawn({ boardId: "b", taskId: "t_abcdefg", env: "work-local", brief: "go", name: "rc toggle", model: "fable", remoteControl: true });
+    expect(bodies[0]).toEqual({ env: "work-local", brief: "go", name: "rc toggle", model: "fable", remoteControl: true });
+  });
+
+  // The existing "exact JSON body" test above asserts `toEqual({ env, brief })`. Absent optionals must
+  // stay ABSENT rather than serialising as `"name": null` — the route's Zod schema would still accept
+  // it, but the body would stop being the minimal one that test pins.
+  it("omits name, model and remoteControl from the spawn body when absent", async () => {
+    const bodies: unknown[] = [];
+    const client = createClient("http://127.0.0.1:8787", async (_input, init) => {
+      bodies.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
+      return jsonResponse({ env: "work-local", paneId: "w2:p3", name: "task-a" });
+    });
+    await client.spawn({ boardId: "b", taskId: "t_abcdefg", env: "work-local", brief: "go" });
+    expect(bodies[0]).toEqual({ env: "work-local", brief: "go" });
+  });
+
   it("encodes a crafted taskId so it cannot splice extra path segments or reopen the query string", async () => {
     // A taskId containing "/" and "?" could otherwise make the interpolated path resolve to a
     // DIFFERENT route (e.g. .../close instead of .../attach) with the rest swallowed into the

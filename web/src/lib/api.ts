@@ -117,11 +117,21 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
-    // repo (config key) roots a NEW space; null when joining an existing space.
-    spawn: (bid: string, tid: string, env: string, targetWorkspaceId: string | null, repo: string | null) =>
+    // repo (config key) roots a NEW space; null when joining an existing space. model is null for the
+    // picker's "default" — the field is then omitted so the session inherits the last-used model.
+    // remoteControl false is likewise omitted rather than sent: the route reads absence as off, and
+    // connecting a session to claude.ai is never implied (spec A.1).
+    spawn: (bid: string, tid: string, env: string, targetWorkspaceId: string | null, repo: string | null, model: string | null, remoteControl: boolean) =>
       req<SessionLink & { idempotent: boolean }>(
         `/api/boards/${bid}/tasks/${tid}/spawn`,
-        { method: "POST", body: JSON.stringify({ env, targetWorkspaceId, repo }) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            env, targetWorkspaceId, repo,
+            ...(model === null ? {} : { model }),
+            ...(remoteControl ? { remoteControl: true } : {}),
+          }),
+        },
       ),
     move: (bid: string, tid: string, toBoardId: string) =>
       req<{ ok: boolean }>(`/api/boards/${bid}/tasks/${tid}/move`, {

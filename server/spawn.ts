@@ -10,9 +10,71 @@ import {
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
+// The ONE string used as the herdr tab label, the card's link name and `claude --name`. 56 is a
+// readability bound for a tab label and the /resume picker — NOT a size chosen so that any slug plus
+// any name fits. A 32-char slug with a 30-char name IS truncated, which is precisely why truncation
+// happens before the freeness test in composeSessionName.
+export const NAME_MAX = 56;
+const NAME_RE = /^[a-z0-9][a-z0-9-]{0,55}$/;
+
+// The a-z candidate letters a card's sessions are distinguished by: `${slug}-<letter>`.
+const SESSION_LETTERS: readonly string[] =
+  Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i));
+
+/**
+ * Slug, or "" when nothing usable survives — callers read "" as "not supplied".
+ *
+ * The pipeline alone guarantees the launch-flag charset, so there is deliberately NO trailing
+ * validity check: every surviving character is already `[a-z0-9-]`; leading dashes are trimmed
+ * BEFORE the slice and a slice keeps a prefix, so the first character can never be a dash; and the
+ * final replace removes a dash the cut may have left. A `/^[a-z0-9][a-z0-9-]*$/` guard here used to
+ * sit on the return and was dead code — it cannot reject anything this function can produce (fuzzed
+ * over 800k inputs, it never once changed the result). Do not add it back.
+ */
+export function slugify(text: string, max: number): string {
+  return text.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, max)
+    .replace(/-+$/, "");
+}
+
+// UNCHANGED. An earlier revision truncated this to 24 characters, which silently changed the slug for
+// every card title over 32 characters and broke the idempotent-rejoin key for cards that already
+// exist. Other call sites depend on both the 32 and the "task" fallback.
 export function sanitizeSlug(title: string): string {
   const s = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
   return SLUG_RE.test(s) ? s : "task";
+}
+
+/**
+ * Compose the session name from the card slug and the caller's requested name, returning the first
+ * candidate `isFree` accepts, or null when none is both free and valid (the route then 409s).
+ *
+ * INVARIANT: the string handed to `isFree` is byte-identical to the string returned. Every candidate
+ * is truncated to NAME_MAX and re-trimmed BEFORE the test, never after — two design revisions had
+ * this backwards and could hand back a truncated name that collided with one already on the card.
+ * `isFree` is a callback rather than a Set so that rule lives in exactly one place and is
+ * unit-testable without the route.
+ */
+export function composeSessionName(
+  taskSlug: string,
+  requested: string,
+  isFree: (name: string) => boolean,
+): string | null {
+  const nameSlug = slugify(requested, 32);
+  const candidates: string[] = [];
+  if (nameSlug !== "") {
+    const joined = `${taskSlug}-${nameSlug}`;
+    candidates.push(joined.slice(0, NAME_MAX).replace(/-+$/, ""));
+    // Pre-trimmed by 2 so the disambiguating letter can never be the part truncation eats.
+    const base = joined.slice(0, NAME_MAX - 2).replace(/-+$/, "");
+    for (const letter of SESSION_LETTERS) candidates.push(`${base}-${letter}`);
+  }
+  // Always ≤34 chars (taskSlug is ≤32), so the NAME_MAX slice above is a no-op here. This is today's
+  // `${slug}-${suffix}`.
+  for (const letter of SESSION_LETTERS) candidates.push(`${taskSlug}-${letter}`);
+  return candidates.find((c) => NAME_RE.test(c) && isFree(c)) ?? null;
 }
 
 export interface SpawnOpts {
@@ -29,9 +91,16 @@ export interface SpawnOpts {
   // only this server-generated, shell-quoted path does. Local environments only (the route enforces
   // that): the file lives on the corral host, and `cat` would otherwise run on a remote box.
   readonly briefPath?: string;
-  readonly sessionSuffix?: string;                // tab suffix a|b|c for a task's Nth session (default "a")
   readonly targetWorkspaceId?: string | null;     // null/absent = create a new workspace
   readonly repoPath?: string | null;              // resolved env.repos[repo]; required to create
+  /** The one string used as the herdr tab label, `--name`, and `--remote-control`'s name. Composed by
+   *  the route (composeSessionName); when absent the tab falls back to `<taskSlug>-<suffix>`. */
+  readonly sessionName?: string;
+  /** Shape-validated in the spawn route's body schema (A.5). corral keeps no allowlist. */
+  readonly model?: string;
+  /** Start with Remote Control connected. Default OFF — this connects the session to claude.ai, so it
+   *  is an explicit per-spawn decision on both the UI and MCP paths (spec A.1). */
+  readonly remoteControl?: boolean;
   // Injectable for testing
   readonly listFn?: (env: HerdrEnv, exec?: ExecFn) => Promise<SessionRow[]>;
   readonly paneGetFn?: (env: HerdrEnv, paneId: string, exec?: ExecFn) => Promise<{ paneId: string; tabId: string; workspaceId: string; cwd: string }>;
@@ -64,7 +133,26 @@ function defaultWorkspaceList(_env: HerdrEnv): Promise<{ workspace_id: string; l
 export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
   const { env, taskSlug, cwd, repo, assignedPaneIds } = opts;
   const spawnCommand = opts.spawnCommand ?? "claude";
+
+  // The tab herdr label must agree with the idempotency key, else re-spawn can't rejoin. `sessionName`
+  // is the composed one-string when the route supplied it; `<taskSlug>-a` is the fallback for the
+  // resume path, which supplies no name.
+  const tabName = opts.sessionName ?? `${taskSlug}-a`;
+
+  // Flags, in a fixed order so tests can assert exact strings. --remote-control ALWAYS carries the
+  // name: its argument is optional, so a bare flag would consume the positional brief that follows and
+  // start a session with no prompt (spec Findings). Passing the name fills the slot.
+  const flags = [
+    "--name", tabName,
+    ...(opts.model !== undefined ? ["--model", opts.model] : []),
+    ...(opts.remoteControl === true ? ["--remote-control", tabName] : []),
+  ];
+  const launch = `${spawnCommand} ${quote(flags)}`;
+
   const command = opts.resumeSessionId !== undefined
+    // Resume sends NO flags: the name lives in the transcript and the model is restored with the
+    // session, so re-sending either would overwrite a choice the user may have made since; and a
+    // resumed session must not silently re-connect to claude.ai (spec A.4).
     ? `${spawnCommand} --resume ${opts.resumeSessionId}`
     : opts.briefPath !== undefined
       // Three things happen inside the ONE substitution, in order:
@@ -74,10 +162,10 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
       //   rm -f — delete the file, caused by the read rather than racing it on a timer. `rm` prints
       //           nothing, so it does not contribute to the expansion.
       // The server-side unlink (server/api.ts) remains only as a backstop for a pane that never
-      // runs this command at all.
-      ? `${spawnCommand} "$(cat ${quote([opts.briefPath])} || printf '%s' ${quote([BRIEF_FALLBACK])}; rm -f ${quote([opts.briefPath])})"`
-      : spawnCommand;
-  const sessionSuffix = opts.sessionSuffix ?? "a";
+      // runs this command at all. ADR-0002 §5 decided this shape deliberately — do NOT move the `rm`
+      // out of the substitution (spec A.7 is withdrawn).
+      ? `${launch} "$(cat ${quote([opts.briefPath])} || printf '%s' ${quote([BRIEF_FALLBACK])}; rm -f ${quote([opts.briefPath])})"`
+      : launch;
   const targetWorkspaceId = opts.targetWorkspaceId ?? null;
   const repoPath = opts.repoPath ?? null;
 
@@ -91,10 +179,6 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
   const doTabRename = opts.tabRenameFn ?? tabRename;
   const doTabClose = opts.tabCloseFn ?? tabClose;
   const doWorkspaceClose = opts.workspaceCloseFn ?? workspaceClose;
-
-  // The tab herdr label and the card `name` must agree with the idempotency key, else re-spawn can't
-  // rejoin. The caller (api spawn endpoint) picks the next free a|b|c suffix for the task's Nth session.
-  const tabName = `${taskSlug}-${sessionSuffix}`;
 
   // Step 1: resolve the target workspace (join existing, or create a new one at repoPath).
   let workspaceId: string;

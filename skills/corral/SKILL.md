@@ -55,6 +55,10 @@ compose the text and let this procedure carry it. Once they agree:
    and their reasons, what was ruled out, what is verified versus assumed.
 2. **Compose the brief** (below) and `corral_spawn` it. The new session lands on the same card, in a
    tab beside this one, and starts from that text.
+   Pass `name` — two to four words for what the new session will do (`rc-toggle-ui`,
+   `registry-watcher`). corral prefixes it with the card's slug and uses the result as the Claude
+   session name, the tab label and the card's label. Without it the session is named
+   `<card-slug>-<letter>`, which tells a reader nothing once a card holds several.
 3. **Verify it arrived** — `corral_whoami` again; the new session appears in the card's session list.
    If the brief failed to deliver, the new session says so on its first turn.
 4. **`corral_session_close` last, and only if asked.** Leaving both sessions running is a valid

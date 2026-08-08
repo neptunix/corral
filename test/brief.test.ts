@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -33,6 +33,11 @@ describe("brief store", () => {
   it("leaves no temp file behind (atomic write)", async () => {
     const p = await writeBrief(root, "hello");
     expect(existsSync(`${p}.tmp`)).toBe(false);
+  });
+
+  it("writes the brief file owner-only (0600)", async () => {
+    const p = await writeBrief(root, "hello");
+    expect((statSync(p).mode & 0o777).toString(8)).toBe("600");
   });
 
   it("generates a distinct path per call", async () => {

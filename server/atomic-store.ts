@@ -10,9 +10,10 @@ export function withMutex<T>(key: string, fn: () => T | Promise<T>): Promise<T> 
   return m.runExclusive(fn);
 }
 
-/** Atomic write: temp file + rename. Synchronous by design (§3.2). */
-export function writeAtomic(filePath: string, data: string): void {
+/** Atomic write: temp file + rename. Synchronous by design (§3.2). `mode` lands on the temp file, so
+ *  the rename carries it — setting it after the rename would leave a window at the default umask. */
+export function writeAtomic(filePath: string, data: string, mode?: number): void {
   const tmp = `${filePath}.tmp`;
-  writeFileSync(tmp, data, "utf8");
+  writeFileSync(tmp, data, mode === undefined ? "utf8" : { encoding: "utf8", mode });
   renameSync(tmp, filePath);
 }

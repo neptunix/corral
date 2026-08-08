@@ -14,6 +14,9 @@ export interface SessionDeps {
 export interface SpawnArgs {
   readonly brief: string;
   readonly env?: string | undefined;
+  readonly name?: string | undefined;
+  readonly model?: string | undefined;
+  readonly remoteControl?: boolean | undefined;
 }
 
 export interface CloseArgs {
@@ -49,6 +52,9 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
       taskId: card.taskId,
       env,
       brief: args.brief,
+      ...(args.name === undefined ? {} : { name: args.name }),
+      ...(args.model === undefined ? {} : { model: args.model }),
+      ...(args.remoteControl === undefined ? {} : { remoteControl: args.remoteControl }),
       ...(sameEnv ? { targetWorkspaceId: me.session.workspaceId } : {}),
     });
     const key = `${result.env}:${result.paneId}`;
@@ -129,10 +135,16 @@ export function registerSessionTools(server: McpServer, deps: SessionDeps): void
     {
       title: "Spawn a session on this card",
       description:
-        "Start a NEW Claude session attached to THIS session's card — for a context handoff or a parallel strand. The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment, where the new session joins THIS session's workspace. LOCAL ENVIRONMENTS ONLY in this phase: `env` may only name a local environment (kind=local in corral_whoami's environment list) — a brief cannot be delivered to a remote environment, so a remote `env` is refused here rather than left to 400 on the server. Destructive: this starts a real session that consumes tokens.",
+        "Start a NEW Claude session attached to THIS session's card — for a context handoff or a parallel strand. The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment, where the new session joins THIS session's workspace. LOCAL ENVIRONMENTS ONLY in this phase: `env` may only name a local environment (kind=local in corral_whoami's environment list) — a brief cannot be delivered to a remote environment, so a remote `env` is refused here rather than left to 400 on the server. Supply `name`: two to four words for what the new session is for. corral composes the final session name as `<card-slug>-<name>` and uses it as the Claude session name, the herdr tab label and the card's label, so a card holding several sessions stays readable. Destructive: this starts a real session that consumes tokens.",
       inputSchema: {
         brief: z.string().describe("handoff text the new session starts from; required"),
         env: z.string().optional().describe("LOCAL environment id from corral_whoami; defaults to this session's. A remote environment is refused."),
+        name: z.string().max(64).optional().describe(
+          'short slug for what THIS session will do, e.g. "rc-toggle-ui" — corral prefixes it with the card\'s slug to make the session name. Omit only if you genuinely cannot say.'),
+        model: z.string().optional().describe(
+          'model for the new session: an alias ("fable", "opus", "sonnet") or a full id. Omit to inherit the model this environment last used. corral does not validate the value beyond its shape — a wrong one starts a session that fails at the API.'),
+        remoteControl: z.boolean().optional().describe(
+          'start the session with Remote Control already connected, so it is reachable from claude.ai. Default off. Use it when you are spawning on behalf of an operator working from a session that is itself remote — otherwise the new session cannot be reached from where it was asked for. Requires claude.ai subscription auth on that machine; without it the session still starts and asks for authorization inside.'),
       },
       // Machine-readable counterpart to the "Destructive." in the descriptions below — a harness can
       // gate on this without parsing prose. It changes nothing on its own: the actual control is the

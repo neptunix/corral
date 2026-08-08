@@ -10,7 +10,7 @@ interface Props {
   readonly envIds: readonly string[];
   readonly onSave: (patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority" | "repo">>) => void;
   readonly onDelete: () => void;
-  readonly onSpawn: (args: { env: string; targetWorkspaceId: string | null; repo: string | null }) => Promise<SessionLink>;
+  readonly onSpawn: (args: { env: string; targetWorkspaceId: string | null; repo: string | null; model: string | null; remoteControl: boolean }) => Promise<SessionLink>;
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly boards: readonly Board[];
   readonly onMove: (toBoardId: string) => Promise<void>;
@@ -28,6 +28,11 @@ export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, 
   const [status, setStatus] = useState(task.status);
   const [spawning, setSpawning] = useState(false);
   const [spawnEnv, setSpawnEnv] = useState(envIds[0] ?? "");
+  // "" is the picker's "default" — no model field is sent, so the session inherits the last-used one.
+  const [spawnModel, setSpawnModel] = useState("");
+  // Unchecked by default, and deliberately NOT persisted between spawns: ticking it connects the new
+  // session to claude.ai, so it is an explicit decision every time (spec A.1).
+  const [spawnRemoteControl, setSpawnRemoteControl] = useState(false);
   // Spawn "Into" targets: existing herdr spaces (join) + the env's configured repos (create new).
   const [targets, setTargets] = useState<{ readonly spaces: readonly { workspaceId: string; label: string }[]; readonly repos: readonly { name: string }[] }>({ spaces: [], repos: [] });
   const [selectedTarget, setSelectedTarget] = useState<string>(""); // a workspaceId (join) or "new:<repo>" (create)
@@ -91,7 +96,11 @@ export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, 
       const isNew = selectedTarget.startsWith("new:");
       const targetWorkspaceId = isNew ? null : selectedTarget;
       const repoArg = isNew ? selectedTarget.slice(4) : null;
-      const link = await onSpawn({ env: spawnEnv, targetWorkspaceId, repo: repoArg });
+      const link = await onSpawn({
+        env: spawnEnv, targetWorkspaceId, repo: repoArg,
+        model: spawnModel === "" ? null : spawnModel,
+        remoteControl: spawnRemoteControl,
+      });
       onClose();
       onOpenSession(link.env, link.paneId, true, task.title); // auto-attach; retry until claude registers as an agent
     } catch (err) {
@@ -158,6 +167,13 @@ export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, 
                   value={spawnEnv} onChange={(e) => { setSpawnEnv(e.target.value); }} title="Environment">
                   {envIds.map((id) => <option key={id} value={id}>{id}</option>)}
                 </select>
+                <select className="w-24 shrink-0 bg-background border border-border rounded px-2 py-1.5 text-foreground text-sm"
+                  value={spawnModel} onChange={(e) => { setSpawnModel(e.target.value); }} title="Model">
+                  <option value="">default</option>
+                  <option value="sonnet">sonnet</option>
+                  <option value="opus">opus</option>
+                  <option value="fable">fable</option>
+                </select>
                 <select className="flex-1 min-w-0 bg-background border border-border rounded px-2 py-1.5 text-foreground text-sm"
                   value={selectedTarget} onChange={(e) => { setSelectedTarget(e.target.value); }} title="Where the session runs" disabled={noTargets}>
                   {targets.spaces.length > 0 && (
@@ -177,6 +193,12 @@ export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, 
                 </button>
               </div>
               <p className="text-xs text-muted-foreground">Into an existing herdr space, or a new one from a repo in <span className="text-foreground/80 font-mono">environments.json</span>.</p>
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1 cursor-pointer">
+                <input type="checkbox" className="accent-success"
+                  checked={spawnRemoteControl}
+                  onChange={(e) => { setSpawnRemoteControl(e.target.checked); }} />
+                Remote Control — start it connected to claude.ai, reachable from a phone
+              </label>
               {noTargets && spawnError === null && (
                 <p className="text-xs text-muted-foreground mt-1">No spaces or configured repos for this env — add repos to its <span className="font-mono">environments.json</span> entry, or create a space in herdr.</p>
               )}
