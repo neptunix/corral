@@ -257,8 +257,8 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
           envIds={Object.keys(envs)}
           onSave={handleSave}
           onDelete={handleDelete}
-          onSpawn={async ({ env, targetWorkspaceId, repo }) => {
-            const link = await api.tasks.spawn(board.id, editingTask.id, env, targetWorkspaceId, repo);
+          onSpawn={async ({ env, targetWorkspaceId, repo, model, remoteControl }) => {
+            const link = await api.tasks.spawn(board.id, editingTask.id, env, targetWorkspaceId, repo, model, remoteControl);
             onBoardStateChange();
             return link;
           }}
