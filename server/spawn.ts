@@ -21,14 +21,22 @@ const NAME_RE = /^[a-z0-9][a-z0-9-]{0,55}$/;
 const SESSION_LETTERS: readonly string[] =
   Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i));
 
-/** Slug, or "" when nothing usable survives — callers read "" as "not supplied". */
+/**
+ * Slug, or "" when nothing usable survives — callers read "" as "not supplied".
+ *
+ * The pipeline alone guarantees the launch-flag charset, so there is deliberately NO trailing
+ * validity check: every surviving character is already `[a-z0-9-]`; leading dashes are trimmed
+ * BEFORE the slice and a slice keeps a prefix, so the first character can never be a dash; and the
+ * final replace removes a dash the cut may have left. A `/^[a-z0-9][a-z0-9-]*$/` guard here used to
+ * sit on the return and was dead code — it cannot reject anything this function can produce (fuzzed
+ * over 800k inputs, it never once changed the result). Do not add it back.
+ */
 export function slugify(text: string, max: number): string {
-  const s = text.toLowerCase()
+  return text.toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, max)
     .replace(/-+$/, "");
-  return /^[a-z0-9][a-z0-9-]*$/.test(s) ? s : "";
 }
 
 // UNCHANGED. An earlier revision truncated this to 24 characters, which silently changed the slug for

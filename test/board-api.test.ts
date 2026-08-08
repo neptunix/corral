@@ -696,6 +696,26 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     expect(call.model).toBe("claude-sonnet-5[1m]");
   });
 
+  // corral keeps no allowlist, so the shape check must not become one by omission. These are the id
+  // forms Claude Code takes on non-first-party providers; a class without `:` / `@` / uppercase
+  // refused exactly the ids an operator has to type out in full.
+  it.each([
+    "us.anthropic.claude-sonnet-4-5-20250929-v1:0", // Bedrock
+    "anthropic.claude-3-5-sonnet-20241022-v2:0",    // Bedrock
+    "claude-sonnet-4-5@20250929",                   // Vertex
+    "Claude-Opus-4-5",                              // uppercase
+  ])("accepts the full provider model id %j", async (model) => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, model }),
+    });
+    expect(res.status).toBe(200);
+    expect(spawn).toHaveBeenCalledOnce();
+    const call = spawn.mock.calls[0]?.[0] as { model?: string };
+    expect(call.model).toBe(model);
+  });
+
   it("rejects a model carrying shell metacharacters", async () => {
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
     for (const model of ["; rm -rf /", "--dangerously-skip-permissions", "a b", "$(id)"]) {

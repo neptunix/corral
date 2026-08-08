@@ -941,11 +941,19 @@ export function createApi(opts: {
       name: z.string().max(64).optional(),
       // Shape-validated only. corral keeps NO list of valid models: Claude Code accepts any string
       // and fails visibly at the API, the operator corrects it, and an allowlist would need a corral
-      // release per new alias. The brackets admit the `[1m]` context-window suffix; they are glob
-      // characters, which is why server/spawn.ts assembles the command through shell-quote's quote().
-      // NOTE the character class is `.[\]-`, not `.\[\]-`: an escaped `[` inside a class fails
-      // eslint's no-useless-escape, and the two patterns match the same language.
-      model: z.string().regex(/^[a-z0-9][a-z0-9.[\]-]{0,63}$/).optional(),
+      // release per new alias. The class is therefore wide enough for every id shape Claude Code
+      // takes — aliases (`opus`), dated ids (`claude-opus-4-5-20251101`), the `[1m]` context-window
+      // suffix, Bedrock (`us.anthropic.claude-sonnet-4-5-20250929-v1:0`, hence `:`) and Vertex
+      // (`claude-sonnet-4-5@20250929`, hence `@`), plus uppercase. A narrower class was an
+      // ACCIDENTAL allowlist that refused exactly the ids an operator has to type out in full, which
+      // is the thing this comment says corral does not do.
+      //
+      // What it still refuses is what carries risk: the first character must be alphanumeric, so no
+      // value can reach `claude` as a FLAG, and no space or shell metacharacter is admitted at all.
+      // The brackets are glob characters, which is why server/spawn.ts assembles the command through
+      // shell-quote's quote() rather than interpolating. NOTE the class writes `[\]`, not `\[\]`: an
+      // escaped `[` inside a class fails eslint's no-useless-escape, and both match the same language.
+      model: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9.:@[\]-]{0,63}$/).optional(),
       // Start with Remote Control connected. Default OFF: this connects the session to claude.ai, so
       // it is an explicit per-spawn decision, never implied (spec A.1). Absent === off.
       remoteControl: z.boolean().optional(),
