@@ -619,6 +619,127 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     expect(err.error.code).toBe("session_cap");
     expect(spawn).not.toHaveBeenCalled();
   });
+
+  it("composes the session name from the card slug and the requested name", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, name: "RC toggle UI" }),
+    });
+    expect(res.status).toBe(200);
+    const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
+    expect(call.sessionName).toBe("my-task-rc-toggle-ui");
+    const body = await res.json() as { name: string };
+    expect(body.name).toBe("my-task-rc-toggle-ui"); // the STORED link name is the same string
+  });
+
+  it("falls back to <slug>-<letter> when no name is supplied", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["my-task-a"]);
+    await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+    });
+    const call = spawn.mock.calls[0]?.[0] as { sessionName: string; sessionSuffix: string };
+    expect(call.sessionName).toBe("my-task-b");
+    expect(call.sessionSuffix).toBe("b"); // the letter and the name agree
+  });
+
+  it("appends a letter when the composed name is already on the card", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["my-task-rc-toggle-ui"]);
+    await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, name: "RC toggle UI" }),
+    });
+    const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
+    expect(call.sessionName).toBe("my-task-rc-toggle-ui-a");
+  });
+
+  it("rejects a name longer than 64 characters", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, name: "x".repeat(65) }),
+    });
+    expect(res.status).toBe(400);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("forwards a valid model to the spawner", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
+    await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, model: "fable" }),
+    });
+    const call = spawn.mock.calls[0]?.[0] as { model?: string };
+    expect(call.model).toBe("fable");
+  });
+
+  it("omits model from the spawn options entirely when none is chosen", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
+    await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+    });
+    // exactOptionalPropertyTypes: absent must mean ABSENT, not `undefined` — spawn.ts branches on
+    // `opts.model === undefined`, and "inherit the last-used model" is the default.
+    expect(Object.hasOwn(spawn.mock.calls[0]?.[0] ?? {}, "model")).toBe(false);
+  });
+
+  it("accepts a model carrying the [1m] context-window suffix", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, model: "claude-sonnet-5[1m]" }),
+    });
+    expect(res.status).toBe(200);
+    const call = spawn.mock.calls[0]?.[0] as { model?: string };
+    expect(call.model).toBe("claude-sonnet-5[1m]");
+  });
+
+  it("rejects a model carrying shell metacharacters", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
+    for (const model of ["; rm -rf /", "--dangerously-skip-permissions", "a b", "$(id)"]) {
+      const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, model }),
+      });
+      expect(res.status, model).toBe(400);
+      expect((await res.json() as { error: { message: string } }).error.message, model).toContain("model");
+    }
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("passes remoteControl through to the spawner, and omits it entirely by default", async () => {
+    const on = await seedTaskWithSessionNames(tmpDir, []);
+    await on.app.request(`/api/boards/test/tasks/${on.tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, remoteControl: true }),
+    });
+    expect((on.spawn.mock.calls[0]?.[0] as { remoteControl?: boolean }).remoteControl).toBe(true);
+
+    const off = await seedTaskWithSessionNames(tmpDir, []);
+    await off.app.request(`/api/boards/test/tasks/${off.tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+    });
+    // ABSENT, not `false` — exactOptionalPropertyTypes makes those different types.
+    expect(Object.hasOwn(off.spawn.mock.calls[0]?.[0] ?? {}, "remoteControl")).toBe(false);
+  });
+
+  // A.2: the cap is COUNTED, not inferred from letter exhaustion. A named spawn need not consume a
+  // letter, so "no free letter" stopped being the same question as "too many sessions". These 26
+  // links are ATTACHED-style names — no letter of `my-task-<a..z>` is taken, and it still caps.
+  it("409s with session_cap at 26 sessions whatever they are named", async () => {
+    const names = Array.from({ length: 26 }, (_, i) => `attached-${String(i)}`);
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, names);
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+    });
+    expect(res.status).toBe(409);
+    expect((await res.json() as { error: { code: string } }).error.code).toBe("session_cap");
+    expect(spawn).not.toHaveBeenCalled();
+  });
 });
 
 async function makeTwoBoards(app: ReturnType<typeof createApi>): Promise<string> {

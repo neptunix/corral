@@ -27,7 +27,7 @@ import { isLoopbackHost } from "./host-guard.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
 import { isSessionBound, resolveLinkIndex } from "./session-binding.ts";
-import { sanitizeSlug } from "./spawn.ts";
+import { composeSessionName, sanitizeSlug, SESSION_LETTERS } from "./spawn.ts";
 import type { SpawnOpts, SpawnResult } from "./spawn.ts";
 import { aggregateAccounts } from "./statusline.ts";
 import type { Storage } from "./storage.ts";
@@ -48,10 +48,11 @@ const LAST_ACTIVE_TTL_MS = 60_000;
 // How long a ?deferred=1 close waits after responding before killing the pane. Long enough for the
 // HTTP response to flush to the MCP client, short enough that the operator sees the pane die "now".
 const CLOSE_DEFER_MS = 150;
-// Spawn tab-name suffixes: a task's Nth spawned session gets tab `${slug}-<letter>` (a human-readable
-// label so a task's sessions are distinguishable). a–z is a soft ceiling; attached sessions don't
-// consume a letter and are unbounded. Revisit if a task ever needs more than 26 spawned sessions.
-const SPAWN_SUFFIXES = Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i));
+// The per-card session cap. COUNTED, not inferred from letter exhaustion: a named spawn does not
+// have to consume a letter, so "no free a–z suffix" stopped being the same question as "too many
+// sessions". This does now cap a card holding 26 ATTACHED sessions, which the letter check did not —
+// intended, and the only reading of "cap" that survives named spawns.
+const SPAWN_CAP = 26;
 
 export type SpawnFn = (opts: SpawnOpts) => Promise<SpawnResult>;
 
@@ -920,8 +921,24 @@ export function createApi(opts: {
       targetWorkspaceId: z.string().nullable().optional(),
       repo: z.string().nullable().optional(), // repo to root a NEW space at (config key); ignored when joining
       brief: z.string().min(1).optional(),    // initial prompt, delivered via file indirection
+      // Short slug for what THIS session does; composed with the card slug into the one string used
+      // as the herdr tab label, the card's link name and `claude --name`.
+      name: z.string().max(64).optional(),
+      // Shape-validated only. corral keeps NO list of valid models: Claude Code accepts any string
+      // and fails visibly at the API, the operator corrects it, and an allowlist would need a corral
+      // release per new alias. The brackets admit the `[1m]` context-window suffix; they are glob
+      // characters, which is why server/spawn.ts assembles the command through shell-quote's quote().
+      // NOTE the character class is `.[\]-`, not `.\[\]-`: an escaped `[` inside a class fails
+      // eslint's no-useless-escape, and the two patterns match the same language.
+      model: z.string().regex(/^[a-z0-9][a-z0-9.[\]-]{0,63}$/).optional(),
+      // Start with Remote Control connected. Default OFF: this connects the session to claude.ai, so
+      // it is an explicit per-spawn decision, never implied (spec A.1). Absent === off.
+      remoteControl: z.boolean().optional(),
     }).safeParse(body);
-    if (!parsed.success) return c.json({ error: { code: "validation", message: "env required" } }, 400);
+    if (!parsed.success) {
+      const field = parsed.error.issues[0]?.path.join(".") ?? "body";
+      return c.json({ error: { code: "validation", message: `invalid "${field}"` } }, 400);
+    }
 
     const targetEnv = opts.envs.find((e) => e.id === parsed.data.env);
     if (targetEnv === undefined) return c.json({ error: { code: "validation", message: "unknown env" } }, 400);
@@ -959,13 +976,20 @@ export function createApi(opts: {
       : null;
 
     const slug = sanitizeSlug(task.title);
-    // Pick the next free a–z suffix for this task's Nth spawned session — each is a distinct herdr tab
-    // `${slug}-<suffix>`. Only spawn-named links occupy these (attached sessions carry their own
-    // tab-label names), so a task can hold up to 26 spawned sessions plus any number of attached ones.
     const usedNames = new Set(task.sessions.map((s) => s.name));
-    const sessionSuffix = SPAWN_SUFFIXES.find((sfx) => !usedNames.has(`${slug}-${sfx}`));
-    if (sessionSuffix === undefined) {
-      return c.json({ error: { code: "session_cap", message: "task already has 26 spawned sessions (a–z) — attach or remove one first" } }, 409);
+    if (task.sessions.length >= SPAWN_CAP) {
+      return c.json({ error: { code: "session_cap", message: `task already has ${String(SPAWN_CAP)} sessions — attach or remove one first` } }, 409);
+    }
+    // Still picked, and still passed: SpawnOpts.sessionSuffix is the tab-label fallback for callers
+    // that supply no sessionName. Same letter list composeSessionName's final candidates use, so the
+    // chosen letter and the composed fallback name cannot disagree. The `?? "a"` is unreachable while
+    // a name is composed — with every letter taken, composeSessionName returns null and we 409 below.
+    const sessionSuffix = SESSION_LETTERS.find((sfx) => !usedNames.has(`${slug}-${sfx}`)) ?? "a";
+    // One string for tab label, link name and `claude --name`. The uniqueness test happens inside
+    // composeSessionName against the string it will actually return — see the invariant there.
+    const sessionName = composeSessionName(slug, parsed.data.name ?? "", (n) => !usedNames.has(n));
+    if (sessionName === null) {
+      return c.json({ error: { code: "session_cap", message: "no free session name left on this task — attach or remove one first" } }, 409);
     }
     // Brief delivery is local-only: the file is written on the corral host, and the `$(cat …)`
     // substitution runs in the pane's shell — on a remote box that path would not exist. Mirrors the
@@ -996,11 +1020,16 @@ export function createApi(opts: {
     });
     // Keep a handle to the spawn so a timeout can tear down whatever it eventually creates (below).
     const spawnPromise = opts.spawn({
-      env: targetEnv, taskSlug: slug, sessionSuffix,
+      env: targetEnv, taskSlug: slug, sessionSuffix, sessionName,
       cwd: task.sessions[0]?.cwdSnapshot ?? process.cwd(),
       repo: newSpaceRepo, assignedPaneIds,
       spawnCommand: targetEnv.spawnCommand,
       targetWorkspaceId, repoPath,
+      ...(parsed.data.model === undefined ? {} : { model: parsed.data.model }),
+      // Absent === off. Never `remoteControl: parsed.data.remoteControl ?? false` — under
+      // exactOptionalPropertyTypes an explicit `false` and an absent key are different types, and
+      // spawn.ts branches on `=== true`.
+      ...(parsed.data.remoteControl === true ? { remoteControl: true } : {}),
       ...(briefPath === undefined ? {} : { briefPath }),
     });
     // Unlink the brief once THIS spawn attempt is done — a brief's on-disk lifetime is one spawn, not
@@ -1022,7 +1051,7 @@ export function createApi(opts: {
         env: targetEnv.id, paneId: result.paneId,
         tabId: result.tabId, tabLabel: result.tabLabel,
         workspaceId: result.workspaceId, workspaceLabel: result.workspaceLabel,
-        name: `${slug}-${sessionSuffix}`, cwdSnapshot: result.cwdSnapshot,
+        name: sessionName, cwdSnapshot: result.cwdSnapshot,
         // Almost always null here — Claude hasn't registered on the fresh pane yet (it's absent from
         // `agent list` until then). Not a bug: the reconciler backfills it once the poller sees the id.
         sessionId: opts.poller.getSnapshot().sessions.find((s) => s.env === targetEnv.id && s.paneId === result.paneId)?.sessionId ?? null,
