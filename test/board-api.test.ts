@@ -1086,6 +1086,84 @@ describe("POST resume", () => {
     expect(body.error.code).toBe("validation");
     expect(called).toBe(false);
   });
+
+  it("recreates the tab under the link's stored name, and still sends no launch flags", async () => {
+    let seen: unknown;
+    const storage = createStorage(tmpDir);
+    const app = createApi({
+      poller, envs: ENVIRONMENTS, storage,
+      spawn: (o) => {
+        seen = o;
+        return Promise.resolve({ paneId: "w1:p9", tabId: "w1:t9", workspaceId: "w1", workspaceLabel: "c", tabLabel: "x-a", cwdSnapshot: "/c", idempotent: false });
+      },
+    });
+    await seedTaskWithLink(app, storage);
+    const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/resume", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect((seen as { sessionName?: string }).sessionName).toBe("x-a");
+    // The flags themselves are spawn.ts's job (test/spawn.test.ts pins that resume sends none); what
+    // the route owns is passing the NAME, so the recreated tab is not silently relabelled `<slug>-a`.
+    expect((seen as { model?: string }).model).toBeUndefined();
+  });
+
+  // link.name is `""` on legacy links (server/api.ts:118 heals it to the paneId for DISPLAY only —
+  // the stored value stays empty). Passing "" through would label the recreated tab with nothing.
+  // `link.name` is client-supplied on the attach / from-session routes (`z.string().default("")`), and
+  // the MCP bind path puts the session's own `/rename`d name there — so it is NOT a string this route
+  // composed. Sanitize, don't drop: the operator's intent survives, and a leading `-` never reaches
+  // `herdr tab create` as a flag. Only a name with nothing usable left falls back to `<slug>-a`.
+  it.each([
+    ["Fix the auth bug", "fix-the-auth-bug"],
+    ["My Session", "my-session"],
+    ["-rf", "rf"],
+    ["--dangerously-skip-permissions", "dangerously-skip-permissions"],
+    ["a b; rm -rf /", "a-b-rm-rf"],
+    ["my-task-a", "my-task-a"],                       // already valid → unchanged
+  ])("sanitizes a stored link name (%j → %j)", async (name, expected) => {
+    let seen: unknown;
+    const storage = createStorage(tmpDir);
+    const app = createApi({
+      poller, envs: ENVIRONMENTS, storage,
+      spawn: (o) => {
+        seen = o;
+        return Promise.resolve({ paneId: "w1:p9", tabId: "w1:t9", workspaceId: "w1", workspaceLabel: "c", tabLabel: "x-a", cwdSnapshot: "/c", idempotent: false });
+      },
+    });
+    await seedTaskWithLink(app, storage);
+    await storage.withBoard("t", (b) => {
+      if (b === null) return { board: null, result: undefined };
+      return {
+        board: { ...b, tasks: b.tasks.map((t) => ({ ...t, sessions: t.sessions.map((s) => ({ ...s, name })) })) },
+        result: undefined,
+      };
+    });
+    await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/resume", { method: "POST" });
+    expect((seen as { sessionName?: string }).sessionName).toBe(expected);
+  });
+
+  // Nothing usable left → omit entirely, so spawn.ts falls back to `<slug>-a` rather than labelling the
+  // tab with an empty string.
+  it.each(["", "***", "Отладка"])("omits a stored link name with nothing usable left (%j)", async (name) => {
+    let seen: unknown;
+    const storage = createStorage(tmpDir);
+    const app = createApi({
+      poller, envs: ENVIRONMENTS, storage,
+      spawn: (o) => {
+        seen = o;
+        return Promise.resolve({ paneId: "w1:p9", tabId: "w1:t9", workspaceId: "w1", workspaceLabel: "c", tabLabel: "x-a", cwdSnapshot: "/c", idempotent: false });
+      },
+    });
+    await seedTaskWithLink(app, storage);
+    await storage.withBoard("t", (b) => {
+      if (b === null) return { board: null, result: undefined };
+      return {
+        board: { ...b, tasks: b.tasks.map((t) => ({ ...t, sessions: t.sessions.map((s) => ({ ...s, name })) })) },
+        result: undefined,
+      };
+    });
+    await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/resume", { method: "POST" });
+    expect(Object.hasOwn(seen ?? {}, "sessionName")).toBe(false);
+  });
 });
 
 describe("POST resume — rebinds one link by ?sid and keeps the live sibling intact", () => {

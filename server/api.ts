@@ -27,7 +27,7 @@ import { isLoopbackHost } from "./host-guard.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
 import { isSessionBound, resolveLinkIndex } from "./session-binding.ts";
-import { composeSessionName, sanitizeSlug, SESSION_LETTERS } from "./spawn.ts";
+import { composeSessionName, NAME_MAX, sanitizeSlug, SESSION_LETTERS, slugify } from "./spawn.ts";
 import type { SpawnOpts, SpawnResult } from "./spawn.ts";
 import { aggregateAccounts } from "./statusline.ts";
 import type { Storage } from "./storage.ts";
@@ -867,6 +867,9 @@ export function createApi(opts: {
     // diverge from the session's real dir (e.g. an adopted session whose pane shell sat at $HOME),
     // and resuming from the wrong dir both lands Claude there AND fails to find the transcript.
     const resumeCwd = (await sessionCwd(env, link.sessionId)) ?? link.cwdSnapshot;
+    // ≤ NAME_MAX and matching the charset composeSessionName emits, so the resumed tab label obeys the
+    // same rule as a spawned one. "" means nothing usable survived → spawn.ts's `<slug>-a` fallback.
+    const resumeName = slugify(link.name, NAME_MAX);
     let result: SpawnResult;
     try {
       result = await opts.spawn({
@@ -875,6 +878,18 @@ export function createApi(opts: {
         spawnCommand: env.spawnCommand,
         targetWorkspaceId: link.workspaceId, repoPath,
         resumeSessionId: link.sessionId,
+        // Recreate the tab under the name the card already stores, not the `<slug>-a` default: without
+        // this every resumed tab is mislabelled. NOT sent as `--name` — spawn.ts omits both launch
+        // flags when resuming (the name lives in the transcript, the model with the session).
+        //
+        // SANITIZED, not trusted, and not dropped either. `link.name` is NOT a string this route
+        // composed: the attach and from-session routes take it as `z.string().default("")` straight
+        // from the client, and the MCP bind path puts the session's own Claude name there — so after
+        // a `/rename Fix the auth bug` the card holds exactly that, spaces and capitals included.
+        // `slugify` turns it into `fix-the-auth-bug`: the operator's intent survives, and a leading `-`
+        // cannot reach `herdr tab create` as a flag. Only a name with nothing usable left falls back
+        // to `<slug>-a`.
+        ...(resumeName === "" ? {} : { sessionName: resumeName }),
       });
     } catch (err) {
       return c.json({ error: { code: "resume_failed", message: err instanceof Error ? err.message : String(err) } }, 502);
