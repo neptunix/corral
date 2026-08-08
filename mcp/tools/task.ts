@@ -116,6 +116,20 @@ export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string>
   });
 }
 
+/**
+ * The two description literals that carry a hazard rather than merely describing a tool, exported so
+ * they can be pinned the way ORIENTATION is (test/mcp-orientation.test.ts). `update` is now the ONLY
+ * place a session is warned before a full-replacement description write — corral_whoami no longer
+ * puts the value in front of it — so a later pass trimming this string for tokens would silently
+ * remove the last guard. That is not hypothetical: this string was trimmed once already.
+ */
+export const TASK_TOOL_DESCRIPTIONS = {
+  read:
+    "Read the FULL description of the card THIS session is bound to — corral_whoami shows only a one-line preview of it. Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. Read-only.",
+  update:
+    "Update the card THIS session is bound to; cannot target another card. `status` is the coarse board state and must be one of the column ids corral_whoami reports. `description` is the running progress log and is a FULL-REPLACEMENT write — read the current value with corral_task_read first and edit around it, or you will silently delete what you never saw.",
+} as const;
+
 export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
   server.registerTool(
     "corral_task_bind",
@@ -135,8 +149,7 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
     "corral_task_read",
     {
       title: "Read this session's card in full",
-      description:
-        "Read the FULL description of the card THIS session is bound to — corral_whoami shows only a one-line preview of it. Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. Read-only.",
+      description: TASK_TOOL_DESCRIPTIONS.read,
       inputSchema: {},
       annotations: { readOnlyHint: true },
     },
@@ -147,8 +160,7 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
     "corral_task_update",
     {
       title: "Update this session's card",
-      description:
-        "Update the card THIS session is bound to; cannot target another card. `status` is the coarse board state and must be one of the column ids corral_whoami reports. `description` is the running progress log and is a FULL-REPLACEMENT write — read the current value with corral_task_read first and edit around it, or you will silently delete what you never saw.",
+      description: TASK_TOOL_DESCRIPTIONS.update,
       inputSchema: {
         title: z.string().optional(),
         description: z.string().optional().describe(

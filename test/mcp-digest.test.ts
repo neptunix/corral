@@ -11,6 +11,8 @@ const NEWLINE_VARIANTS: readonly [string, string][] = [
   ["\\n", "\n"],
   ["\\r\\n", "\r\n"],
   ["\\r", "\r"],
+  ["U+2028", "\u2028"],
+  ["U+2029", "\u2029"],
 ];
 
 function fakeStatuslineWithModel(model: string): StatuslineData {
@@ -704,11 +706,31 @@ describe("formatCardDetail", () => {
     expect(header.endsWith("…")).toBe(true);
   });
 
-  it("renders a description line of exactly the total cap without shaving the gutter off it", () => {
-    // Pins CARD_DETAIL_LINE_MAX's derivation (cap + prefix length + ellipsis). Were it set to the
-    // bare 40_000, this line would come back four characters short, silently.
-    const out = formatCardDetail({ ...task, description: "F".repeat(40_000) });
-    expect(out).toContain(`  | ${"F".repeat(40_000)}`);
+  it("leaves a legitimately long card header intact — the cap is LINE_MAX, not the title budget", () => {
+    // The lower side of the same boundary. Without this, a header bound set far too tight (say
+    // TASK_TITLE_MAX) satisfies the assertion above and the mistake ships.
+    const out = formatCardDetail({ ...task, status: "s".repeat(1500) });
+    const header = out.split("\n")[0] ?? "";
+    expect(header).toContain("s".repeat(1500));
+    expect(header.endsWith("…")).toBe(false);
+  });
+
+  it("spends the budget on the RENDERED block, so a newline-dense description cannot amplify past it", () => {
+    // The gutter is four characters per line and this formatter has no row cap, so charging only the
+    // raw text let 40k of newlines leave here as ~200k of rendered output — 5x the advertised cap,
+    // from a value any session on the board can set.
+    const out = formatCardDetail({ ...task, description: "\n".repeat(40_000) });
+    expect(out.length).toBeLessThan(41_000);
+    expect(out).toContain("TRUNCATED");
+    expect(out.toLowerCase()).toContain("full-replacement write");
+  });
+
+  it("renders a single line up to the full budget without shaving the gutter off it", () => {
+    // Pins that the budget covers the gutter rather than being applied beneath it: 39_996 raw chars
+    // plus the 4-char prefix is exactly the cap, so this must survive whole and unmarked.
+    const line = "F".repeat(40_000 - 4);
+    const out = formatCardDetail({ ...task, description: line });
+    expect(out).toContain(`  | ${line}`);
     expect(out).not.toContain("TRUNCATED");
   });
 
@@ -738,8 +760,9 @@ describe("formatCardDetail", () => {
   it("still bounds a pathological description at the total cap, marked TRUNCATED and warned", () => {
     const out = formatCardDetail({ ...task, description: "E".repeat(50_000) });
     expect(out).toContain("50000 chars, TRUNCATED");
-    expect(out).not.toContain("E".repeat(40_001));
-    expect(out).toContain("E".repeat(40_000));
+    // 39_996 survives, not 40_000: the 4-char gutter is charged against the same budget.
+    expect(out).toContain("E".repeat(40_000 - 4));
+    expect(out).not.toContain("E".repeat(40_000 - 3));
     expect(out.toLowerCase()).toContain("full-replacement write");
     expect(out.toLowerCase()).toContain("silently delete");
   });
@@ -763,5 +786,15 @@ describe("formatCardDetail", () => {
     const out = formatCardDetail({ ...task, title: "T".repeat(300) });
     expect(out).not.toContain("T".repeat(121));
     expect(out).toContain("…");
+  });
+
+  it.each(NEWLINE_VARIANTS)("splits on %s, so the line count and the rendered rows agree", (_label, sep) => {
+    // The counts are what corral_whoami's preview advertises as a staleness signal, so a terminator
+    // splitLines does not recognise is a wrong count, not just a cosmetic difference: "a<sep>b" would
+    // be reported as one line and rendered as one row carrying both halves.
+    const out = formatCardDetail({ ...task, description: `a${sep}b` });
+    expect(out).toContain("2 lines");
+    expect(out).toContain("  | a");
+    expect(out).toContain("  | b");
   });
 });

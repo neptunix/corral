@@ -24,14 +24,18 @@ export const TASK_TITLE_MAX = 120;
 //
 // formatWhoami is the call every session REPEATS — at startup, after a bind, to read its own ctx%,
 // to confirm a spawn landed — so there it is a PREVIEW: one bounded line, collapsed and truncated
-// like any other field, plus the line/char counts. The counts are the load-bearing half; they let a
-// session that already read the full text detect whether it changed without paying for it again.
+// like any other field, plus the line/char counts. The counts are a cheap staleness HEURISTIC, not a
+// guarantee: an edit that preserves both the length and the line count is invisible here, and the
+// write path has no optimistic concurrency to catch it. They are enough to skip a redundant re-read;
+// they are not enough to license a full-replacement write. corral_task_read is.
 const DESCRIPTION_PREVIEW_MAX = 120;
 // formatCardDetail (corral_task_read) is the opposite contract: give me the whole thing, because
 // corral_task_update's `description` is a FULL-REPLACEMENT write and a session that writes back what
 // it could not see destroys the difference. It is opt-in and takes no arguments — a session pays
-// this size only when it asks for it — which is what buys a budget this far above LINE_MAX. Head
-// truncation with an explicit marker, same as everywhere else in this module: a caller is either
+// this size only when it asks for it — which is what buys a budget this far above LINE_MAX. Spent on
+// the RENDERED block, gutter included, not on the raw value: this is the module's one formatter with
+// no row cap, so charging only the raw text would let a newline-dense description leave at ~5x the
+// cap. Head truncation with an explicit marker, same as everywhere else here: a caller is either
 // shown the whole value or told plainly that it isn't.
 const TASK_DESCRIPTION_FULL_MAX = 40_000;
 // Every line of a rendered description is prefixed with this literal, fixed string — never derived
@@ -60,11 +64,12 @@ const WHOAMI_COLUMNS_MAX = 20;
 // may set as long as 1000 characters, plus env/tab/pane/status/model/card columns, so anything near
 // 1000 would silently start cutting valid rows.
 const LINE_MAX = 2000;
-// formatCardDetail's own bound is TASK_DESCRIPTION_FULL_MAX, applied to the RAW description before
-// it is split and prefixed. Derived from it rather than chosen: emit must not then shave the prefix
-// and the truncation ellipsis back off a line that already fits that bound — which is exactly what
-// LINE_MAX would do to a long single-line description, silently, behind the caller's back.
-const CARD_DETAIL_LINE_MAX = TASK_DESCRIPTION_FULL_MAX + DESCRIPTION_LINE_PREFIX.length + 1;
+// renderFullDescription bounds its own RENDERED block against TASK_DESCRIPTION_FULL_MAX, so emit's
+// per-line pass over formatCardDetail exists for the terminator sweep, not to cut anything. This
+// ceiling is therefore just the largest line that function can hand back — the whole budget spent on
+// one line, plus the ellipsis `truncate` appends when it cuts. Anything smaller would silently shave
+// a line the budget had already accepted.
+const CARD_DETAIL_LINE_MAX = TASK_DESCRIPTION_FULL_MAX + 1;
 
 export function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max)}…`;
@@ -272,9 +277,10 @@ function lineCount(raw: string): string {
  * ordinary tabular field here — collapsed and truncated like recap or cwd — so the row-fabrication
  * defence is `emit`'s sweep rather than a prefixed block; there is no block to protect.
  *
- * The counts are not decoration. They are what lets a session that already called corral_task_read
- * tell whether the card changed under it without spending a second full read, and they are what
- * makes it unambiguous that the quoted text is a fragment rather than the value.
+ * The counts are not decoration: they make it unambiguous that the quoted text is a fragment rather
+ * than the value, and they let a session skip a redundant re-read. They do NOT prove the card is
+ * unchanged — an edit that preserves both length and line count is invisible here. Anything about to
+ * do a full-replacement write calls corral_task_read; the counts are not a substitute for it.
  */
 function describePreview(raw: string): string {
   if (raw === "") return "description: (empty)";
@@ -295,10 +301,26 @@ function describePreview(raw: string): string {
  */
 function renderFullDescription(raw: string): string[] {
   if (raw === "") return ["description: (empty)"];
-  // Bound the RAW text once, before splitting. A per-line budget is exactly what this formatter
-  // exists NOT to apply, so the total cap is the only cut possible here.
-  const kept = truncate(raw, TASK_DESCRIPTION_FULL_MAX);
-  const truncated = kept !== raw;
+  // The budget is spent on the RENDERED block, not on the raw value. Bounding the raw text and then
+  // adding the gutter would let a newline-dense description leave here at ~5x the cap: 40 000
+  // newlines is 40 000 raw chars but 40 001 lines, each costing four characters of prefix plus a
+  // joining newline. `description` is an unbounded z.string() any session on the board can set, so
+  // that is a live shape, not a hypothetical — and this is the one formatter with no row cap.
+  const all = splitLines(raw);
+  const shown: string[] = [];
+  let budget = TASK_DESCRIPTION_FULL_MAX;
+  let truncated = false;
+  for (const line of all) {
+    if (budget <= 0) break;
+    // Each split segment carries no terminator of its own, so `emit`'s sweep is a no-op on it —
+    // splitting first is what preserves the structure that sweep would otherwise flatten.
+    const full = `${DESCRIPTION_LINE_PREFIX}${line}`;
+    const kept = truncate(full, budget);
+    if (kept !== full) truncated = true;
+    shown.push(kept);
+    budget -= kept.length + 1; // +1: the newline `emit` will join with, charged to the same budget.
+  }
+  if (shown.length < all.length) truncated = true;
   // The prefix is stated to the CONSUMER, not just to maintainers in the comment above. This reply
   // is the only full read a session has, and corral_task_update replaces the field wholesale — so a
   // session that copies back what it was shown, gutter and all, silently grows the stored value by
@@ -306,9 +328,7 @@ function renderFullDescription(raw: string): string[] {
   const header = `description (${lineCount(raw)}, ${String(raw.length)} chars${
     truncated ? ", TRUNCATED" : ""
   }; each line below carries a leading "${DESCRIPTION_LINE_PREFIX}" added by this tool — strip it before writing back):`;
-  // Each split segment already carries no terminator of its own, so `emit`'s sweep is a no-op on
-  // them — splitting first is what preserves the structure that sweep would otherwise flatten.
-  const out = [header, ...splitLines(kept).map((line) => `${DESCRIPTION_LINE_PREFIX}${line}`)];
+  const out = [header, ...shown];
   if (truncated) {
     out.push(
       "WARNING: the description block above is truncated — it is NOT the full stored value. corral_task_update's description is a full-replacement write: doing that write from this partial view will silently delete the content you cannot see here.",

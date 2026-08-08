@@ -6,7 +6,7 @@ import { CorralError } from "../mcp/client.ts";
 import { createIdentity } from "../mcp/identity.ts";
 import { fleetHandler } from "../mcp/tools/fleet.ts";
 import { whoamiHandler } from "../mcp/tools/self.ts";
-import { readHandler } from "../mcp/tools/task.ts";
+import { readHandler, TASK_TOOL_DESCRIPTIONS } from "../mcp/tools/task.ts";
 
 const resolved: WhoamiResponse = {
   resolved: true,
@@ -53,6 +53,21 @@ describe("whoamiHandler", () => {
   it("reports an unreachable corral as text", async () => {
     const client = stub({ whoami: async () => { throw new CorralError("unreachable", "corral is not reachable"); } });
     expect(await whoamiHandler(createIdentity(client, ctx))).toContain("not reachable");
+  });
+});
+
+// Pinned the way ORIENTATION is (test/mcp-orientation.test.ts): with corral_whoami no longer putting
+// the description in front of a session, corral_task_update's own description is the LAST warning
+// before a full-replacement write. Nothing else fails if a later token trim removes the pointer.
+describe("task tool descriptions", () => {
+  it("warns about the full-replacement write and names the read tool", () => {
+    expect(TASK_TOOL_DESCRIPTIONS.update).toContain("FULL-REPLACEMENT");
+    expect(TASK_TOOL_DESCRIPTIONS.update).toContain("corral_task_read");
+  });
+
+  it("tells corral_task_read's caller that whoami only shows a preview", () => {
+    expect(TASK_TOOL_DESCRIPTIONS.read).toContain("corral_whoami");
+    expect(TASK_TOOL_DESCRIPTIONS.read.toLowerCase()).toContain("preview");
   });
 });
 
