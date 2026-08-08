@@ -111,13 +111,34 @@ describe("createIdentity", () => {
     expect(calls).toBe(2);
   });
 
-  it("returns the card coordinates when bound", async () => {
+  it("returns the whole card when bound, not just its coordinates", async () => {
+    // The full card, so corral_task_update reads `columns` and corral_task_read reads `description`
+    // off this same forced read rather than issuing a second one.
     const id = createIdentity(client(resolvedBody), ctx);
-    await expect(id.requireCard()).resolves.toEqual({ boardId: "board", taskId: "t_abcdefg" });
+    await expect(id.requireCard()).resolves.toEqual(resolvedBody.task);
   });
 
   it("tells the caller to bind when unbound", async () => {
     const id = createIdentity(client({ ...resolvedBody, task: null }), ctx);
     await expect(id.requireCard()).rejects.toThrow(/corral_task_bind/);
+  });
+
+  it("always re-reads, so a bind made after the session's first whoami is visible", async () => {
+    // The `load(true)` in requireCard is an invariant no test pinned: every other requireCard test
+    // starts from an unprimed cache, so the first fetch happens with or without the force. Drop the
+    // force and this is what breaks — corral_task_read and corral_task_update would refuse a session
+    // that bound its card after calling corral_whoami while still unbound.
+    let calls = 0;
+    const stub: CorralClient = {
+      ...client(resolvedBody),
+      whoami: async () => {
+        calls += 1;
+        return calls === 1 ? { ...resolvedBody, task: null } : resolvedBody;
+      },
+    };
+    const id = createIdentity(stub, ctx);
+    await id.load(); // primes the cache while still unbound
+    await expect(id.requireCard()).resolves.toEqual(resolvedBody.task);
+    expect(calls).toBe(2);
   });
 });

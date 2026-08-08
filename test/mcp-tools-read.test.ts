@@ -6,6 +6,7 @@ import { CorralError } from "../mcp/client.ts";
 import { createIdentity } from "../mcp/identity.ts";
 import { fleetHandler } from "../mcp/tools/fleet.ts";
 import { whoamiHandler } from "../mcp/tools/self.ts";
+import { readHandler, TASK_TOOL_DESCRIPTIONS } from "../mcp/tools/task.ts";
 
 const resolved: WhoamiResponse = {
   resolved: true,
@@ -52,6 +53,55 @@ describe("whoamiHandler", () => {
   it("reports an unreachable corral as text", async () => {
     const client = stub({ whoami: async () => { throw new CorralError("unreachable", "corral is not reachable"); } });
     expect(await whoamiHandler(createIdentity(client, ctx))).toContain("not reachable");
+  });
+});
+
+// Pinned the way ORIENTATION is (test/mcp-orientation.test.ts): with corral_whoami no longer putting
+// the description in front of a session, corral_task_update's own description is the LAST warning
+// before a full-replacement write. Nothing else fails if a later token trim removes the pointer.
+describe("task tool descriptions", () => {
+  it("warns about the full-replacement write and names the read tool", () => {
+    expect(TASK_TOOL_DESCRIPTIONS.update).toContain("FULL-REPLACEMENT");
+    expect(TASK_TOOL_DESCRIPTIONS.update).toContain("corral_task_read");
+  });
+
+  it("tells corral_task_read's caller that whoami only shows a preview", () => {
+    expect(TASK_TOOL_DESCRIPTIONS.read).toContain("corral_whoami");
+    expect(TASK_TOOL_DESCRIPTIONS.read.toLowerCase()).toContain("preview");
+  });
+});
+
+describe("readHandler", () => {
+  // A long log: this is exactly the shape corral_whoami now refuses to inline and corral_task_read
+  // exists to return whole.
+  const description = Array.from({ length: 200 }, (_, i) => `entry ${String(i)}`).join("\n");
+  const boundTask = {
+    boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
+    description, status: "doing", priority: null,
+    columns: [{ id: "todo", label: "Todo" }, { id: "doing", label: "Doing" }],
+    sessions: [],
+  };
+
+  it("returns the bound card's full description, past whoami's preview budget", async () => {
+    const client = stub({ whoami: async () => ({ ...resolved, task: boundTask }) });
+    const out = await readHandler({ client, identity: createIdentity(client, ctx) });
+    expect(out).toContain("card: board/t_abcdefg");
+    expect(out).toContain("  | entry 0");
+    expect(out).toContain("  | entry 199");
+    expect(out).not.toContain("TRUNCATED");
+    // The preview line and its pointer belong to whoami — this reply is the value itself.
+    expect(out).not.toContain("PREVIEW");
+  });
+
+  it("refuses an unbound session with the standard bind instruction", async () => {
+    const client = stub({});  // the shared fixture is unbound
+    const out = await readHandler({ client, identity: createIdentity(client, ctx) });
+    expect(out).toContain("corral_task_bind");
+  });
+
+  it("reports an unreachable corral as text", async () => {
+    const client = stub({ whoami: async () => { throw new CorralError("unreachable", "corral is not reachable"); } });
+    expect(await readHandler({ client, identity: createIdentity(client, ctx) })).toContain("not reachable");
   });
 });
 

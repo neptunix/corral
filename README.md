@@ -408,11 +408,12 @@ if you run corral on a non-default port, either export `HERDR_DASH_PORT` where C
 it at registration with `--env CORRAL_URL=http://127.0.0.1:<port>` — otherwise every tool reports
 `unreachable` against port 8787 while the server is running perfectly well somewhere else.
 
-The six tools:
+The seven tools:
 
 - `corral_whoami` — this session's pane/tab/workspace, Claude session id, model/context/cost, and its bound task card; call it first.
 - `corral_fleet` — one bounded line per session across every environment, for cross-session triage.
 - `corral_task_bind` — link this session to an existing task card (no card creation).
+- `corral_task_read` — the bound card's full description. `corral_whoami` renders it as a one-line preview, because that call is repeated many times a session and a long progress log would be re-inlined on every one; this is the opt-in full read, and the one to call before rewriting the description.
 - `corral_task_update` — update the bound card's title, description, status, or priority.
 - `corral_spawn` — start a new session on this session's card, with a brief as its first message.
 - `corral_session_close` — stop this session or one on the same card; suspend, not destroy.
@@ -427,8 +428,8 @@ caller's own workspace** (a new tab beside it); a cross-environment spawn **root
 at that environment's configured repo path instead. Phase 1 has no path to write into another
 *existing* session's pane — the spawn brief is the only agent-authored text that reaches a pane at
 all, and that pane is always brand-new. `corral_spawn` and `corral_session_close` carry MCP's
-`destructiveHint` annotation (and say so in their descriptions); `corral_whoami` and `corral_fleet`
-carry `readOnlyHint`. Those are hints for the harness, not enforcement — nothing in the server
+`destructiveHint` annotation (and say so in their descriptions); `corral_whoami`, `corral_fleet` and
+`corral_task_read` carry `readOnlyHint`. Those are hints for the harness, not enforcement — nothing in the server
 requires confirmation. The actual control is the operator's Claude Code permission configuration:
 simply don't allowlist the two destructive tools, same as any other destructive tool call.
 

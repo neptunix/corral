@@ -1,6 +1,6 @@
 import type { CorralClient } from "./client.ts";
 import { CorralError } from "./client.ts";
-import type { WhoamiResolved } from "../shared/whoami-schema.ts";
+import type { WhoamiResolved, WhoamiTask } from "../shared/whoami-schema.ts";
 
 export interface HerdrContext {
   readonly paneId: string;
@@ -33,7 +33,13 @@ export function readHerdrEnv(env: NodeJS.ProcessEnv, cwd: string): HerdrContext 
 
 export interface Identity {
   load(force?: boolean): Promise<WhoamiResolved>;
-  requireCard(): Promise<{ readonly boardId: string; readonly taskId: string }>;
+  /**
+   * The bound card, or the standard "not bound" refusal. Returns the WHOLE card rather than just
+   * its ids: `WhoamiTask` already carries `boardId`/`taskId`, so every caller that only wanted
+   * those is unaffected, while a caller that also needs `columns` (corral_task_update) or
+   * `description` (corral_task_read) gets them from the same forced read instead of a second one.
+   */
+  requireCard(): Promise<WhoamiTask>;
 }
 
 export function createIdentity(client: CorralClient, ctx: HerdrContext): Identity {
@@ -58,7 +64,7 @@ export function createIdentity(client: CorralClient, ctx: HerdrContext): Identit
           "this session is not bound to a task — call corral_task_bind first (with no arguments to list open cards)",
         );
       }
-      return { boardId: me.task.boardId, taskId: me.task.taskId };
+      return me.task;
     },
   };
 }
