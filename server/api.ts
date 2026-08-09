@@ -21,7 +21,7 @@ import {
   UPLOAD_ROOT, WS_ALLOWED_ORIGINS,
 } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
-import { briefByteLength, cleanupBrief, composeBrief, writeBrief } from "./brief.ts";
+import { briefByteLength, cleanupBrief, composeBrief, START_COMMAND_FALLBACK, writeBrief } from "./brief.ts";
 import { syncClaudeThemeBase, ThemeModeSchema } from "./claude-theme.ts";
 import { closePane, listWorkspaces, paneIdentity, readPane, type ReadFn } from "./herdr.ts";
 import { isLoopbackHost } from "./host-guard.ts";
@@ -975,6 +975,13 @@ export function createApi(opts: {
       // 400, and a configured key is never anywhere near this long.
       repo: z.string().max(200).nullable().optional(), // config key: roots a NEW space, or names the one to resolve
       brief: z.string().min(1).optional(),    // initial prompt, delivered via file indirection
+      // The session's first message, delivered VERBATIM — no preamble — so a leading slash command is
+      // at position 0 of the message, which is the only position Claude Code expands it from (§2.4).
+      // Mutually exclusive with `brief`: MCP and the UI share this route, and this is what tells them
+      // apart, so an MCP caller cannot accidentally drop the preamble. The leading-character rule is
+      // the same flag hazard the `model` field guards against — this text becomes one positional argv
+      // word for `claude`, and quoting protects it from the shell, not from the argument parser.
+      startCommand: z.string().trim().min(1).max(2000).regex(/^[/A-Za-z0-9]/).optional(),
       // Short slug for what THIS session does; composed with the card slug into the one string used
       // as the herdr tab label, the card's link name and `claude --name`.
       name: z.string().max(64).optional(),
@@ -1065,27 +1072,33 @@ export function createApi(opts: {
     if (sessionName === null) {
       return c.json({ error: { code: "session_cap", message: "no free session name left on this task — attach or remove one first" } }, 409);
     }
-    // Brief delivery is local-only: the file is written on the corral host, and the `$(cat …)`
-    // substitution runs in the pane's shell — on a remote box that path would not exist. Mirrors the
-    // uploads restriction. Both guards run BEFORE any spawn work so a refusal creates nothing.
+    // Brief/start-command delivery is local-only: the file is written on the corral host, and the
+    // `$(cat …)` substitution runs in the pane's shell — on a remote box that path would not exist.
+    // Mirrors the uploads restriction. Order is schema → mutual exclusion → env kind → byte cap →
+    // write, matching how the route already sequences its guards, so a refusal creates no file.
     const brief = parsed.data.brief;
+    const startCommand = parsed.data.startCommand;
+    if (brief !== undefined && startCommand !== undefined) {
+      return c.json({ error: { code: "validation", message: "send either brief or startCommand, not both" } }, 400);
+    }
+    const firstMessage = brief !== undefined ? composeBrief(brief) : startCommand;
+    const messageKind = brief !== undefined ? "brief" : "startCommand";
     let briefPath: string | undefined;
-    if (brief !== undefined) {
+    if (firstMessage !== undefined) {
       if (targetEnv.kind !== "local") {
         return c.json({ error: { code: "remote_brief_unsupported", message: "a spawn brief is available for local environments only" } }, 400);
       }
-      const composed = composeBrief(brief);
-      if (briefByteLength(composed) > BRIEF_MAX_BYTES) {
+      if (briefByteLength(firstMessage) > BRIEF_MAX_BYTES) {
         return c.json({ error: { code: "too_large", message: `brief exceeds ${String(BRIEF_MAX_BYTES)} bytes` } }, 413);
       }
       try {
-        briefPath = await writeBrief(briefRoot, composed);
+        briefPath = await writeBrief(briefRoot, firstMessage);
       } catch (err) {
         return c.json({ error: { code: "brief_write_failed", message: err instanceof Error ? err.message : String(err) } }, 500);
       }
-      // Audit line, mirroring the upload route (server/api.ts ~408): coordinates and size only —
-      // never contents. A brief is agent-authored text entering a fresh session; leave a trace.
-      console.warn(`[brief] board=${bid} task=${tid} env=${targetEnv.id} bytes=${String(briefByteLength(composed))} path=${briefPath}`);
+      // Audit: coordinates and size only, never contents. `kind` matters — a spawn that hands a session
+      // an AUTO-EXECUTING command must not read the same in the log as a preamble-wrapped brief.
+      console.warn(`[brief] kind=${messageKind} board=${bid} task=${tid} env=${targetEnv.id} bytes=${String(briefByteLength(firstMessage))} path=${briefPath}`);
     }
     const spawnTimerHandle = { id: setTimeout(() => { /* replaced below */ }, 0) };
     clearTimeout(spawnTimerHandle.id);
@@ -1106,6 +1119,7 @@ export function createApi(opts: {
       // spawn.ts branches on `=== true`.
       ...(parsed.data.remoteControl === true ? { remoteControl: true } : {}),
       ...(briefPath === undefined ? {} : { briefPath }),
+      ...(startCommand === undefined ? {} : { briefFallback: START_COMMAND_FALLBACK }),
     });
     // Unlink the brief once THIS spawn attempt is done — a brief's on-disk lifetime is one spawn, not
     // one server run. Chained off `spawnPromise` itself (not the race below): a timed-out spawn keeps

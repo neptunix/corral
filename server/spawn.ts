@@ -91,6 +91,12 @@ export interface SpawnOpts {
   // only this server-generated, shell-quoted path does. Local environments only (the route enforces
   // that): the file lives on the corral host, and `cat` would otherwise run on a remote box.
   readonly briefPath?: string;
+  /** What the pane shows when the shell cannot read the brief file. Defaults to BRIEF_FALLBACK, whose
+   *  wording is about a LOST HANDOFF — wrong for a start command, where nothing was handed off and no
+   *  prior session authored the text. Kept as an option rather than a second branch in the command
+   *  builder so the fallback stays a single interpolation point. Apostrophe-free: it is embedded in a
+   *  single-quoted shell word. */
+  readonly briefFallback?: string;
   /**
    * THREE-state, and the three states are not interchangeable:
    *   - a workspace id → join that workspace;
@@ -178,7 +184,7 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
       // The server-side unlink (server/api.ts) remains only as a backstop for a pane that never
       // runs this command at all. ADR-0002 §5 decided this shape deliberately — do NOT move the `rm`
       // out of the substitution (spec A.7 is withdrawn).
-      ? `${launch} "$(cat ${quote([opts.briefPath])} || printf '%s' ${quote([BRIEF_FALLBACK])}; rm -f ${quote([opts.briefPath])})"`
+      ? `${launch} "$(cat ${quote([opts.briefPath])} || printf '%s' ${quote([opts.briefFallback ?? BRIEF_FALLBACK])}; rm -f ${quote([opts.briefPath])})"`
       : launch;
   const repoPath = opts.repoPath ?? null;
 

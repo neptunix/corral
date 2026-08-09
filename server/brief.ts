@@ -20,6 +20,11 @@ export const BRIEF_PREAMBLE =
 export const BRIEF_FALLBACK =
   "corral could not deliver your brief (the handoff file was unreadable). Call corral_whoami to read your card, then tell the operator the brief was lost.";
 
+/** The start-command counterpart of BRIEF_FALLBACK. Nothing was handed off here and no prior session
+ *  authored this text, so the handoff wording would be actively misleading. Apostrophe-free. */
+export const START_COMMAND_FALLBACK =
+  "corral could not deliver your start command (the file was unreadable). Call corral_whoami to read your card, then tell the operator the start command was lost.";
+
 /** Preamble + blank line + the brief verbatim. */
 export function composeBrief(brief: string): string {
   return `${BRIEF_PREAMBLE}\n\n${brief}`;
