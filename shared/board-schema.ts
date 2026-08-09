@@ -151,6 +151,19 @@ export function closedColumnIds(columns: readonly Column[]): Set<string> {
   return new Set(columns.filter((c) => c.type === "closed").map((c) => c.id));
 }
 
+/**
+ * Where a task lands when nothing else decides: the first column that is not `closed`.
+ *
+ * INVARIANT — a task's landing status is always `defaultColumnId` of its board. Position 0 is NOT
+ * the default: a `closed` column renders as a collapsed strip, so a task landing there is invisible,
+ * and one dropdown change in Board settings puts a closed column at position 0. Falls back to
+ * `columns[0]` when every column is closed (a board with nowhere open to land — the operator's
+ * choice, and there is no better answer), and to `undefined` on an empty board.
+ */
+export function defaultColumnId(columns: readonly Column[]): string | undefined {
+  return (columns.find((c) => c.type !== "closed") ?? columns[0])?.id;
+}
+
 export function nowSecs(): number {
   return Math.floor(Date.now() / 1000);
 }
