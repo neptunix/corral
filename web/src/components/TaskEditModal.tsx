@@ -2,28 +2,36 @@ import type { EnrichedTask, Board, Priority, SessionLink } from "@shared/board-s
 import type { JSX } from "react";
 import { useEffect, useState } from "react";
 
+import type { SpawnRequestBody } from "../lib/api";
 import { api } from "../lib/api";
+
+// SpawnEnvOption declared here for now — Task 7 moves it to SpawnPanel.tsx.
+export interface SpawnEnvOption {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: "local" | "remote" | null; // null = unknown → treated as NOT local
+}
 
 interface Props {
   readonly task: EnrichedTask;
   readonly board: Board;
-  readonly envIds: readonly string[];
+  readonly envs: readonly SpawnEnvOption[];
   readonly onSave: (patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority">>) => void;
   readonly onDelete: () => void;
-  readonly onSpawn: (args: { env: string; targetWorkspaceId: string | null; repo: string | null; model: string | null; remoteControl: boolean }) => Promise<SessionLink>;
+  readonly onSpawn: (body: SpawnRequestBody) => Promise<SessionLink>;
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly boards: readonly Board[];
   readonly onMove: (toBoardId: string) => Promise<void>;
   readonly onClose: () => void;
 }
 
-export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, onOpenSession, boards, onMove, onClose }: Props): JSX.Element {
+export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, onOpenSession, boards, onMove, onClose }: Props): JSX.Element {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [priority, setPriority] = useState<Priority>(task.priority);
   const [status, setStatus] = useState(task.status);
   const [spawning, setSpawning] = useState(false);
-  const [spawnEnv, setSpawnEnv] = useState(envIds[0] ?? "");
+  const [spawnEnv, setSpawnEnv] = useState(envs[0]?.id ?? "");
   // "" is the picker's "default" — no model field is sent, so the session inherits the last-used one.
   const [spawnModel, setSpawnModel] = useState("");
   // Unchecked by default, and deliberately NOT persisted between spawns: ticking it connects the new
@@ -88,9 +96,11 @@ export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, 
       const targetWorkspaceId = isNew ? null : selectedTarget;
       const repoArg = isNew ? selectedTarget.slice(4) : null;
       const link = await onSpawn({
-        env: spawnEnv, targetWorkspaceId, repo: repoArg,
-        model: spawnModel === "" ? null : spawnModel,
-        remoteControl: spawnRemoteControl,
+        env: spawnEnv,
+        targetWorkspaceId,
+        repo: repoArg,
+        ...(spawnModel === "" ? {} : { model: spawnModel }),
+        ...(spawnRemoteControl ? { remoteControl: true } : {}),
       });
       onClose();
       onOpenSession(link.env, link.paneId, true, task.title); // auto-attach; retry until claude registers as an agent
@@ -156,7 +166,7 @@ export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, 
               <div className="flex gap-2 mb-1">
                 <select className="w-32 shrink-0 bg-background border border-border rounded px-2 py-1.5 text-foreground text-sm"
                   value={spawnEnv} onChange={(e) => { setSpawnEnv(e.target.value); }} title="Environment">
-                  {envIds.map((id) => <option key={id} value={id}>{id}</option>)}
+                  {envs.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
                 </select>
                 <select className="w-24 shrink-0 bg-background border border-border rounded px-2 py-1.5 text-foreground text-sm"
                   value={spawnModel} onChange={(e) => { setSpawnModel(e.target.value); }} title="Model">

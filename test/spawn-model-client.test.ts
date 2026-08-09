@@ -25,7 +25,7 @@ function captureFetch(): { bodies: unknown[]; urls: string[]; methods: (string |
 describe("api.tasks.spawn", () => {
   it("POSTs the chosen model to the task's spawn route", async () => {
     const { bodies, urls, methods } = captureFetch();
-    await api.tasks.spawn("b", "t", "work-local", null, "corral", "fable", false);
+    await api.tasks.spawn("b", "t", { env: "work-local", targetWorkspaceId: null, repo: "corral", model: "fable" });
     expect(urls[0]).toBe("/api/boards/b/tasks/t/spawn");
     expect(methods[0]).toBe("POST");
     expect(bodies[0]).toEqual({ env: "work-local", targetWorkspaceId: null, repo: "corral", model: "fable" });
@@ -39,19 +39,19 @@ describe("api.tasks.spawn", () => {
   // remoteControl key at all.
   it("omits the model field entirely for the default choice", async () => {
     const { bodies } = captureFetch();
-    await api.tasks.spawn("b", "t", "work-local", null, "corral", null, false);
+    await api.tasks.spawn("b", "t", { env: "work-local", targetWorkspaceId: null, repo: "corral" });
     expect(bodies[0]).toEqual({ env: "work-local", targetWorkspaceId: null, repo: "corral" });
   });
 
   it("sends remoteControl only when the box is ticked", async () => {
     const { bodies } = captureFetch();
-    await api.tasks.spawn("b", "t", "work-local", null, "corral", null, true);
+    await api.tasks.spawn("b", "t", { env: "work-local", targetWorkspaceId: null, repo: "corral", remoteControl: true });
     expect(bodies[0]).toEqual({ env: "work-local", targetWorkspaceId: null, repo: "corral", remoteControl: true });
   });
 
   it("sends both together", async () => {
     const { bodies } = captureFetch();
-    await api.tasks.spawn("b", "t", "work-local", "w1", null, "opus", true);
+    await api.tasks.spawn("b", "t", { env: "work-local", targetWorkspaceId: "w1", repo: null, model: "opus", remoteControl: true });
     expect(bodies[0]).toEqual({ env: "work-local", targetWorkspaceId: "w1", repo: null, model: "opus", remoteControl: true });
   });
 });

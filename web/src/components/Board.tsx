@@ -255,11 +255,11 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
         <TaskEditModal
           task={editingTask}
           board={board}
-          envIds={Object.keys(envs)}
+          envs={Object.entries(envs).map(([id, e]) => ({ id, label: e.label ?? id, kind: e.kind ?? null }))}
           onSave={handleSave}
           onDelete={handleDelete}
-          onSpawn={async ({ env, targetWorkspaceId, repo, model, remoteControl }) => {
-            const link = await api.tasks.spawn(board.id, editingTask.id, env, targetWorkspaceId, repo, model, remoteControl);
+          onSpawn={async (body) => {
+            const link = await api.tasks.spawn(board.id, editingTask.id, body);
             onBoardStateChange();
             return link;
           }}
