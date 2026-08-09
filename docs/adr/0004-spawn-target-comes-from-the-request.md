@@ -40,15 +40,25 @@ workspaces, hence several repositories. A card therefore cannot own a repository
 
 3. **`repo` resolves to the workspace of that repository.** The configured-path lookup
    runs first, on both branches; only then is a workspace with that label sought
-   (case-insensitively) and joined, or created if absent. The tab's directory always
-   comes from the configured path, never from the neighbouring panes. The name selects
-   the workspace; the configuration selects the directory. A workspace renamed by hand
-   can group a session oddly — it cannot place it anywhere but the repository root.
+   (case-insensitively) and joined, or created if absent. **When `repo` is given**, the
+   tab's directory comes from the configured path, never from the neighbouring panes;
+   when it is omitted the directory still comes from the neighbours, which is what makes
+   "continue where I am" keep a worktree visible. The name selects the workspace; the
+   configuration selects the directory. A workspace renamed by hand can group a session
+   oddly — it cannot place it anywhere but the repository root.
 
-4. **A missing target is refused, never inferred, and the refusal lists the valid
-   names** for that environment. The refusal is returned by the MCP tool rather than
-   thrown by the server, and is rendered by the digest module beside the existing
-   column-id refusal.
+   Because this redefines what `targetWorkspaceId: null` plus `repo` means, it changes
+   the browser too: the picker's "new space from this repo" option joins an existing
+   space of that name rather than creating a second one. That follows from one workspace
+   per repository, and is accepted rather than worked around.
+
+4. **A missing or unknown target is refused, never inferred, and the refusal lists the
+   valid names** for that environment. Both cases refuse: no target at all, and a name
+   that is not configured. The refusal reaches the caller as a returned value from the
+   MCP tool rather than a thrown server error — including the unknown-name case, which
+   the route detects and the tool re-renders — and is built by the digest module beside
+   the existing column-id refusal. The names are read, only on that path, from the
+   spawn-target route the browser's picker already uses.
 
 5. **`Task.repo` is removed** from the schema, the three request schemas, their writes,
    and the resume path that used it as a workspace-label fallback.
@@ -70,7 +80,10 @@ must produce a usable answer; making it carry the valid names means nothing is p
 until something goes wrong. Returning it from the tool rather than throwing it matters
 concretely: thrown errors are collapsed and truncated on the way out, so an appended
 list is exactly what gets cut, and a server-side refusal would also surface in the
-browser, where a message naming an agent-only concept is noise.
+browser, where a message naming an agent-only concept is noise. This is why the
+unknown-name case cannot simply be left to the route: the route is where the name is
+resolved, but its error would be the truncated kind, so the tool has to catch it and
+render the listing itself.
 
 Point 5 follows from the model rather than from disuse. "Nobody writes it" would justify
 deleting the field; "a card spans several repositories" is why it should never have
@@ -92,9 +105,12 @@ per-repository convention this record is built on.
 
 **A catalog tool listing every environment's repositories.** An extra tool costs its
 description in every session's context, including sessions that never spawn, and needs a
-server surface, a rule for environments that cannot be spawned into, and documentation
-updates. It would sit *on top of* the refusal, which is required anyway. Worth revisiting
-only if agents are seen choosing among projects rather than naming one they already know.
+rule for environments that cannot be spawned into, plus documentation updates. It would
+sit *on top of* the refusal, which is required anyway. The server surface is *not* part
+of the cost — the route the browser's picker uses already exposes the names, and the
+refusal path reads them from it. What is being declined is the standing per-session
+description, not the endpoint. Worth revisiting only if agents are seen choosing among
+projects rather than naming one they already know.
 
 **Listing repository names in `corral_whoami`.** The catalog is a cross-product of
 environments and repositories that grows with every machine, charged to the one call
