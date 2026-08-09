@@ -108,7 +108,7 @@ export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, 
 
         <label className="block text-xs text-muted-foreground mb-1">Board / Project</label>
         <div className="flex gap-2 mb-3">
-          <select className="flex-1 bg-background border border-border rounded px-3 py-2 text-foreground text-sm"
+          <select className="flex-1 bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
             value={targetBoardId} onChange={(e) => { setTargetBoardId(e.target.value); }}>
             {boards.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
           </select>
