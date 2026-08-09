@@ -1,9 +1,10 @@
-import type { SessionLink } from "@shared/board-schema";
+import type { SessionLink, SpawnPreset } from "@shared/board-schema";
 import type { JSX } from "react";
 import { useEffect, useState } from "react";
 
 import type { SpawnRequestBody } from "../lib/api";
 import { api } from "../lib/api";
+import { buildSpawnRequest } from "../lib/spawn-request";
 
 export interface SpawnEnvOption {
   readonly id: string;
@@ -21,12 +22,14 @@ type TargetsState =
 
 export interface SpawnPanelProps {
   readonly envs: readonly SpawnEnvOption[];
+  readonly presets: readonly SpawnPreset[];
+  readonly defaultPresetId: string | null;
   readonly hasSessions: boolean; // "Spawn another session" vs "Spawn a new session"
   readonly onSpawn: (body: SpawnRequestBody) => Promise<SessionLink>;
   readonly onSpawned: (link: SessionLink) => void; // the modal closes + auto-attaches
 }
 
-export function SpawnPanel({ envs, hasSessions, onSpawn, onSpawned }: SpawnPanelProps): JSX.Element {
+export function SpawnPanel({ envs, presets, defaultPresetId, hasSessions, onSpawn, onSpawned }: SpawnPanelProps): JSX.Element {
   const [spawning, setSpawning] = useState(false);
   const [spawnEnv, setSpawnEnv] = useState(envs[0]?.id ?? "");
   // "" is the picker's "default" — no model field is sent, so the session inherits the last-used one.
@@ -38,6 +41,10 @@ export function SpawnPanel({ envs, hasSessions, onSpawn, onSpawned }: SpawnPanel
   const [targets, setTargets] = useState<TargetsState>({ phase: "loading" });
   const [selectedTarget, setSelectedTarget] = useState<string>(""); // a workspaceId (join) or "new:<repo>" (create)
   const [spawnError, setSpawnError] = useState<string | null>(null);
+  const [presetId, setPresetId] = useState<string | null>(defaultPresetId);
+  const selectedPreset = presets.find((p) => p.id === presetId) ?? null;
+  const envKind = envs.find((e) => e.id === spawnEnv)?.kind ?? null;
+  const commandAllowed = envKind === "local";
 
   // Fetch spawn targets for the chosen env (unreachable env → error phase; configured repos still show
   // once reachable). Cleared to "loading" IMMEDIATELY on env change, so a space belonging to the
@@ -80,13 +87,15 @@ export function SpawnPanel({ envs, hasSessions, onSpawn, onSpawned }: SpawnPanel
       const isNew = selectedTarget.startsWith("new:");
       const targetWorkspaceId = isNew ? null : selectedTarget;
       const repoArg = isNew ? selectedTarget.slice(4) : null;
-      const link = await onSpawn({
+      const link = await onSpawn(buildSpawnRequest({
         env: spawnEnv,
+        envKind,
         targetWorkspaceId,
         repo: repoArg,
-        ...(spawnModel === "" ? {} : { model: spawnModel }),
-        ...(spawnRemoteControl ? { remoteControl: true } : {}),
-      });
+        model: spawnModel === "" ? null : spawnModel,
+        remoteControl: spawnRemoteControl,
+        startCommand: selectedPreset?.text ?? null,
+      }));
       onSpawned(link);
     } catch (err) {
       setSpawnError(err instanceof Error ? err.message : String(err));
@@ -159,7 +168,32 @@ export function SpawnPanel({ envs, hasSessions, onSpawn, onSpawned }: SpawnPanel
       </div>
       <p className="text-xs text-muted-foreground">Into an existing herdr space, or a new one from a repo in <span className="text-foreground/80 font-mono">environments.json</span>.</p>
 
-      {/* (Task 14 inserts Start command here) */}
+      <div className="mt-3">
+        <label className="block text-xs text-muted-foreground mb-1">Start command</label>
+        <select
+          className="w-full bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
+          value={presetId ?? ""}
+          disabled={!commandAllowed}
+          onChange={(e) => { setPresetId(e.target.value === "" ? null : e.target.value); }}
+        >
+          <option value="">no command</option>
+          {presets.map((p) => (
+            // First line only, ellipsized by the select's own width; the FULL text is the title —
+            // a preset may hold 2000 characters and the default is pre-selected, so the ordinary
+            // flow is one click on text the operator has not read to the end.
+            <option key={p.id} value={p.id} title={p.text}>{p.text.split("\n")[0] ?? ""}</option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground mt-1">
+          {!commandAllowed
+            ? "Start commands are available for local environments only — your pick is kept."
+            : presets.length === 0
+              ? "No start commands on this board — add them in Board settings → Start commands."
+              : selectedPreset === null
+                ? "Edited in Board settings → Start commands."
+                : `${selectedPreset.text} — edited in Board settings → Start commands.`}
+        </p>
+      </div>
 
       <div className="border-t border-border my-3" />
 

@@ -38,6 +38,7 @@ export interface SpawnRequestBody {
   readonly repo: string | null;
   readonly model?: string;
   readonly remoteControl?: true;
+  readonly startCommand?: string;
 }
 
 export const api = {

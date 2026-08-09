@@ -100,6 +100,8 @@ export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, on
 
         <SpawnPanel
           envs={envs}
+          presets={board.spawnPresets}
+          defaultPresetId={board.defaultSpawnPresetId}
           hasSessions={task.sessions.length > 0}
           onSpawn={onSpawn}
           onSpawned={(link) => { onClose(); onOpenSession(link.env, link.paneId, true, task.title); }}
