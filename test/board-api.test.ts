@@ -1883,3 +1883,92 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — explicit null needs a repo"
     expect(spawn.mock.calls).toHaveLength(0);
   });
 });
+
+describe("landing column when position 0 is closed", () => {
+  // Board shape used by every case below: a closed column FIRST, an open one second.
+  //
+  // The open column is "backlog", NOT "todo", and that is load-bearing. `FromSessionBodySchema`
+  // currently defaults status to the literal string "todo"; if this board also had a column with
+  // that id, the from-session case would assert "todo" and pass identically before and after the
+  // fix — a green test pinning nothing at exactly the site the spec calls out as the fifth and only
+  // hardcoded one. Naming the open column anything else is what makes the test go red.
+  const closedFirst = [
+    { id: "done", label: "Done", type: "closed" },
+    { id: "backlog", label: "Backlog", type: "to-do" },
+  ];
+
+  async function boardWithClosedFirst(app: ReturnType<typeof makeApi>, id: string): Promise<void> {
+    await app.request("/api/boards", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: id }),
+    });
+    await app.request(`/api/boards/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ columns: closedFirst }),
+    });
+  }
+
+  it("reassigns tasks of a deleted column to the first NON-closed column", async () => {
+    const app = makeApi(tmpDir);
+    await boardWithClosedFirst(app, "b1");
+    await app.request("/api/boards/b1", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ columns: [...closedFirst, { id: "wip", label: "WIP" }] }),
+    });
+    const created = await (await app.request("/api/boards/b1/tasks", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Doomed", status: "wip" }),
+    })).json() as { id: string };
+    // Delete the "wip" column by PATCHing a column list without it.
+    await app.request("/api/boards/b1", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ columns: closedFirst }),
+    });
+    const board = await (await app.request("/api/boards/b1")).json() as { tasks: { id: string; status: string }[] };
+    expect(board.tasks.find((t) => t.id === created.id)?.status).toBe("backlog");
+  });
+
+  it("lands a task moved in from another board in the first non-closed column", async () => {
+    const app = makeApi(tmpDir);
+    await boardWithClosedFirst(app, "target");
+    await app.request("/api/boards", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "source" }),
+    });
+    const created = await (await app.request("/api/boards/source/tasks", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Traveller", status: "blocked" }),
+    })).json() as { id: string };
+    const res = await app.request(`/api/boards/source/tasks/${created.id}/move`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toBoardId: "target" }),
+    });
+    expect(res.status).toBe(200);
+    const board = await (await app.request("/api/boards/target")).json() as { tasks: { status: string }[] };
+    expect(board.tasks[0]?.status).toBe("backlog");
+  });
+
+  it("lands a card created from an unassigned session in the first non-closed column", async () => {
+    const app = makeApi(tmpDir);
+    await boardWithClosedFirst(app, "b2");
+    const res = await app.request("/api/boards/b2/tasks/from-session", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "From a live session", env: "work-local", paneId: "w1:p1" }),
+    });
+    expect(res.status).toBe(201);
+    const task = await res.json() as { status: string };
+    // Red before the fix: the route defaults to the literal "todo", which is not a column here.
+    expect(task.status).toBe("backlog");
+  });
+
+  it("from-session still honors an explicit status", async () => {
+    const app = makeApi(tmpDir);
+    await boardWithClosedFirst(app, "b3");
+    const res = await app.request("/api/boards/b3/tasks/from-session", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Explicit", status: "done", env: "work-local", paneId: "w1:p2" }),
+    });
+    const task = await res.json() as { status: string };
+    expect(task.status).toBe("done");
+  });
+});

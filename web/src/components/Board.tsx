@@ -9,6 +9,7 @@ import {
 } from "@dnd-kit/core";
 import { useDroppable } from "@dnd-kit/core";
 import type { Board as BoardType, BoardState, EnrichedTask } from "@shared/board-schema";
+import { defaultColumnId } from "@shared/board-schema";
 import { useCallback, useState } from "react";
 import type { JSX } from "react";
 import { z } from "zod";
@@ -159,7 +160,7 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
   for (const task of tasks) {
     const col = tasksByColumn.get(task.status);
     if (col !== undefined) col.push(task);
-    else (tasksByColumn.get(board.columns[0]?.id ?? "") ?? []).push(task);
+    else (tasksByColumn.get(defaultColumnId(board.columns) ?? "") ?? []).push(task);
   }
 
   function handleSave(patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority">>): void {

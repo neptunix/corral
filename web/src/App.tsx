@@ -1,4 +1,4 @@
-import { StreamFrameSchema, type Board, type BoardState } from "@shared/board-schema";
+import { StreamFrameSchema, defaultColumnId, type Board, type BoardState } from "@shared/board-schema";
 import type { RegistryStatus, SessionRow, StatuslineData } from "@shared/schema";
 import { useState, useEffect, useCallback, useMemo, type JSX } from "react";
 
@@ -221,9 +221,11 @@ export function App(): JSX.Element {
 
   // Plain task create (the header "+ New task" button). Modal-driven, not window.prompt: a prior
   // dialog with "prevent additional dialogs" checked silently suppresses window.prompt (no error),
-  // which made the button appear dead. status = the target board's first column.
+  // which made the button appear dead. status = the target board's landing column, never index 0.
   async function handleNewTask(boardId: string, title: string): Promise<void> {
-    const status = boards.find((b) => b.id === boardId)?.columns[0]?.id ?? "todo";
+    const columns = boards.find((b) => b.id === boardId)?.columns ?? [];
+    // "" lands in Board.tsx's unknown-status bucket rather than inventing a column id.
+    const status = defaultColumnId(columns) ?? "";
     try {
       await api.tasks.create(boardId, { title, status });
     } catch (err) {

@@ -3,6 +3,7 @@ import {
   type GlobalState, type SessionLink, type Task,
   ColumnSchema,
   DEFAULT_COLUMNS,
+  defaultColumnId,
   generateTaskId,
   nowSecs,
   slugifyBoardId,
@@ -187,7 +188,9 @@ const DetachBodySchema = z.object({
 
 const FromSessionBodySchema = z.object({
   title: z.string().min(1),
-  status: z.string().default("todo"),
+  // No literal default: a card created from an unassigned session must land in THIS board's landing
+  // column, which the route resolves inside withBoard (it needs the loaded board to know it).
+  status: z.string().optional(),
   priority: z.enum(["p0", "p1", "p2", "p3"]).nullable().optional(),
   description: z.string().optional(),
   env: z.string(),
@@ -549,12 +552,14 @@ export function createApi(opts: {
       if (label !== undefined) updated = { ...updated, label };
       if (columns !== undefined) {
         const removedIds = new Set(existing.columns.map((col) => col.id).filter((id) => !columns.some((c2) => c2.id === id)));
-        const firstColId = columns[0]?.id;
-        if (removedIds.size > 0 && firstColId !== undefined) {
+        // The landing column, never index 0 — a closed column at 0 would bulk-rewrite these tasks
+        // into a collapsed strip with no undo. See defaultColumnId (shared/board-schema.ts).
+        const landingColId = defaultColumnId(columns);
+        if (removedIds.size > 0 && landingColId !== undefined) {
           updated = {
             ...updated,
             tasks: existing.tasks.map((task) =>
-              removedIds.has(task.status) ? { ...task, status: firstColId } : task,
+              removedIds.has(task.status) ? { ...task, status: landingColId } : task,
             ),
           };
         }
@@ -1149,17 +1154,20 @@ export function createApi(opts: {
     // where the task briefly existed on both). `withBoards` writes boardA (the target, passed first)
     // before boardB (the source) — both synchronous, so the only residual is a process crash between the
     // two writes, which then yields a recoverable duplicate rather than a lost task.
-    type MoveOutcome = "ok" | "src_gone" | "task_gone" | "target_gone" | "conflict";
+    type MoveOutcome = "ok" | "src_gone" | "task_gone" | "target_gone" | "target_no_columns" | "conflict";
     const outcome = await storage.withBoards<MoveOutcome>(toBoardId, bid, (target, source) => {
       if (source === null) return { boardA: target, boardB: source, result: "src_gone" };
       if (target === null) return { boardA: target, boardB: source, result: "target_gone" };
       const task = source.tasks.find((t) => t.id === tid);
       if (task === undefined) return { boardA: target, boardB: source, result: "task_gone" };
       if (target.tasks.some((t) => t.id === tid)) return { boardA: target, boardB: source, result: "conflict" };
-      // Map status: keep it if the target has that column, else fall to the target's first column.
-      const status = target.columns.some((col) => col.id === task.status)
-        ? task.status
-        : (target.columns[0]?.id ?? task.status);
+      // Map status: keep it if the target has that column, else the target's LANDING column.
+      let status = task.status;
+      if (!target.columns.some((col) => col.id === task.status)) {
+        const landing = defaultColumnId(target.columns);
+        if (landing === undefined) return { boardA: target, boardB: source, result: "target_no_columns" };
+        status = landing;
+      }
       const movedTask: Task = { ...task, status, updatedAt: nowSecs() };
       return {
         boardA: { ...target, tasks: [...target.tasks, movedTask] },
@@ -1169,6 +1177,9 @@ export function createApi(opts: {
     });
     if (outcome === "src_gone" || outcome === "task_gone" || outcome === "target_gone") {
       return c.json({ error: { code: "not_found" } }, 404);
+    }
+    if (outcome === "target_no_columns") {
+      return c.json({ error: { code: "validation", message: "board has no columns" } }, 400);
     }
     if (outcome === "conflict") {
       return c.json({ error: { code: "conflict", message: "task id already exists on target" } }, 409);
@@ -1198,7 +1209,7 @@ export function createApi(opts: {
     // that IS live), so the new binding is churn-resolvable from the start; null if not yet registered.
     const liveRow = opts.poller.getSnapshot().sessions.find((s) => `${s.env}:${s.paneId}` === key);
 
-    type FromSessionResult = "board_not_found" | "conflict" | { ok: true; task: Task };
+    type FromSessionResult = "board_not_found" | "conflict" | "no_columns" | { ok: true; task: Task };
     const result = await storage.withBoard<FromSessionResult>(bid, (existing) => {
       if (existing === null) return { board: null, result: "board_not_found" };
       // Claim-check: is THIS live session already bound anywhere? Uses the exact per-link complement
@@ -1209,6 +1220,8 @@ export function createApi(opts: {
       if (isSessionBound(allLinks, { env, paneId, liveSessionId })) {
         return { board: existing, result: "conflict" as const };
       }
+      const landing = parsed.data.status ?? defaultColumnId(existing.columns);
+      if (landing === undefined) return { board: existing, result: "no_columns" as const };
       const link: SessionLink = {
         env: parsed.data.env,
         paneId: parsed.data.paneId,
@@ -1227,7 +1240,7 @@ export function createApi(opts: {
         id: generateTaskId(),
         title: parsed.data.title,
         description: parsed.data.description ?? "",
-        status: parsed.data.status,
+        status: landing,
         priority: parsed.data.priority ?? null,
         sessions: [link],
         createdAt: now,
@@ -1238,6 +1251,7 @@ export function createApi(opts: {
 
     if (result === "board_not_found") return c.json({ error: { code: "not_found" } }, 404);
     if (result === "conflict") return c.json({ error: { code: "conflict", message: "session already assigned" } }, 409);
+    if (result === "no_columns") return c.json({ error: { code: "validation", message: "board has no columns" } }, 400);
     return c.json(result.task, 201);
   });
 
