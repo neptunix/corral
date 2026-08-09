@@ -48,7 +48,7 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ label }),
       }),
-    update: (bid: string, patch: Partial<Pick<Board, "label" | "columns">>) =>
+    update: (bid: string, patch: Partial<Pick<Board, "label" | "columns" | "spawnPresets" | "defaultSpawnPresetId">>) =>
       req<Board>(`/api/boards/${bid}`, {
         method: "PATCH",
         body: JSON.stringify(patch),

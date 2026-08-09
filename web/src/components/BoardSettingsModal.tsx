@@ -1,14 +1,14 @@
 import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { Board, Column } from "@shared/board-schema";
-import { ColumnTypeSchema, defaultColumnId, generateColumnId } from "@shared/board-schema";
+import type { Board, Column, SpawnPreset } from "@shared/board-schema";
+import { ColumnTypeSchema, defaultColumnId, generateColumnId, generateSpawnPresetId } from "@shared/board-schema";
 import type { CSSProperties, JSX } from "react";
 import { useState } from "react";
 
 interface Props {
   readonly board: Board;
-  readonly onSave: (patch: { label?: string; columns?: Column[] }) => void;
+  readonly onSave: (patch: { label?: string; columns?: Column[]; spawnPresets?: SpawnPreset[]; defaultSpawnPresetId?: string | null }) => void;
   readonly onClose: () => void;
 }
 
@@ -82,6 +82,9 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
   const [label, setLabel] = useState(board.label);
   const [columns, setColumns] = useState<Column[]>([...board.columns]);
   const [newColLabel, setNewColLabel] = useState("");
+  const [presets, setPresets] = useState<SpawnPreset[]>([...board.spawnPresets]);
+  const [defaultPresetId, setDefaultPresetId] = useState<string | null>(board.defaultSpawnPresetId);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   // Recomputed from live modal state, so the tag follows both a drag AND a type change. Never pinned
@@ -127,10 +130,56 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
     );
   }
 
+  function addPreset(): void {
+    setPresets((prev) => [...prev, { id: generateSpawnPresetId(), text: "" }]);
+  }
+  function setPresetText(id: string, text: string): void {
+    setPresets((prev) => prev.map((p) => p.id === id ? { ...p, text } : p));
+  }
+  function removePreset(id: string): void {
+    setPresets((prev) => prev.filter((p) => p.id !== id));
+    setDefaultPresetId((cur) => cur === id ? null : cur);
+  }
+
+  function handleSave(): void {
+    // Every PATCH-boundary rule is pre-checked HERE, and that is not belt-and-braces. The save is
+    // fire-and-forget at the render site (App.tsx: `void api.boards.update(...)`) and this modal
+    // closes on Save, so a 400 from the server is invisible — and it takes the label and the columns
+    // down with the presets, because they all travel in one patch. Any rejection the server can
+    // produce must therefore be unreachable from this button.
+    // Blank rows are dropped rather than rejected: an empty row is "I changed my mind", not an error.
+    const kept = presets.filter((p) => p.text.trim() !== "").map((p) => ({ ...p, text: p.text.trim() }));
+    const bad = kept.find((p) => !/^[/A-Za-z0-9]/.test(p.text));
+    if (bad !== undefined) {
+      setSaveError(`A start command must begin with "/" or a letter or digit — "${bad.text.slice(0, 24)}" would reach the CLI as a flag, not as the prompt.`);
+      return;
+    }
+    const tooLong = kept.find((p) => p.text.length > 2000);
+    if (tooLong !== undefined) {
+      setSaveError(`A start command is limited to 2000 characters — "${tooLong.text.slice(0, 24)}…" is ${String(tooLong.text.length)}.`);
+      return;
+    }
+    if (kept.length > 20) {
+      setSaveError(`At most 20 start commands per board — remove ${String(kept.length - 20)}.`);
+      return;
+    }
+    // Duplicate ids cannot happen through this UI (generateSpawnPresetId mints each row), so there is
+    // no fourth check — the server's rule guards the API, not this form.
+    setSaveError(null);
+    onSave({
+      label: label.trim(),
+      columns,
+      spawnPresets: kept,
+      defaultSpawnPresetId: kept.some((p) => p.id === defaultPresetId) ? defaultPresetId : null,
+    });
+    onClose();
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-card border border-border rounded-lg p-6 w-[400px]" onClick={(e) => { e.stopPropagation(); }}>
-        <h2 className="text-foreground font-semibold mb-4">Board settings</h2>
+      <div className="bg-card border border-border rounded-lg w-[min(560px,92vw)] max-h-[80vh] flex flex-col" onClick={(e) => { e.stopPropagation(); }}>
+        <h2 className="text-foreground font-semibold px-6 pt-6 pb-4">Board settings</h2>
+        <div className="px-6 overflow-y-auto flex-1">
         <label className="block text-xs text-muted-foreground mb-1">Board name</label>
         <input className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-4"
           value={label} onChange={(e) => { setLabel(e.target.value); }} />
@@ -159,9 +208,37 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
             onKeyDown={(e) => { if (e.key === "Enter") addColumn(); }} />
           <button onClick={addColumn} className="px-3 py-1 bg-muted text-foreground text-sm rounded hover:bg-muted/80">Add</button>
         </div>
-        <div className="flex justify-end gap-2">
+        <label className="block text-xs text-muted-foreground mb-2">Start commands</label>
+        <div className="space-y-2 mb-3">
+          {presets.map((p) => (
+            <div key={p.id}>
+              <div className="flex gap-2 items-center">
+                <input type="radio" name="defaultSpawnPreset" className="accent-primary" title="Default for new sessions"
+                  checked={defaultPresetId === p.id} onChange={() => { setDefaultPresetId(p.id); }} />
+                <input className="flex-1 bg-background border border-border rounded px-2 py-1 text-foreground text-sm placeholder:text-muted-foreground/70"
+                  placeholder="/plan" value={p.text} onChange={(e) => { setPresetText(p.id, e.target.value); }} />
+                <button onClick={() => { removePreset(p.id); }}
+                  className="px-2 text-destructive hover:text-destructive/80 text-sm">×</button>
+              </div>
+              {/* Per-ROW, not a passive hint under the list: a plain-text first message is a legitimate
+                  preset, so this informs rather than blocks — but only if it says WHICH row. */}
+              {p.text.trim() !== "" && !p.text.trim().startsWith("/") && (
+                <p className="text-[11px] text-muted-foreground pl-6 mt-0.5">sent as a plain message, not a slash command</p>
+              )}
+            </div>
+          ))}
+          <label className="flex gap-2 items-center text-xs text-muted-foreground">
+            <input type="radio" name="defaultSpawnPreset" className="accent-primary"
+              checked={defaultPresetId === null} onChange={() => { setDefaultPresetId(null); }} />
+            no default command
+          </label>
+        </div>
+        <button onClick={addPreset} className="px-3 py-1 mb-4 bg-muted text-foreground text-sm rounded hover:bg-muted/80">Add start command</button>
+        {saveError !== null && <p className="text-xs text-destructive mb-3">{saveError}</p>}
+        </div>
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-border bg-card">
           <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
-          <button onClick={() => { onSave({ label: label.trim(), columns }); onClose(); }}
+          <button onClick={handleSave}
             className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90">Save</button>
         </div>
       </div>
