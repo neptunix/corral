@@ -83,6 +83,23 @@ describe("createPoller", () => {
     expect(snap.sessions.some((s) => s.paneId === "b-1")).toBe(true);
   });
 
+  it("orders snapshot envs by config, not by which env answered first", async () => {
+    const list: ListFn = (e) => Promise.resolve([row(e.id, `${e.id}-1`)]);
+    const p = createPoller({ envs: [A, B], list });
+    // Polls run concurrently under start(), so B can land before A. refreshEnv reproduces that
+    // insertion order deterministically; the UI reads Object.keys(envs) and defaults to [0].
+    await p.refreshEnv("b");
+    await p.refreshEnv("a");
+    expect(Object.keys(p.getSnapshot().envs)).toEqual(["a", "b"]);
+  });
+
+  it("omits envs that have not been polled yet", async () => {
+    const list: ListFn = (e) => Promise.resolve([row(e.id, `${e.id}-1`)]);
+    const p = createPoller({ envs: [A, B], list });
+    await p.refreshEnv("b");
+    expect(Object.keys(p.getSnapshot().envs)).toEqual(["b"]);
+  });
+
   it("notifies subscribers on each poll", async () => {
     const list: ListFn = (e) => Promise.resolve([row(e.id, `${e.id}-1`)]);
     const p = createPoller({ envs: [A], list });

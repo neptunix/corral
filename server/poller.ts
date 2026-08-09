@@ -196,9 +196,17 @@ export function createPoller(opts: {
         sessions.push(merged);
       }
     }
-    // Shallow-copy envStates so a previously emitted snapshot is not retroactively mutated by a
-    // later poll (the sessions array is already freshly allocated each rebuild).
-    snapshot = { envs: { ...envStates }, sessions };
+    // Rebuilt in `opts.envs` order, NOT spread from `envStates` — the polls run concurrently, so
+    // insertion order there is "who answered first", and `Object.keys(envs)` feeds the UI's env
+    // dropdown (and its default selection). A fresh record per rebuild also keeps a previously
+    // emitted snapshot from being retroactively mutated by a later poll (the sessions array is
+    // already freshly allocated each rebuild). Unpolled envs stay absent, as before.
+    const envs: Record<string, EnvState> = {};
+    for (const e of opts.envs) {
+      const state = envStates[e.id];
+      if (state !== undefined) envs[e.id] = state;
+    }
+    snapshot = { envs, sessions };
   }
 
   async function pollEnv(env: HerdrEnv): Promise<void> {
