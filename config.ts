@@ -58,9 +58,17 @@ export const CLAUDE_REGISTRY_MAX_BYTES = intFromEnv("CLAUDE_REGISTRY_MAX_BYTES",
 // 11.5 ms — the excess being one stat() per candidate for the newest-first sort, which is what keeps
 // live sessions from being evicted by dead ones. A truncated read is reported, never silent.
 export const CLAUDE_REGISTRY_MAX_FILES = intFromEnv("CLAUDE_REGISTRY_MAX_FILES", 200, { min: 1 });
-// `CLAUDE_REGISTRY_POLL_MS` is added in the task where the interval that uses it lives. There is no
-// coalescing window and no re-check interval: those belonged to an fs.watch watcher the design
-// removed in favour of a plain interval.
+/**
+ * How often local config dirs are re-read. There is no coalescing window and no re-check interval:
+ * those belonged to an fs.watch watcher the design removed in favour of this plain interval.
+ *
+ * 3 s is an OPERATOR DECISION, not a CPU one. A complete read of this machine's three local config
+ * dirs measured 1.79 ms (35 files, 14.7 KB) — 0.06 % of one core at this interval, and under a tenth
+ * of what the herdr poll beside it already spends on subprocess spawns. What the interval actually
+ * buys back is timer wakeups. Remote environments are NOT read here — they are served by the sweep,
+ * so this adds no SSH traffic — and a broadcast happens only when a record actually changed.
+ */
+export const CLAUDE_REGISTRY_POLL_MS = intFromEnv("CLAUDE_REGISTRY_POLL_MS", 3000, { min: 250 });
 
 // Delay before the FIRST statusline sweep after start(). The sweep can't run at t=0 (it would race the
 // initial poll and see no rows), so it is kicked once after this short delay — by which point the first

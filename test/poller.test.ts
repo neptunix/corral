@@ -1,6 +1,7 @@
 import type { AttentionMap, SessionRow, Snapshot, StatuslineData } from "@shared/schema";
 import { describe, it, expect, vi } from "vitest";
 
+import { CLAUDE_REGISTRY_POLL_MS } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import type { AttentionStore } from "../server/attention-store.ts";
 import { createPoller, type ListFn, type RecapFn, type StatuslineFn } from "../server/poller.ts";
@@ -773,5 +774,245 @@ describe("createPoller — the sweep is the backstop", () => {
     await p.runClaudeSweepOnce();
     expect(warn.mock.calls.filter((c) => String(c[0]).includes("truncated"))).toEqual([]);
     warn.mockRestore();
+  });
+});
+
+describe("createPoller — the local registry interval", () => {
+  const tick = async (): Promise<void> => {
+    await vi.advanceTimersByTimeAsync(CLAUDE_REGISTRY_POLL_MS);
+  };
+  // start() fires ONE immediate sweep that is not parked by recapIntervalMs, and for a remote env that
+  // sweep does its own registry read. Draining it here is what lets the assertions below be about the
+  // INTERVAL's reads rather than about the sweep's.
+  const settleStart = async (): Promise<void> => { await vi.advanceTimersByTimeAsync(0); };
+
+  it("reads each local environment once per tick and never a remote one", async () => {
+    vi.useFakeTimers();
+    const seen: string[] = [];
+    const p = createPoller({
+      envs: [A, R],
+      list: (e) => Promise.resolve([rowWithSession(e.id, "p1", VALID_UUID)]),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
+      readRegistry: (e) => { seen.push(e.id); return Promise.resolve(ok([{ sessionId: VALID_UUID, status: "busy" }])); },
+      // Park the recurring sweep far away so only the interval fires after settleStart.
+      recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
+    });
+    await p.pollOnce();
+    p.start();
+    await settleStart();
+    const afterStart = seen.length;
+    await tick();
+    p.stop();
+    vi.useRealTimers();
+    // The LOCAL env only. A remote read on the interval would be a second writer for that environment.
+    expect(seen.slice(afterStart)).toEqual(["a"]);
+    expect(p.getSnapshot().sessions.find((r) => r.env === "a")?.claudeStatus).toBe("busy");
+  });
+
+  // The per-directory bug this replaced: applyRegistry clears any session the read did not return, so
+  // it must be handed a read covering ALL of an environment's claudeConfigDirs. A per-dir loop made
+  // each dir's read clear the other dirs' sessions, flapping every row twice a tick.
+  it("hands applyRegistry one read per environment, not one per config dir", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const multiDir: HerdrEnv = { ...A, claudeConfigDirs: ["/one", "/two", "/three"] };
+    const p = createPoller({
+      envs: [multiDir],
+      list: () => Promise.resolve([rowWithSession(multiDir.id, "p1", VALID_UUID)]),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
+      readRegistry: () => { calls++; return Promise.resolve(ok([{ sessionId: VALID_UUID, status: "busy" }])); },
+      recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
+    });
+    await p.pollOnce();
+    p.start();
+    await settleStart();
+    calls = 0;
+    await tick();
+    p.stop();
+    vi.useRealTimers();
+    expect(calls).toBe(1);                       // ONE, not one per claudeConfigDirs entry
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBe("busy");
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBe("ok");
+  });
+
+  it("skips a tick whose predecessor is still in flight", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    // An ARRAY of resolvers, not `let release: (() => void) | null`. TypeScript does not track
+    // assignments made inside a callback, so a `let` initialised to `null` is still narrowed to `null`
+    // at the call site below; array elements are not narrowed that way.
+    const pending: (() => void)[] = [];
+    const p = createPoller({
+      envs: [A],
+      list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
+      readRegistry: () => {
+        calls++;
+        return new Promise<RegistryRead>((res) => { pending.push(() => { res(ok([])); }); });
+      },
+      recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
+    });
+    await p.pollOnce();
+    p.start();
+    await settleStart();
+    await tick();
+    expect(calls).toBe(1);
+    await tick();            // the first read has not resolved — this tick must do nothing
+    expect(calls).toBe(1);
+    for (const r of pending) r();
+    await tick();            // now it may run again
+    expect(calls).toBe(2);
+    p.stop();
+    vi.useRealTimers();
+  });
+
+  it("does not broadcast on a tick that changes nothing, and does on one that does", async () => {
+    vi.useFakeTimers();
+    let status = "idle";
+    const p = createPoller({
+      envs: [A],
+      list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
+      readRegistry: () => Promise.resolve(ok([{ sessionId: VALID_UUID, status }])),
+      recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
+    });
+    await p.pollOnce();
+    p.start();
+    await settleStart();
+    await tick();                       // first read: lands the record
+    const seen: Snapshot[] = [];
+    p.onSnapshot((s) => seen.push(s));
+    await tick();
+    await tick();
+    expect(seen).toEqual([]);           // almost every tick: no change, no frame
+    status = "waiting";
+    await tick();
+    expect(seen).toHaveLength(1);
+    p.stop();
+    vi.useRealTimers();
+  });
+
+  it("keeps the previous record and reports the failure when a read degrades", async () => {
+    vi.useFakeTimers();
+    let read: RegistryRead = ok([{ sessionId: VALID_UUID, status: "busy" }]);
+    const p = createPoller({
+      envs: [A],
+      list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
+      readRegistry: () => Promise.resolve(read),
+      recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
+    });
+    await p.pollOnce();
+    p.start();
+    await settleStart();
+    await tick();
+    read = { records: [], status: "read-error", truncated: false };
+    await tick();
+    p.stop();
+    vi.useRealTimers();
+    // Stale state is kept and LABELLED, not blanked — a momentary EACCES must not empty the board.
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBe("busy");
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBe("read-error");
+  });
+
+  it("survives a reader that throws, and keeps ticking", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let calls = 0;
+    const p = createPoller({
+      envs: [A],
+      list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
+      readRegistry: () => { calls++; return Promise.reject(new Error("boom")); },
+      recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
+    });
+    await p.pollOnce();
+    p.start();
+    await settleStart();
+    calls = 0;
+    await tick();
+    await tick();
+    p.stop();
+    vi.useRealTimers();
+    warn.mockRestore();
+    // The re-entrancy flag must be cleared in a `finally`, or one throw stops the interval forever.
+    expect(calls).toBe(2);
+  });
+
+  // The inner catch, which the outer `finally` alone does NOT cover: without it the first env's throw
+  // aborts the loop and every later local environment is skipped for that whole tick.
+  it("keeps reading the remaining local environments when one throws", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const seen: string[] = [];
+    const p = createPoller({
+      envs: [A, B],
+      list: (e) => Promise.resolve([rowWithSession(e.id, "p1", VALID_UUID)]),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
+      readRegistry: (e) => {
+        seen.push(e.id);
+        return e.id === A.id
+          ? Promise.reject(new Error("boom"))
+          : Promise.resolve(ok([{ sessionId: VALID_UUID, status: "busy" }]));
+      },
+      recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
+    });
+    await p.pollOnce();
+    p.start();
+    await settleStart();
+    seen.length = 0;
+    await tick();
+    p.stop();
+    vi.useRealTimers();
+    expect(seen).toEqual(["a", "b"]);
+    expect(p.getSnapshot().sessions.find((r) => r.env === "b")?.claudeStatus).toBe("busy");
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("tick threw"))).toBe(true);
+    warn.mockRestore();
+  });
+
+  it("stops ticking after stop()", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const p = createPoller({
+      envs: [A],
+      list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
+      readRegistry: () => { calls++; return Promise.resolve(ok([])); },
+      recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
+    });
+    await p.pollOnce();
+    p.start();
+    await settleStart();
+    await tick();
+    const afterOneTick = calls;
+    p.stop();
+    await tick();
+    await tick();
+    vi.useRealTimers();
+    expect(calls).toBe(afterOneTick);
+  });
+
+  // Nothing may tick before start(): createPoller is called in tests and on cold paths that never
+  // start the poller, and a timer armed at construction would read the real config dirs there.
+  it("does not tick before start()", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    createPoller({
+      envs: [A],
+      list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
+      readRegistry: () => { calls++; return Promise.resolve(ok([])); },
+    });
+    await tick();
+    await tick();
+    vi.useRealTimers();
+    expect(calls).toBe(0);
   });
 });

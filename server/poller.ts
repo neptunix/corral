@@ -1,6 +1,6 @@
 import type { AttentionMap, EnvState, RecapStatus, RegistryStatus, SessionRow, Snapshot, StatuslineData, StatuslineStatus } from "@shared/schema";
 
-import { ATTENTION_MIN_WORK_MS, CHEAP_INTERVAL_MS, RECAP_ENABLED, RECAP_INTERVAL_MS, STATUSLINE_ENABLED, SWEEP_INITIAL_DELAY_MS, TAB_RENAME_ENABLED } from "../config.ts";
+import { ATTENTION_MIN_WORK_MS, CHEAP_INTERVAL_MS, CLAUDE_REGISTRY_POLL_MS, RECAP_ENABLED, RECAP_INTERVAL_MS, STATUSLINE_ENABLED, SWEEP_INITIAL_DELAY_MS, TAB_RENAME_ENABLED } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import type { AttentionStore } from "./attention-store.ts";
 import { listSessions, tabRename as tabRenameHerdr } from "./herdr.ts";
@@ -377,6 +377,55 @@ export function createPoller(opts: {
     for (const cb of subs) cb(snapshot);
   }
 
+  /**
+   * Local freshness. Calls the SAME per-environment reader the sweep calls, so both paths do full
+   * reads over all of an environment's config dirs — which is what makes absence authoritative and
+   * removes any cross-writer precedence question. Local only: there is no cheap read over SSH, and
+   * remote is the sweep's job, so this adds ZERO SSH round trips.
+   *
+   * Armed by start(), not by createPoller: a timer created at construction would tick in every test
+   * and on every cold path that builds a poller without starting one, reading the real config dirs.
+   *
+   * Two local environments pointing at the same config dir read it twice per tick, once each. That is
+   * correct rather than wasteful — they have different pane keys, and each needs a read authoritative
+   * for its own rows. Deduplicating would reintroduce the per-directory bug this shape exists to
+   * avoid: applyRegistry clears any session its read did not return, so a read covering one directory
+   * out of several would clear the sessions living in the others, twice a tick, forever.
+   */
+  function startRegistryInterval(): () => void {
+    const localEnvs = opts.envs.filter((e) => e.kind === "local");
+    let tickRunning = false;
+    const timer = setInterval(() => {
+      // A tick still in flight skips this one. At ~1.8 ms per read against a multi-second interval
+      // overlap is physically unreachable, but the guard is unconditional because the cost of being
+      // wrong is two readers interleaving writes into one cache.
+      if (tickRunning) return;
+      tickRunning = true;
+      void (async () => {
+        try {
+          for (const env of localEnvs) {
+            // Per ENVIRONMENT, not per directory: applyRegistry clears any session the read did not
+            // return, so it must be handed a read covering every one of that env's claudeConfigDirs.
+            // readRegistry does; readRegistryDir(oneDir) does not.
+            try {
+              applyRegistry(env, await readRegistryFn(env));
+            } catch (err) {
+              // A read error is DATA — readRegistry reports it as a status and applyRegistry lands it
+              // on the row. A throw is something else (a bug), and it must not kill the timer: an
+              // unhandled rejection here would silently stop local state updating for the process's
+              // whole life. Hence also the `finally` below.
+              console.warn(`[registry] tick threw: env=${env.id} err=${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+        } finally {
+          tickRunning = false;
+        }
+      })();
+    }, CLAUDE_REGISTRY_POLL_MS);
+    timer.unref();
+    return () => { clearInterval(timer); };
+  }
+
   let stops: (() => void)[] = [];
   let started = false;
   // One guard per environment, built once and shared by BOTH the interval below and refreshEnv —
@@ -417,7 +466,7 @@ export function createPoller(opts: {
       const intervalId = setInterval(() => void sweep(), recapIntervalMs);
       const kickId = setTimeout(() => void sweep(), initialSweepDelayMs);
       const sweepStop = (): void => { clearInterval(intervalId); clearTimeout(kickId); };
-      stops = [...listStops, sweepStop];
+      stops = [...listStops, sweepStop, startRegistryInterval()];
     },
     stop() { for (const s of stops) s(); stops = []; started = false; },
   };
