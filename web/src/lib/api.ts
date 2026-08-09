@@ -52,7 +52,6 @@ export const api = {
         status: string;
         priority?: string | null;
         description?: string;
-        repo?: string | null;
       },
     ) =>
       req<Task>(`/api/boards/${bid}/tasks`, {
@@ -63,7 +62,7 @@ export const api = {
       bid: string,
       tid: string,
       patch: Partial<
-        Pick<Task, "title" | "description" | "status" | "priority" | "repo">
+        Pick<Task, "title" | "description" | "status" | "priority">
       >,
     ) =>
       req<Task>(`/api/boards/${bid}/tasks/${tid}`, {

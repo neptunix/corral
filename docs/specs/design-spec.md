@@ -266,7 +266,6 @@ through the same mutex. This makes the "server serializes mutations" guarantee r
     "comments":[ {"id":"c1","author":"alice","ts":1718700000,"body":"…",
                   "idemKey":null} ],            // author SERVER-ASSIGNED (§7); idemKey dedupes agent writes
     "sessions":[ {"env":"work-local","paneId":"w653..-1","name":"task-42-a","cwdSnapshot":"…/demo-api"} ],
-    "repo":"demo-api", "defaultEnv":"work-local",
     "createdAt":1718700000, "updatedAt":1718700500
   }]
 }
@@ -354,8 +353,13 @@ Drag a pooled session onto a task (or API) → stored by `(env,paneId)`. Detach 
 1. **Local vs remote:** prompt, defaulting to **local**.
 2. **Idempotency pre-check:** look in `agent list` for a session named `<task-slug>-<a|b|c>`; if
    present, attach it and stop (handles retry after a timed-out spawn).
-3. **Workspace by repo:** if the task's `repo` matches an existing workspace (by label/cwd),
-   `herdr tab create` a new tab there; else create the workspace.
+3. **Target from the REQUEST, never from the card.** A card cuts across workspaces — its sessions may
+   sit in several repositories — so it carries no `repo`. The request states one of three things: a
+   workspace id joins that workspace; an explicit `null` creates a new one at the named repo's
+   configured path; an omitted target with a `repo` resolves that repo to its own workspace (join the
+   space labelled with the repo key, else create it), and the new tab starts at the configured path
+   either way. No target and no repo is refused, with the environment's configured names — corral
+   does not infer one.
 4. **Spawn:** `herdr agent start <name> --workspace <id> -- claude`.
 5. **Auto-name:** `herdr pane run <paneId> "/rename <slug>-<a|b|c>"`. **`slug` is sanitized** (§13):
    `title.toLowerCase().replace(/[^a-z0-9]/g,'-').slice(0,32)`, must match `^[a-z0-9][a-z0-9\-]{0,31}$`.

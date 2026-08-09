@@ -53,8 +53,11 @@ compose the text and let this procedure carry it. Once they agree:
 
 1. **Write the card first** — everything the next session needs that is not already in git: decisions
    and their reasons, what was ruled out, what is verified versus assumed.
-2. **Compose the brief** (below) and `corral_spawn` it. The new session lands on the same card, in a
-   tab beside this one, and starts from that text.
+2. **Compose the brief** (below) and `corral_spawn` it. The new session lands on the same card and
+   starts from that text. By default it lands in a tab beside this one — same workspace, so a
+   worktree checkout stays visible. Pass `repo` only to send it to a *different* project: it then
+   lands in that repository's workspace, at its root, and a name that is not configured for the
+   target environment comes back refused with the list of ones that are.
    Pass `name` — two to four words for what the new session will do (`rc-toggle-ui`,
    `registry-watcher`). corral prefixes it with the card's slug and uses the result as the Claude
    session name, the tab label and the card's label. Without it the session is named

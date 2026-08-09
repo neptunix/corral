@@ -162,7 +162,7 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
     else (tasksByColumn.get(board.columns[0]?.id ?? "") ?? []).push(task);
   }
 
-  function handleSave(patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority" | "repo">>): void {
+  function handleSave(patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority">>): void {
     if (editingTask === null) return;
     void api.tasks.update(board.id, editingTask.id, patch).then(() => { onBoardStateChange(); });
   }

@@ -97,13 +97,32 @@ export interface CorralClient {
   boards(): Promise<z.infer<typeof BoardSchema>[]>;
   patchTask(a: { boardId: string; taskId: string; patch: TaskPatch }): Promise<z.infer<typeof TaskSchema>>;
   attach(a: { boardId: string; taskId: string; env: string; paneId: string; name: string }): Promise<void>;
-  spawn(a: { boardId: string; taskId: string; env: string; brief: string; name?: string | undefined; model?: string | undefined; remoteControl?: boolean | undefined; targetWorkspaceId?: string | undefined }): Promise<{ env: string; paneId: string; name: string }>;
+  spawn(a: { boardId: string; taskId: string; env: string; brief: string; name?: string | undefined; model?: string | undefined; remoteControl?: boolean | undefined; targetWorkspaceId?: string | undefined; repo?: string | undefined }): Promise<z.infer<typeof SpawnResultSchema>>;
   closeSession(a: { boardId: string; taskId: string; env: string; paneId: string; sessionId: string | null; deferred?: boolean | undefined }): Promise<void>;
+  /** The configured repository NAMES of one environment, from the route the browser's "Into" picker
+   *  already uses. Read only when a spawn is being refused, so the happy path pays nothing. */
+  spawnTargets(env: string): Promise<string[]>;
 }
 
 // The attach route's every non-error path ends in `c.json({ ok: true })` — it never returns a task.
 const OkSchema = z.object({ ok: z.boolean() });
-const SpawnResultSchema = z.object({ env: z.string(), paneId: z.string(), name: z.string() });
+// The three location fields are OPTIONAL on purpose. The route returns all of them today, but this
+// MCP process restarts with every Claude session while the corral server is long-running, so a
+// `git pull` routinely leaves a new MCP talking to an older server. Requiring them would turn a
+// spawn that actually succeeded into a parse error — a worse reply than one that omits where it
+// landed. Non-strict, so the route's full SessionLink superset still parses and is stripped.
+const SpawnResultSchema = z.object({
+  env: z.string(),
+  paneId: z.string(),
+  name: z.string(),
+  workspaceLabel: z.string().optional(),
+  cwdSnapshot: z.string().optional(),
+  idempotent: z.boolean().optional(),
+});
+const SpawnTargetsSchema = z.object({
+  spaces: z.array(z.object({ workspaceId: z.string(), label: z.string() })).default([]),
+  repos: z.array(z.object({ name: z.string() })).default([]),
+});
 
 export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralClient {
   const base = baseUrl.replace(/\/+$/, "");
@@ -143,10 +162,17 @@ export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralC
           ...(a.name === undefined ? {} : { name: a.name }),
           ...(a.model === undefined ? {} : { model: a.model }),
           ...(a.remoteControl === undefined ? {} : { remoteControl: a.remoteControl }),
+          // Absent, not null: the route reads an omitted key as "resolve the repo to its workspace"
+          // and an explicit null as "create a new space".
           ...(a.targetWorkspaceId === undefined ? {} : { targetWorkspaceId: a.targetWorkspaceId }),
+          ...(a.repo === undefined ? {} : { repo: a.repo }),
         }),
         SpawnResultSchema,
       ),
+    spawnTargets: async (env) => {
+      const body = await request(fetchFn, `${base}/api/envs/${seg(env)}/spawn-targets`, undefined, SpawnTargetsSchema);
+      return body.repos.map((r) => r.name);
+    },
     closeSession: async (a) => {
       const params = new URLSearchParams();
       if (a.sessionId !== null) params.set("sid", a.sessionId);

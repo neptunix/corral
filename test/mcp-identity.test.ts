@@ -31,6 +31,7 @@ function client(body: WhoamiResponse, counter?: { n: number }): CorralClient {
     attach: async () => undefined,
     spawn: async () => ({ env: "work-local", paneId: "w1:p2", name: "n" }),
     closeSession: async () => undefined,
+    spawnTargets: async () => [],
   };
   return stub;
 }

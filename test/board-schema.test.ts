@@ -28,12 +28,18 @@ describe("BoardSchema", () => {
 });
 
 describe("TaskSchema", () => {
-  it("defaults description, priority, repo, sessions", () => {
+  it("defaults description, priority, sessions", () => {
     const t = TaskSchema.parse({ id: "t_abc1234", title: "Test", status: "todo", createdAt: 1, updatedAt: 1 });
     expect(t.description).toBe("");
     expect(t.priority).toBeNull();
-    expect(t.repo).toBeNull();
     expect(t.sessions).toEqual([]);
+  });
+
+  // A card no longer carries a repository — the spawn target comes from the request. Boards written
+  // before that still hold the key: they must keep parsing, and lose it on the next write.
+  it("parses a stored task carrying a legacy repo and drops the field", () => {
+    const t = TaskSchema.parse({ id: "t_abc1234", title: "Test", status: "todo", repo: "corral", createdAt: 1, updatedAt: 1 });
+    expect(Object.hasOwn(t, "repo")).toBe(false);
   });
 
   it("rejects unknown priority", () => {
@@ -44,9 +50,9 @@ describe("TaskSchema", () => {
 describe("sortTasks", () => {
   it("sorts p0 before p1 before null", () => {
     const tasks = [
-      { id: "a", title: "a", status: "todo", priority: null, description: "", repo: null, sessions: [], createdAt: 1, updatedAt: 1 },
-      { id: "b", title: "b", status: "todo", priority: "p1" as const, description: "", repo: null, sessions: [], createdAt: 2, updatedAt: 2 },
-      { id: "c", title: "c", status: "todo", priority: "p0" as const, description: "", repo: null, sessions: [], createdAt: 3, updatedAt: 3 },
+      { id: "a", title: "a", status: "todo", priority: null, description: "", sessions: [], createdAt: 1, updatedAt: 1 },
+      { id: "b", title: "b", status: "todo", priority: "p1" as const, description: "", sessions: [], createdAt: 2, updatedAt: 2 },
+      { id: "c", title: "c", status: "todo", priority: "p0" as const, description: "", sessions: [], createdAt: 3, updatedAt: 3 },
     ];
     const sorted = sortTasks(tasks);
     expect(sorted.map(t => t.id)).toEqual(["c", "b", "a"]);
@@ -54,8 +60,8 @@ describe("sortTasks", () => {
 
   it("breaks priority ties by createdAt DESC (newest first)", () => {
     const tasks = [
-      { id: "a", title: "a", status: "todo", priority: "p1" as const, description: "", repo: null, sessions: [], createdAt: 10, updatedAt: 10 },
-      { id: "b", title: "b", status: "todo", priority: "p1" as const, description: "", repo: null, sessions: [], createdAt: 20, updatedAt: 20 },
+      { id: "a", title: "a", status: "todo", priority: "p1" as const, description: "", sessions: [], createdAt: 10, updatedAt: 10 },
+      { id: "b", title: "b", status: "todo", priority: "p1" as const, description: "", sessions: [], createdAt: 20, updatedAt: 20 },
     ];
     expect(sortTasks(tasks).map(t => t.id)).toEqual(["b", "a"]);
   });

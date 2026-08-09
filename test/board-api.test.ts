@@ -284,8 +284,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
       board: {
         id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
         tasks: [{
-          id: "t_seeded", title: "T", description: "", status: "todo", priority: null, repo: null,
-          sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-9" }],
+          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,           sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-9" }],
           createdAt: now, updatedAt: now,
         }],
       },
@@ -320,8 +319,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
       board: {
         id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
         tasks: [{
-          id: "t_seeded", title: "T", description: "", status: "todo", priority: null, repo: null,
-          sessions: [
+          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,           sessions: [
             { env: "work-local", paneId: "p1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "A", cwdSnapshot: "", sessionId: "uuid-A" },
             { env: "work-local", paneId: "p2", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "B", cwdSnapshot: "", sessionId: "uuid-B" },
           ],
@@ -360,8 +358,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
       board: {
         id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
         tasks: [{
-          id: "t_seeded", title: "T", description: "", status: "todo", priority: null, repo: null,
-          sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-dead" }],
+          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,           sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-dead" }],
           createdAt: now, updatedAt: now,
         }],
       },
@@ -386,8 +383,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
       board: {
         id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
         tasks: [{
-          id: "t_seeded", title: "T", description: "", status: "todo", priority: null, repo: null,
-          sessions: [{ env: "work-local", paneId: "wQ:p4", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-old" }],
+          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,           sessions: [{ env: "work-local", paneId: "wQ:p4", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-old" }],
           createdAt: now, updatedAt: now,
         }],
       },
@@ -470,8 +466,7 @@ describe("GET /api/state — name healing for persisted empty-name links", () =>
       board: {
         id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
         tasks: [{
-          id: "t_seeded", title: "T", description: "", status: "todo", priority: null, repo: null,
-          sessions: [{ env: "work-local", paneId: "old-1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "", cwdSnapshot: "", sessionId: null }],
+          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,           sessions: [{ env: "work-local", paneId: "old-1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "", cwdSnapshot: "", sessionId: null }],
           createdAt: now, updatedAt: now,
         }],
       },
@@ -527,7 +522,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn", () => {
   it("passes spawnCommand + targetWorkspaceId and returns the link (with env)", async () => {
     const { app, spawn } = makeApiWithSpawn(tmpDir);
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
-    const { id } = await (await app.request("/api/boards/test/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "My Task", status: "todo", repo: "corral" }) })).json() as { id: string };
+    const { id } = await (await app.request("/api/boards/test/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "My Task", status: "todo" }) })).json() as { id: string };
     const res = await app.request(`/api/boards/test/tasks/${id}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
@@ -561,7 +556,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn", () => {
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
     const { id } = await (await app.request("/api/boards/test/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "T", status: "todo" }) })).json() as { id: string };
     const res = await app.request(`/api/boards/test/tasks/${id}/spawn`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ env: "work-local" }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
     });
     expect(res.status).toBe(500);
     const err = await res.json() as { error: { message: string } };
@@ -885,8 +880,7 @@ async function seedTaskWithLink(app: ReturnType<typeof createApi>, storage: Retu
   await storage.withBoard("t", (b) => {
     if (b === null) return { board: null, result: undefined };
     const task = {
-      id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, repo: null,
-      sessions: [{ env: "work-local", paneId: "w1:p1", tabId: "w1:t1", tabLabel: "x", workspaceId: "w1", workspaceLabel: "c", name: "x-a", cwdSnapshot: "/c", sessionId }],
+      id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null,       sessions: [{ env: "work-local", paneId: "w1:p1", tabId: "w1:t1", tabLabel: "x", workspaceId: "w1", workspaceLabel: "c", name: "x-a", cwdSnapshot: "/c", sessionId }],
       createdAt: 1, updatedAt: 1,
     };
     return { board: { ...b, tasks: [task] }, result: undefined };
@@ -1215,7 +1209,7 @@ describe("POST resume — rebinds one link by ?sid and keeps the live sibling in
     await storage.withBoard("t", (b) => {
       if (b === null) return { board: null, result: undefined };
       const mk = (sid: string, paneId: string, tabId: string) => ({ env: "work-local", paneId, tabId, tabLabel: "x", workspaceId: "w1", workspaceLabel: "c", name: sid, cwdSnapshot: "/c", sessionId: sid });
-      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, repo: null, sessions: [mk(OLD, "pX", "old:t"), mk(NEW, "pX", "new:t")], createdAt: 1, updatedAt: 1 };
+      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [mk(OLD, "pX", "old:t"), mk(NEW, "pX", "new:t")], createdAt: 1, updatedAt: 1 };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
     const res = await app.request(`/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/pX/resume?sid=${OLD}`, { method: "POST" });
@@ -1241,7 +1235,7 @@ describe("POST resume — rebinds one link by ?sid and keeps the live sibling in
     await storage.withBoard("t", (b) => {
       if (b === null) return { board: null, result: undefined };
       const mk = (env: string, paneId: string, tabId: string) => ({ env, paneId, tabId, tabLabel: "x", workspaceId: "w1", workspaceLabel: "c", name: env, cwdSnapshot: "/c", sessionId: OLD });
-      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, repo: null, sessions: [mk("work-local", "wp", "wt"), mk("personal-local", "gp", "gt")], createdAt: 1, updatedAt: 1 };
+      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [mk("work-local", "wp", "wt"), mk("personal-local", "gp", "gt")], createdAt: 1, updatedAt: 1 };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
     const res = await app.request(`/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/wp/resume?sid=${OLD}`, { method: "POST" });
@@ -1271,8 +1265,7 @@ async function seedLinkOnBoardT(storage: ReturnType<typeof createStorage>, link:
   await storage.withBoard("t", (b) => {
     if (b === null) return { board: null, result: undefined };
     const task = {
-      id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, repo: null,
-      sessions: [{ env: "work-local", paneId: link.paneId, tabId: link.tabId, tabLabel: "x", workspaceId: link.workspaceId ?? "w1", workspaceLabel: "c", name: "x-a", cwdSnapshot: "/c", sessionId: link.sessionId }],
+      id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null,       sessions: [{ env: "work-local", paneId: link.paneId, tabId: link.tabId, tabLabel: "x", workspaceId: link.workspaceId ?? "w1", workspaceLabel: "c", name: "x-a", cwdSnapshot: "/c", sessionId: link.sessionId }],
       createdAt: 1, updatedAt: 1,
     };
     return { board: { ...b, tasks: [task] }, result: undefined };
@@ -1388,7 +1381,7 @@ describe("POST detach — targets one of two same-pane links by sessionId", () =
     await storage.withBoard("t", (b) => {
       if (b === null) return { board: null, result: undefined };
       const s = (sid: string, name: string) => ({ env: "work-local", paneId: "pX", tabId: "t", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name, cwdSnapshot: "/c", sessionId: sid });
-      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, repo: null, sessions: [s(OLD, "old"), s(NEW, "new")], createdAt: 1, updatedAt: 1 };
+      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [s(OLD, "old"), s(NEW, "new")], createdAt: 1, updatedAt: 1 };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
     const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/detach", {
@@ -1410,7 +1403,7 @@ describe("POST close — targets one of two same-pane links by ?sid", () => {
     await storage.withBoard("t", (b) => {
       if (b === null) return { board: null, result: undefined };
       const s = (sid: string, tabId: string) => ({ env: "work-local", paneId: "pX", tabId, tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: sid, cwdSnapshot: "/c", sessionId: sid });
-      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, repo: null, sessions: [s(OLD, "old:t"), s(NEW, "new:t")], createdAt: 1, updatedAt: 1 };
+      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [s(OLD, "old:t"), s(NEW, "new:t")], createdAt: 1, updatedAt: 1 };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
   }
@@ -1553,8 +1546,7 @@ describe("POST from-session — UUID-aware claim-check", () => {
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
     await storage.withBoard("test", (b) => {
       if (b === null) return { board: null, result: undefined };
-      const task = { id: "t_stale00", title: "T", description: "", status: "todo", priority: null, repo: null,
-        sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "x", cwdSnapshot: "/c", sessionId: OLD }],
+      const task = { id: "t_stale00", title: "T", description: "", status: "todo", priority: null,         sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "x", cwdSnapshot: "/c", sessionId: OLD }],
         createdAt: 1, updatedAt: 1 };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
@@ -1574,8 +1566,7 @@ describe("POST from-session — UUID-aware claim-check", () => {
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
     await storage.withBoard("test", (b) => {
       if (b === null) return { board: null, result: undefined };
-      const task = { id: "t_nul0000", title: "T", description: "", status: "todo", priority: null, repo: null,
-        sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "x", cwdSnapshot: "/c", sessionId: OLD }],
+      const task = { id: "t_nul0000", title: "T", description: "", status: "todo", priority: null,         sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "x", cwdSnapshot: "/c", sessionId: OLD }],
         createdAt: 1, updatedAt: 1 };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
@@ -1615,8 +1606,7 @@ describe("POST attach — UUID-aware idempotency (two same-pane cards)", () => {
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
     await storage.withBoard("test", (b) => {
       if (b === null) return { board: null, result: undefined };
-      const task = { id: "t_two0000", title: "T", description: "", status: "todo", priority: null, repo: null,
-        sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "wm-a", cwdSnapshot: "/c", sessionId: OLD }],
+      const task = { id: "t_two0000", title: "T", description: "", status: "todo", priority: null,         sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "wm-a", cwdSnapshot: "/c", sessionId: OLD }],
         createdAt: 1, updatedAt: 1 };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
@@ -1651,8 +1641,7 @@ describe("POST attach — UUID-aware idempotency (two same-pane cards)", () => {
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
     await storage.withBoard("test", (b) => {
       if (b === null) return { board: null, result: undefined };
-      const task = { id: "t_leg0000", title: "T", description: "", status: "todo", priority: null, repo: null,
-        sessions: [{ env: "work-local", paneId: "pX", tabId: "", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "legacy", cwdSnapshot: "/c", sessionId: null }],
+      const task = { id: "t_leg0000", title: "T", description: "", status: "todo", priority: null,         sessions: [{ env: "work-local", paneId: "pX", tabId: "", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "legacy", cwdSnapshot: "/c", sessionId: null }],
         createdAt: 1, updatedAt: 1 };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
@@ -1722,5 +1711,117 @@ describe("GET /api/state — Claude's own session state reaches the board", () =
     expect(live?.waitingFor).toBeNull();
     expect(live?.remoteControl).toBeNull();
     expect(live?.registryStatus).toBeNull();
+  });
+});
+
+// §1's whole table, asserted at the route rather than through the picker: the browser always sends
+// `targetWorkspaceId` explicitly, the MCP tool omits the key, and those are DIFFERENT requests.
+describe("POST /api/boards/:bid/tasks/:tid/spawn — the three-state target", () => {
+  async function seed(app: ReturnType<typeof createApi>): Promise<string> {
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
+    const { id } = await (await app.request("/api/boards/test/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "My Task", status: "todo" }) })).json() as { id: string };
+    return id;
+  }
+  async function spawnWith(body: Record<string, unknown>): Promise<{ res: Response; opts: Record<string, unknown> | undefined }> {
+    const { app, spawn } = makeApiWithSpawn(tmpDir);
+    const tid = await seed(app);
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const first: unknown = spawn.mock.calls[0]?.[0];
+    return { res, opts: typeof first === "object" && first !== null ? { ...first } : undefined };
+  }
+
+  it("a workspace id joins that workspace", async () => {
+    const { res, opts } = await spawnWith({ env: "work-local", targetWorkspaceId: "w1" });
+    expect(res.status).toBe(200);
+    expect(opts?.targetWorkspaceId).toBe("w1");
+  });
+
+  // The browser's "＋ <repo>" pick. It stays a CREATE even when a space with that label exists —
+  // which is exactly the case resolve-by-repo would join instead.
+  it("an explicit null with a repo creates a new space", async () => {
+    const { res, opts } = await spawnWith({ env: "work-local", targetWorkspaceId: null, repo: "corral" });
+    expect(res.status).toBe(200);
+    expect(opts?.targetWorkspaceId).toBeNull();
+    expect(opts?.repo).toBe("corral");
+  });
+
+  it("an absent key with a repo passes the target through absent, for resolve-by-repo", async () => {
+    const { res, opts } = await spawnWith({ env: "work-local", repo: "corral" });
+    expect(res.status).toBe(200);
+    expect(opts).toBeDefined();
+    expect(Object.hasOwn(opts ?? {}, "targetWorkspaceId")).toBe(false);
+    expect(opts?.repoPath).toBe("/repos/corral");
+  });
+
+  it("no target and no repo is refused, and nothing is spawned", async () => {
+    const { res, opts } = await spawnWith({ env: "work-local" });
+    expect(res.status).toBe(400);
+    expect(opts).toBeUndefined();
+  });
+});
+
+// The card used to carry the repo, and the spawn route used to fall back to it. Posting `repo` on a
+// card is now silently stripped by z.object, so this asserts the CONSEQUENCE rather than the key's
+// absence — a test that only checked the stored shape would still pass if the fallback came back.
+describe("a card no longer supplies the spawn target", () => {
+  it("stores no repo from a create body, and a later spawn with no target is refused", async () => {
+    const { app, spawn } = makeApiWithSpawn(tmpDir);
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
+    const created = await (await app.request("/api/boards/test/tasks", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "My Task", status: "todo", repo: "corral" }),
+    })).json() as { id: string } & Record<string, unknown>;
+    expect(Object.hasOwn(created, "repo")).toBe(false);
+    const res = await app.request(`/api/boards/test/tasks/${created.id}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local" }),
+    });
+    expect(res.status).toBe(400);
+    expect(spawn.mock.calls).toHaveLength(0);
+  });
+});
+
+describe("POST /api/boards/:bid/tasks/:tid/spawn — unknown_repo", () => {
+  async function spawnWith(body: Record<string, unknown>): Promise<{ res: Response; spawned: boolean }> {
+    const { app, spawn } = makeApiWithSpawn(tmpDir);
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
+    const { id } = await (await app.request("/api/boards/test/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "My Task", status: "todo" }) })).json() as { id: string };
+    const res = await app.request(`/api/boards/test/tasks/${id}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    return { res, spawned: spawn.mock.calls.length > 0 };
+  }
+
+  // Its own code, not the blanket `validation`: the MCP tool re-renders THIS case as "repository not
+  // configured — retry with one of…", and keying that on `validation` would answer the same for a
+  // bad model id.
+  it("400s with unknown_repo for a repo that is not configured, before any spawn work", async () => {
+    const { res, spawned } = await spawnWith({ env: "work-local", repo: "not-configured" });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: { code: string } }).error.code).toBe("unknown_repo");
+    expect(spawned).toBe(false);
+  });
+
+  it("a different bad field still returns validation, not unknown_repo", async () => {
+    const { res } = await spawnWith({ env: "work-local", targetWorkspaceId: null, repo: "corral", model: "bad model!" });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: { code: string } }).error.code).toBe("validation");
+  });
+
+  it("an unknown env still returns validation, not unknown_repo", async () => {
+    const { res } = await spawnWith({ env: "nope", repo: "corral" });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: { code: string } }).error.code).toBe("validation");
+  });
+
+  // A key like "__proto__" resolves to an inherited value on a plain index — Object.hasOwn is what
+  // keeps a client string from becoming a path.
+  it("400s on a prototype key rather than resolving an inherited value", async () => {
+    const { res, spawned } = await spawnWith({ env: "work-local", repo: "__proto__" });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: { code: string } }).error.code).toBe("unknown_repo");
+    expect(spawned).toBe(false);
   });
 });

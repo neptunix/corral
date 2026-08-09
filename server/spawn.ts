@@ -91,7 +91,15 @@ export interface SpawnOpts {
   // only this server-generated, shell-quoted path does. Local environments only (the route enforces
   // that): the file lives on the corral host, and `cat` would otherwise run on a remote box.
   readonly briefPath?: string;
-  readonly targetWorkspaceId?: string | null;     // null/absent = create a new workspace
+  /**
+   * THREE-state, and the three states are not interchangeable:
+   *   - a workspace id → join that workspace;
+   *   - explicit `null` → create a new workspace at `repoPath`;
+   *   - ABSENT → resolve `repo` to its workspace: join the space labelled with the repo key if one
+   *     exists, else create at `repoPath`.
+   * The route passes the caller's shape straight through; do not collapse absent to null here.
+   */
+  readonly targetWorkspaceId?: string | null;
   readonly repoPath?: string | null;              // resolved env.repos[repo]; required to create
   /** The one string used as the herdr tab label, `--name`, and `--remote-control`'s name. Composed by
    *  the route (composeSessionName); when absent the tab falls back to `<taskSlug>-<suffix>`. */
@@ -111,6 +119,12 @@ export interface SpawnOpts {
   readonly tabCloseFn?: (env: HerdrEnv, tabId: string, exec?: ExecFn) => Promise<void>;
   readonly workspaceCloseFn?: (env: HerdrEnv, workspaceId: string, exec?: ExecFn) => Promise<void>;
   readonly workspaceListFn?: (env: HerdrEnv) => Promise<{ workspace_id: string; label: string }[]>;
+  /** Listing used ONLY to resolve a repo to its workspace. Deliberately separate from
+   *  `workspaceListFn`, and deliberately without a default: that path reads "no space carries this
+   *  label" as "create one", so a listing that silently degraded to `[]` — the lenient parser, or
+   *  the no-op default above — would create a second workspace for a repository that already has
+   *  one. Wire `listWorkspacesStrict` (server/index.ts does); absent, resolution refuses. */
+  readonly workspaceListStrictFn?: (env: HerdrEnv) => Promise<{ workspace_id: string; label: string }[]>;
   readonly listPanesFn?: (env: HerdrEnv, workspaceId: string, exec?: ExecFn) => Promise<{ paneId: string; cwd: string }[]>;
 }
 
@@ -166,7 +180,6 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
       // out of the substitution (spec A.7 is withdrawn).
       ? `${launch} "$(cat ${quote([opts.briefPath])} || printf '%s' ${quote([BRIEF_FALLBACK])}; rm -f ${quote([opts.briefPath])})"`
       : launch;
-  const targetWorkspaceId = opts.targetWorkspaceId ?? null;
   const repoPath = opts.repoPath ?? null;
 
   const doList = opts.listFn ?? ((e: HerdrEnv) => import("./herdr.ts").then((h) => h.listSessions(e)));
@@ -179,6 +192,30 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
   const doTabRename = opts.tabRenameFn ?? tabRename;
   const doTabClose = opts.tabCloseFn ?? tabClose;
   const doWorkspaceClose = opts.workspaceCloseFn ?? workspaceClose;
+
+  // Step 0: an ABSENT targetWorkspaceId means "the workspace of this repository". Look it up by
+  // label — the model is one workspace per repository — rather than guessing. The listing is reused
+  // by the join branch below so the label costs no second round-trip.
+  let targetWorkspaceId: string | null = opts.targetWorkspaceId ?? null;
+  let resolvedSpaces: { workspace_id: string; label: string }[] | null = null;
+  // Non-null only when the caller named the repo: then the CONFIGURED path roots the new tab, not
+  // whatever directory the matched space's existing panes happen to sit in.
+  let repoRootCwd: string | null = null;
+  if (opts.targetWorkspaceId === undefined && repo !== null && repoPath !== null) {
+    const doWorkspaceListStrict = opts.workspaceListStrictFn;
+    if (doWorkspaceListStrict === undefined) {
+      throw new Error("spawn: resolving a workspace by repo needs workspaceListStrictFn — none was wired");
+    }
+    resolvedSpaces = await doWorkspaceListStrict(env);
+    const key = repo.toLowerCase();
+    // Lexicographically smallest id on a tie, so a retry makes the same choice and rejoins the
+    // session it started rather than opening a second one beside it.
+    targetWorkspaceId = resolvedSpaces
+      .filter((w) => w.label.toLowerCase() === key)
+      .map((w) => w.workspace_id)
+      .sort()[0] ?? null;
+    repoRootCwd = repoPath;
+  }
 
   // Step 1: resolve the target workspace (join existing, or create a new one at repoPath).
   let workspaceId: string;
@@ -193,7 +230,7 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
     // Join: label from the picked workspace, cwd from one of its panes (a custom space's own path,
     // not the repo path). panes[0].cwd is a heuristic when panes disagree; guarded fallbacks follow.
     workspaceId = targetWorkspaceId;
-    const allWss = await doWorkspaceList(env);
+    const allWss = resolvedSpaces ?? await doWorkspaceList(env);
     const targetWs = allWss.find((w) => w.workspace_id === targetWorkspaceId);
     workspaceLabel = targetWs?.label ?? repo ?? taskSlug;
     if (opts.resumeSessionId !== undefined) {
@@ -218,7 +255,7 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
       }
     } else {
       const panes = await doListPanes(env, workspaceId);
-      tabCwd = panes[0]?.cwd ?? repoPath ?? cwd;
+      tabCwd = repoRootCwd ?? panes[0]?.cwd ?? repoPath ?? cwd;
 
       // Step 2 (join only): idempotency — a live tab named exactly `tabName` (the chosen suffix) that
       // already lives IN this exact workspace and isn't carded yet → rejoin it. Scope by actual pane

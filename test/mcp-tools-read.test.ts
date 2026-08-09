@@ -31,6 +31,7 @@ function stub(over: Partial<CorralClient>): CorralClient {
     attach: async () => undefined,
     spawn: async () => ({ env: "work-local", paneId: "w1:p2", name: "n" }),
     closeSession: async () => undefined,
+    spawnTargets: async () => [],
     ...over,
   };
 }

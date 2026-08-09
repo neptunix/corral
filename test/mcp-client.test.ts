@@ -71,7 +71,7 @@ describe("corral client", () => {
       sentBody = typeof init?.body === "string" ? init.body : "";
       return jsonResponse({
         id: "t_abcdefg", title: "T", description: "", status: "doing", priority: null,
-        repo: null, sessions: [], createdAt: 1, updatedAt: 2,
+        sessions: [], createdAt: 1, updatedAt: 2,
       });
     });
     await client.patchTask({ boardId: "b", taskId: "t_abcdefg", patch: { status: "doing" } });
@@ -119,7 +119,7 @@ describe("corral client", () => {
       columns: [{ id: "todo", label: "Todo" }, { id: "doing", label: "Doing" }],
       tasks: [{
         id: "t_abcdefg", title: "Ship the client", description: "", status: "doing",
-        priority: "p1", repo: null, sessions: [], createdAt: 1, updatedAt: 2,
+        priority: "p1", sessions: [], createdAt: 1, updatedAt: 2,
       }],
     }];
     const client = createClient("http://127.0.0.1:8787", async (input) => {
@@ -134,8 +134,8 @@ describe("corral client", () => {
   it("spawns a session with the exact method, URL, and JSON body the route expects", async () => {
     const calls: { url: string; method: string | undefined; body: string }[] = [];
     // A realistic spawn response: the real route (server/api.ts) replies with the full stored
-    // SessionLink plus `idempotent`, not the bare {env,paneId,name} the client's schema declares —
-    // SpawnResultSchema is intentionally non-strict, so it must accept this superset and strip the rest.
+    // SessionLink plus `idempotent`, a superset of what the client's schema declares —
+    // SpawnResultSchema is intentionally non-strict, so it must accept it and strip the rest.
     const client = createClient("http://127.0.0.1:8787", async (input, init) => {
       calls.push({ url: urlOf(input), method: init?.method, body: typeof init?.body === "string" ? init.body : "" });
       return jsonResponse({
@@ -149,7 +149,10 @@ describe("corral client", () => {
     expect(call?.method).toBe("POST");
     expect(new URL(call?.url ?? "").pathname).toBe("/api/boards/b/tasks/t_abcdefg/spawn");
     expect(JSON.parse(call?.body ?? "")).toEqual({ env: "work-local", brief: "run the tests" });
-    expect(result).toEqual({ env: "work-local", paneId: "w2:p3", name: "task-a" });
+    expect(result).toEqual({
+      env: "work-local", paneId: "w2:p3", name: "task-a",
+      workspaceLabel: "task-a", cwdSnapshot: "/repo", idempotent: false,
+    });
   });
 
   it("sends name, model and remoteControl in the spawn body when supplied", async () => {
@@ -196,5 +199,61 @@ describe("corral client", () => {
     const client = createClient("http://127.0.0.1:8787", async () =>
       new Response("not json", { status: 200, headers: { "Content-Type": "text/plain" } }));
     await expect(client.attention()).rejects.toMatchObject({ code: "bad_response" });
+  });
+});
+
+describe("corral client — spawn target and location", () => {
+  it("sends repo in the spawn body when supplied, and omits it when not", async () => {
+    const bodies: unknown[] = [];
+    const client = createClient("http://127.0.0.1:8787", async (_input, init) => {
+      bodies.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
+      return jsonResponse({ env: "work-local", paneId: "w2:p3", name: "task-a" });
+    });
+    await client.spawn({ boardId: "b", taskId: "t_abcdefg", env: "work-local", brief: "go", repo: "corral" });
+    await client.spawn({ boardId: "b", taskId: "t_abcdefg", env: "work-local", brief: "go" });
+    expect(bodies[0]).toEqual({ env: "work-local", brief: "go", repo: "corral" });
+    expect(bodies[1]).toEqual({ env: "work-local", brief: "go" });
+  });
+
+  it("carries workspaceLabel, cwdSnapshot and idempotent through from the route", async () => {
+    const client = createClient("http://127.0.0.1:8787", async () => jsonResponse({
+      env: "work-local", paneId: "w2:p3", name: "task-a",
+      workspaceLabel: "corral", cwdSnapshot: "/repos/corral", idempotent: true,
+    }));
+    const r = await client.spawn({ boardId: "b", taskId: "t_abcdefg", env: "work-local", brief: "go" });
+    expect(r.workspaceLabel).toBe("corral");
+    expect(r.cwdSnapshot).toBe("/repos/corral");
+    expect(r.idempotent).toBe(true);
+  });
+
+  // The MCP process and the corral server are not released together. A required field here would
+  // turn a spawn that actually succeeded into a parse error.
+  it("still parses a spawn reply from a server that omits the location fields", async () => {
+    const client = createClient("http://127.0.0.1:8787", async () =>
+      jsonResponse({ env: "work-local", paneId: "w2:p3", name: "task-a" }));
+    const r = await client.spawn({ boardId: "b", taskId: "t_abcdefg", env: "work-local", brief: "go" });
+    expect(r.paneId).toBe("w2:p3");
+    expect(r.workspaceLabel).toBeUndefined();
+  });
+
+  it("reads the configured repo names from the existing spawn-targets route", async () => {
+    const urls: string[] = [];
+    const client = createClient("http://127.0.0.1:8787", async (input) => {
+      urls.push(urlOf(input));
+      return jsonResponse({ spaces: [{ workspaceId: "w1", label: "corral" }], repos: [{ name: "corral" }, { name: "demo-api" }] });
+    });
+    const repos = await client.spawnTargets("work-local");
+    expect(new URL(urls[0] ?? "").pathname).toBe("/api/envs/work-local/spawn-targets");
+    expect(repos).toEqual(["corral", "demo-api"]);
+  });
+
+  it("encodes a crafted env id in the spawn-targets path", async () => {
+    const urls: string[] = [];
+    const client = createClient("http://127.0.0.1:8787", async (input) => {
+      urls.push(urlOf(input));
+      return jsonResponse({ spaces: [], repos: [] });
+    });
+    await client.spawnTargets("a/b?c");
+    expect(new URL(urls[0] ?? "").pathname).toBe("/api/envs/a%2Fb%3Fc/spawn-targets");
   });
 });

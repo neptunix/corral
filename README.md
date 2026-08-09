@@ -371,10 +371,16 @@ When you spawn, corral opens a fresh herdr workspace/tab **in that directory** a
 environment's `spawnCommand` there — so each path must be a real directory on that
 environment's machine. Path rules follow the shell that `cd`s into them: **local** paths may
 use `~` (`~/code/corral`); **remote** paths must be **absolute** (`/home/me/svc`) — `~` is not
-expanded on the remote shell. A repo you didn't list can't be spawned into by name (corral
-errors *"no path configured for repo … — add it to environments.json `repos`"*); you can still
+expanded on the remote shell. A repo you didn't list can't be spawned into by name; you can still
 spawn into an already-open herdr workspace instead. See `environments.example.json` for
 complete local and remote entries.
+
+The names are also what `corral_spawn`'s `repo` argument takes, and a name that isn't configured
+comes back as a refusal **listing the ones that are** — from the UI you pick from a menu, and an
+agent gets the same menu the moment it guesses wrong. One workspace per repository is the
+convention corral spawns by: naming a repo lands the session in that repository's workspace,
+joining it if it already exists and creating it at the configured path otherwise, and the new tab
+starts at that configured path either way.
 
 ## Multiple Claude accounts
 
@@ -605,7 +611,7 @@ The seven tools:
 - `corral_task_bind` — link this session to an existing task card (no card creation).
 - `corral_task_read` — the bound card's full description. `corral_whoami` renders it as a one-line preview, because that call is repeated many times a session and a long progress log would be re-inlined on every one; this is the opt-in full read, and the one to call before rewriting the description.
 - `corral_task_update` — update the bound card's title, description, status, or priority.
-- `corral_spawn` — start a new session on this session's card, with a brief as its first message.
+- `corral_spawn` — start a new session on this session's card, with a brief as its first message; `repo` says which project it lands in.
 - `corral_session_close` — stop this session or one on the same card; suspend, not destroy.
 
 The server registers **no tools outside herdr** — launched with `HERDR_ENV`/`HERDR_PANE_ID` unset,
@@ -613,9 +619,12 @@ it connects but declares no tool capability at all, so a non-herdr session sees 
 pays nothing for the connection. (Because the capability is absent rather than empty, a `tools/list`
 sent anyway comes back `Method not found` — expected, not a fault.) Installing it at user scope is
 therefore safe for any non-herdr session too. A spawn brief is available for **local environments only**, and the audit
-trail it leaves records coordinates and size, never contents. A same-environment spawn **joins the
-caller's own workspace** (a new tab beside it); a cross-environment spawn **roots a new workspace**
-at that environment's configured repo path instead. Phase 1 has no path to write into another
+trail it leaves records coordinates and size, never contents. Where the new session lands is the
+caller's to state: omit `repo` and it **joins the caller's own workspace** (a new tab beside it, so
+a worktree checkout stays visible); pass `repo` and it lands in **that repository's workspace**, at
+its configured path. There is no inferred default — a spawn with neither (a cross-environment
+handoff, say, where the caller has no workspace over there) is refused with the target
+environment's configured repository names, rather than guessed at. Phase 1 has no path to write into another
 *existing* session's pane — the spawn brief is the only agent-authored text that reaches a pane at
 all, and that pane is always brand-new. `corral_spawn` and `corral_session_close` carry MCP's
 `destructiveHint` annotation (and say so in their descriptions); `corral_whoami`, `corral_fleet` and

@@ -14,7 +14,7 @@ function link(env: string, paneId: string): SessionLink {
   return { env, paneId, tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "", cwdSnapshot: "", sessionId: null };
 }
 function task(id: string, sessions: readonly SessionLink[]): Task {
-  return { id, title: id, description: "", status: "todo", priority: null, repo: null, sessions: [...sessions], createdAt: 0, updatedAt: 0 };
+  return { id, title: id, description: "", status: "todo", priority: null, sessions: [...sessions], createdAt: 0, updatedAt: 0 };
 }
 function board(id: string, tasks: readonly Task[]): Board {
   return { id, label: id, columns: [], tasks: [...tasks] };

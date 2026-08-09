@@ -137,8 +137,7 @@ function boardWithLink(over: Partial<{ tabId: string; paneId: string; sessionId:
   return {
     id: "b", label: "B", columns: [],
     tasks: [{
-      id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, repo: null,
-      sessions: [{
+      id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null,       sessions: [{
         env: "work-local", paneId: over.paneId ?? "w1:p2", tabId: over.tabId ?? "w1:t2",
         tabLabel: over.tabLabel ?? "task-a", workspaceId: "w1", workspaceLabel: "c", name: "task-a",
         cwdSnapshot: "/c", sessionId: over.sessionId ?? SID,
@@ -209,7 +208,7 @@ describe("startZombieReaper", () => {
     const board: Board = {
       id: "b", label: "B", columns: [],
       tasks: [{
-        id: "t", title: "x", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1,
+        id: "t", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1,
         sessions: [
           { env: "work-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID },
           { env: "personal-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID2 },
@@ -251,7 +250,7 @@ describe("startZombieReaper", () => {
     const board: Board = {
       id: "b", label: "B", columns: [],
       tasks: [{
-        id: "t", title: "x", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1,
+        id: "t", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1,
         sessions: [
           { env: "work-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID },
           { env: "personal-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID2 },
@@ -349,7 +348,7 @@ describe("startZombieReaper", () => {
       const board: Board = {
         id: "b", label: "B", columns: [],
         tasks: [{
-          id: "t", title: "x", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1,
+          id: "t", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1,
           sessions: [
             { env: "work-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID },
             { env: "personal-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID2 },
@@ -385,8 +384,8 @@ describe("startZombieReaper", () => {
     const board: Board = {
       id: "b", label: "B", columns: [],
       tasks: [
-        { id: "t1", title: "x", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1, sessions: [linkSession(SID)] },
-        { id: "t2", title: "y", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1, sessions: [linkSession(SID2)] },
+        { id: "t1", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions: [linkSession(SID)] },
+        { id: "t2", title: "y", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions: [linkSession(SID2)] },
       ],
     };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -430,8 +429,8 @@ describe("startZombieReaper", () => {
     const board: Board = {
       id: "b", label: "B", columns: [],
       tasks: [
-        { id: "t1", title: "x", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1, sessions: [linkSession("w1:t1", SID)] },
-        { id: "t2", title: "y", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1, sessions: [linkSession("w1:t2", SID2)] },
+        { id: "t1", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions: [linkSession("w1:t1", SID)] },
+        { id: "t2", title: "y", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions: [linkSession("w1:t2", SID2)] },
       ],
     };
     const closed: string[] = [];
@@ -557,7 +556,7 @@ describe("startZombieReaper", () => {
     });
     const board: Board = {
       id: "b", label: "B", columns: [],
-      tasks: [{ id: "t", title: "x", description: "", status: "todo", priority: null, repo: null, createdAt: 1, updatedAt: 1,
+      tasks: [{ id: "t", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1,
         sessions: [link("w1:p2", "w1:t2", "w1", SID), link("w2:p3", "w2:t3", "w2", "dddddddd-1111-2222-3333-444444444444")] }],
     };
     const closed: string[] = [];
@@ -599,8 +598,7 @@ describe("startZombieReaper", () => {
     });
     const board: Board = {
       id: "b", label: "B", columns: [],
-      tasks: [{ id: "t", title: "x", description: "", status: "todo", priority: null, repo: null,
-        createdAt: 1, updatedAt: 1, sessions: [sess("w1:p2", "w1:t2", "w1", SID), sess("w2:p3", "w2:t3", "w2", SID2)] }],
+      tasks: [{ id: "t", title: "x", description: "", status: "todo", priority: null,         createdAt: 1, updatedAt: 1, sessions: [sess("w1:p2", "w1:t2", "w1", SID), sess("w2:p3", "w2:t3", "w2", SID2)] }],
     };
     const empty: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
     const aLive: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [{
