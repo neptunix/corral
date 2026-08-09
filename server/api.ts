@@ -148,9 +148,23 @@ const CreateBoardBodySchema = z.object({
   label: z.string().min(1),
 });
 
+// PATCH-BOUNDARY constraints — deliberately NOT in BoardSchema (server/storage.ts parses stored
+// boards with .parse, so a constraint there would make a bad board unloadable).
+//
+// The leading-character rule is load-bearing, not cosmetic: the command's bytes become one positional
+// argv word for `claude`, and quoting protects that word from the SHELL, not from Claude Code's
+// argument parser. A preset starting with `-` is read as an option, never as the prompt. Same rule,
+// same reason, as the `model` field on the spawn route.
+const SpawnPresetPatchSchema = z.object({
+  id: z.string().min(1),
+  text: z.string().trim().min(1).max(2000).regex(/^[/A-Za-z0-9]/),
+});
+
 const PatchBoardBodySchema = z.object({
   label: z.string().min(1).optional(),
   columns: z.array(ColumnSchema).optional(),
+  spawnPresets: z.array(SpawnPresetPatchSchema).max(20).optional(),
+  defaultSpawnPresetId: z.string().nullable().optional(),
 });
 
 const CreateTaskBodySchema = z.object({
@@ -542,9 +556,12 @@ export function createApi(opts: {
     if (!parsed.success) return c.json({ error: { code: "validation", message: parsed.error.message } }, 400);
     const bid = c.req.param("bid");
     if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
-    const { label, columns } = parsed.data;
+    const { label, columns, spawnPresets, defaultSpawnPresetId } = parsed.data;
     if (columns?.length === 0) {
       return c.json({ error: { code: "validation", message: "columns must not be empty" } }, 400);
+    }
+    if (spawnPresets !== undefined && new Set(spawnPresets.map((p) => p.id)).size !== spawnPresets.length) {
+      return c.json({ error: { code: "validation", message: "duplicate preset id" } }, 400);
     }
     const result = await opts.storage.withBoard(bid, (existing) => {
       if (existing === null) return { board: null, result: null };
@@ -564,6 +581,15 @@ export function createApi(opts: {
           };
         }
         updated = { ...updated, columns };
+      }
+      if (spawnPresets !== undefined) updated = { ...updated, spawnPresets: [...spawnPresets] };
+      if (defaultSpawnPresetId !== undefined) updated = { ...updated, defaultSpawnPresetId };
+      // A default pointing at no preset is no default — resolve it here rather than leaving a dangling
+      // id for every reader to re-handle. Re-checked after BOTH assignments, so replacing the list in
+      // the same patch that keeps the old default cannot leave a dangle behind.
+      if (updated.defaultSpawnPresetId !== null
+        && !updated.spawnPresets.some((p) => p.id === updated.defaultSpawnPresetId)) {
+        updated = { ...updated, defaultSpawnPresetId: null };
       }
       return { board: updated, result: updated };
     });

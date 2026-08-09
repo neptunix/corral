@@ -1991,3 +1991,71 @@ it("preserves column order across a PATCH round-trip", async () => {
   const board = await (await app.request("/api/boards/ordered")).json() as { columns: { id: string }[] };
   expect(board.columns.map((c) => c.id)).toEqual(["doing", "todo", "done"]);
 });
+
+describe("PATCH /api/boards/:bid — start-command presets", () => {
+  async function makeBoard(app: ReturnType<typeof makeApi>): Promise<void> {
+    await app.request("/api/boards", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "Presets" }),
+    });
+  }
+  function patch(app: ReturnType<typeof makeApi>, body: unknown): Promise<Response> {
+    return Promise.resolve(app.request("/api/boards/presets", {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }));
+  }
+
+  it("persists presets and the default id", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    const res = await patch(app, {
+      spawnPresets: [{ id: "p1", text: "/plan" }, { id: "p2", text: "Read the card first." }],
+      defaultSpawnPresetId: "p1",
+    });
+    expect(res.status).toBe(200);
+    const board = await (await app.request("/api/boards/presets")).json() as {
+      spawnPresets: { id: string; text: string }[]; defaultSpawnPresetId: string | null;
+    };
+    expect(board.spawnPresets.map((p) => p.id)).toEqual(["p1", "p2"]);
+    expect(board.defaultSpawnPresetId).toBe("p1");
+  });
+
+  it("rejects a preset beginning with a dash — it would reach claude as a flag", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    expect((await patch(app, { spawnPresets: [{ id: "p1", text: "--continue" }] })).status).toBe(400);
+  });
+
+  it("rejects blank, over-long, over-count and duplicate-id preset lists", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    expect((await patch(app, { spawnPresets: [{ id: "p1", text: "   " }] })).status).toBe(400);
+    expect((await patch(app, { spawnPresets: [{ id: "p1", text: `/${"x".repeat(2000)}` }] })).status).toBe(400);
+    expect((await patch(app, {
+      spawnPresets: Array.from({ length: 21 }, (_, i) => ({ id: `p${String(i)}`, text: "/plan" })),
+    })).status).toBe(400);
+    expect((await patch(app, {
+      spawnPresets: [{ id: "dup", text: "/plan" }, { id: "dup", text: "/review" }],
+    })).status).toBe(400);
+  });
+
+  it("resolves a defaultSpawnPresetId matching no preset to no default", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    await patch(app, { spawnPresets: [{ id: "p1", text: "/plan" }], defaultSpawnPresetId: "gone" });
+    const board = await (await app.request("/api/boards/presets")).json() as { defaultSpawnPresetId: string | null };
+    expect(board.defaultSpawnPresetId).toBeNull();
+  });
+
+  it("keeps a preset the default when only its text is edited", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    await patch(app, { spawnPresets: [{ id: "p1", text: "/plan" }], defaultSpawnPresetId: "p1" });
+    await patch(app, { spawnPresets: [{ id: "p1", text: "/plan the migration" }] });
+    const board = await (await app.request("/api/boards/presets")).json() as {
+      spawnPresets: { text: string }[]; defaultSpawnPresetId: string | null;
+    };
+    expect(board.spawnPresets[0]?.text).toBe("/plan the migration");
+    expect(board.defaultSpawnPresetId).toBe("p1");
+  });
+});
