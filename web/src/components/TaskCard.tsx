@@ -17,15 +17,15 @@ const PRIORITY_STYLE: Record<string, string> = {
   p3: "bg-slate-700 text-slate-300 light:bg-slate-200 light:text-slate-700",
 };
 const PRIORITY_LABEL: Record<string, string> = { p0: "P0", p1: "P1", p2: "P2", p3: "P3" };
-// Keyed by the tone sessionStateTone returns, NOT by herdr's agent_status: the dot and the label it
-// sits beside must come from ONE decision, or they contradict each other — a sky-blue "done" dot next
-// to the word "idle". `unknown` keeps the class the old herdr-keyed lookup fell back to, so a detached
-// row and the closing…/resuming… transients look exactly as before.
+// Keyed by tone, NOT by herdr's agent_status — the dot and the label must come from one decision.
+// `unknown` keeps the class the herdr-keyed lookup fell back to, so the closing/resuming transients are
+// not repainted; the values are pinned in test/ui-safety.test.ts.
 const TONE_DOT: Record<SessionStateTone, string> = {
   working: "bg-emerald-400 light:bg-emerald-600",
   attention: "bg-red-400 light:bg-red-600",
   idle: "bg-slate-500",
   done: "bg-sky-400 light:bg-sky-600",
+  unavailable: "bg-amber-400 light:bg-amber-600",
   unknown: "bg-slate-500",
 };
 

@@ -115,6 +115,56 @@ describe("UI wiring — every surface renders session state through sessionState
     expect(read("components/UnassignedView.tsx")).toContain("const TONE_COLOR: Record<SessionStateTone, string>");
   });
 
+  // The assertions above pin the palettes' SHAPE. Nothing pinned a VALUE, so repainting `attention` to
+  // `done`'s blue — a session waiting on a human rendered as finished — kept the whole suite green.
+  // These pin the two claims that carry meaning: the legacy fallback, and that the states a user must
+  // tell apart are actually different colours.
+  const PALETTES = [
+    ["components/TaskCard.tsx", "TONE_DOT", "bg-slate-500"],
+    ["components/UnassignedView.tsx", "TONE_COLOR", "text-slate-400 light:text-slate-500"],
+  ] as const;
+
+  const paletteOf = (src: string, name: string): Record<string, string> => {
+    const body = src.split(`const ${name}: Record<SessionStateTone, string> = {`)[1]?.split("};")[0] ?? "";
+    const out: Record<string, string> = {};
+    for (const m of body.matchAll(/(\w+): "([^"]+)"/g)) {
+      const [, key, value] = m;
+      if (key !== undefined && value !== undefined) out[key] = value;
+    }
+    // Guard the PARSER, not just its output: a rename that silently yielded {} would make every
+    // assertion below vacuous.
+    if (Object.keys(out).length === 0) throw new Error(`could not parse ${name}`);
+    return out;
+  };
+
+  it("keeps `unknown` on the class the herdr-keyed lookup fell back to, so the transients are not repainted", () => {
+    for (const [file, name, legacy] of PALETTES) {
+      expect(paletteOf(read(file), name).unknown, file).toBe(legacy);
+    }
+  });
+
+  it("gives `unavailable` a colour distinct from `idle` on both surfaces", () => {
+    for (const [file, name] of PALETTES) {
+      const p = paletteOf(read(file), name);
+      expect(Object.keys(p).sort(), file)
+        .toEqual(["attention", "done", "idle", "unavailable", "unknown", "working"]);
+      // THE regression this tone exists for: "corral could not read this" must not look like "at rest".
+      expect(p.unavailable, file).not.toBe(p.idle);
+      expect(p.unavailable, file).not.toBe(p.unknown);
+    }
+  });
+
+  // A tone rendered in another tone's colour is the original bug wearing a different hat, so pin the
+  // colour FAMILY of each semantic tone rather than the exact class (which stays free to be tuned).
+  it("renders each semantic tone in its own colour family", () => {
+    for (const [file, name] of PALETTES) {
+      const p = paletteOf(read(file), name);
+      for (const [tone, family] of [["working", "emerald"], ["attention", "red"], ["done", "sky"], ["unavailable", "amber"]] as const) {
+        expect(p[tone], `${file} ${tone}`).toContain(family);
+      }
+    }
+  });
+
   it("SessionModal renders the label too", () => {
     expect(read("components/SessionModal.tsx"))
       .toContain("sessionStateLabel({ status, claudeStatus, waitingFor, registryStatus })");

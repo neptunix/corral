@@ -11,12 +11,12 @@ import { envLabel } from "../lib/env";
 import { toSnapshotPreview } from "../lib/preview";
 import { sessionStateLabel, sessionStateTone, type SessionStateTone } from "../lib/session-state";
 
-// Keyed by the tone sessionStateTone returns, NOT by herdr's agent_status — the dot and the state word
-// at the front of the subtitle must come from ONE decision, or they contradict each other. `unknown`
-// keeps the class the old herdr-keyed lookup fell back to.
+// Keyed by tone, NOT by herdr's agent_status — the dot and the state word at the front of the subtitle
+// must come from one decision. Values pinned in test/ui-safety.test.ts.
 const TONE_COLOR: Record<SessionStateTone, string> = {
   working: "text-emerald-400 light:text-emerald-600", idle: "text-slate-500",
   attention: "text-red-400 light:text-red-600", done: "text-sky-400 light:text-sky-600",
+  unavailable: "text-amber-400 light:text-amber-600",
   unknown: "text-slate-400 light:text-slate-500",
 };
 

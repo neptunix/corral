@@ -132,16 +132,32 @@ describe("sessionStateTone", () => {
     expect(sessionStateTone(live({ status: "blocked", claudeStatus: null, registryStatus: "ok" }))).toBe("attention");
   });
 
-  // "state unavailable" must not be coloured as though corral knew something. A stale claudeStatus is
-  // still attached on a failed read, and colouring from it would contradict the words outright.
-  it("claims nothing when the label says state unavailable", () => {
+  // "state unavailable" gets its OWN tone, not the quiet default: sharing a colour with `idle` would
+  // show a session corral cannot read as one at rest — the exact failure registryStatus exists for.
+  // A stale claudeStatus is still attached on a failed read and must not be coloured from.
+  it("has a dedicated tone when the label says state unavailable", () => {
     for (const registryStatus of ["not-found", "bad-schema", "read-error"] as const) {
-      expect(sessionStateTone(live({ status: "working", claudeStatus: "busy", registryStatus })), registryStatus).toBe("unknown");
+      expect(sessionStateTone(live({ status: "working", claudeStatus: "busy", registryStatus })), registryStatus).toBe("unavailable");
     }
   });
 
-  it("is the working tone while the label says starting", () => {
-    expect(sessionStateTone(live({ status: "idle", registryStatus: "no-session-ref" }))).toBe("working");
+  // A Claude status this version does not know. The label prints the word verbatim, so a resting dot
+  // beside it would be the original bug again — one Claude release away, since claudeStatus is a bare
+  // string read from an undocumented file.
+  it("does not claim a resting dot for a Claude status it does not recognise", () => {
+    const s = live({ status: "working", claudeStatus: "compacting", registryStatus: "ok" });
+    expect(sessionStateLabel(s)).toBe("compacting");
+    expect(sessionStateTone(s)).toBe("unavailable");
+  });
+
+  // "starting" claims NOTHING, and green would be wrong rather than merely loud: sessionId stays null
+  // forever for a bare-shell agent (docs/adr/0003) and for any pane started outside a herdr context
+  // (server/poller.ts's install-drift warning), so those rows would glow with the strongest activity
+  // colour on the board permanently.
+  it("claims nothing while the label says starting", () => {
+    for (const status of ["idle", "working", "unknown"]) {
+      expect(sessionStateTone(live({ status, registryStatus: "no-session-ref" })), status).toBe("unknown");
+    }
   });
 
   // The optimistic close/resume synthetics and a detached row are outside herdr's vocabulary. They land
@@ -153,5 +169,27 @@ describe("sessionStateTone", () => {
       expect(sessionStateTone(live({ status, registryStatus: null })), status).toBe("unknown");
     }
     expect(sessionStateTone(null)).toBe("unknown");
+  });
+
+  // The invariant, as a PROPERTY over every real combination rather than as hand-picked cases: wherever
+  // the label falls back to herdr's word, the tone must fall back to herdr's colour. Enumerated cases
+  // drift as branches are added; this cannot. Sweeps 7 x 5 x 6 = 210 combinations.
+  it("label and tone fall back to herdr together, for every field combination", () => {
+    const registryStatuses = [null, "ok", "no-config-dirs", "no-session-ref", "not-found", "bad-schema", "read-error"] as const;
+    let asserted = 0;
+    for (const registryStatus of registryStatuses) {
+      for (const status of ["working", "blocked", "done", "idle", CLOSING_STATUS]) {
+        for (const claudeStatus of [null, "idle", "busy", "waiting", "shell", "compacting"]) {
+          const s = live({ status, claudeStatus, registryStatus });
+          if (sessionStateLabel(s) !== status) continue;
+          // registryStatus null forces the herdr branch, so this is herdr's tone for that word.
+          const herdr = sessionStateTone(live({ status, registryStatus: null }));
+          expect(sessionStateTone(s), `${status}/${String(claudeStatus)}/${String(registryStatus)}`).toBe(herdr);
+          asserted++;
+        }
+      }
+    }
+    // The loop must actually assert something — a `continue` that always fired would pass silently.
+    expect(asserted).toBeGreaterThan(50);
   });
 });

@@ -1,12 +1,11 @@
 import type { AttentionMap, SessionRow, Snapshot, StatuslineData } from "@shared/schema";
-import { readFileSync } from "node:fs";
 import { describe, it, expect, vi } from "vitest";
 
 import { CLAUDE_REGISTRY_POLL_MS } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import type { AttentionStore } from "../server/attention-store.ts";
-import { createPoller, type ListFn, type RecapFn, type StatuslineFn } from "../server/poller.ts";
-import { RegistryRecordSchema, type RegistryRead } from "../server/session-registry.ts";
+import { createPoller, recordsEqual, type ListFn, type RecapFn, type StatuslineFn } from "../server/poller.ts";
+import { RegistryRecordSchema, type RegistryRead, type RegistryRecord } from "../server/session-registry.ts";
 
 const A: HerdrEnv = { id: "a", label: "A", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
 const B: HerdrEnv = { id: "b", label: "B", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
@@ -928,20 +927,39 @@ describe("createPoller — the local registry interval", () => {
   });
 
   // recordsEqual lists the compared fields BY HAND, so a field added to RegistryRecordSchema and not
-  // added there silently stops broadcasting that field's changes. Pin the two lists against each other.
-  // Source-level because recordsEqual is a closure inside createPoller and cannot be imported — the
-  // same instrument test/ui-safety.test.ts uses for the render sites.
-  it("recordsEqual compares every field RegistryRecordSchema declares", () => {
-    const src = readFileSync(new URL("../server/poller.ts", import.meta.url).pathname, "utf8");
-    const keys = Object.keys(RegistryRecordSchema.shape);
-    expect(keys).toContain("sessionId");
-    for (const key of keys) {
-      // sessionId is required, so it is compared directly rather than through `?? null`.
-      const expected = key === "sessionId"
-        ? "a.sessionId === b.sessionId"
-        : `(a.${key} ?? null) === (b.${key} ?? null)`;
-      expect(src, key).toContain(expected);
+  // added there silently stops broadcasting that field's changes.
+  //
+  // One mutator per schema field, typed `Record<keyof RegistryRecord, …>` so TYPECHECK fails the day a
+  // field is added to the schema without one. Deliberately NOT a source-text assertion over the
+  // comparison chain: that version passed while the comparison sat commented out, because the string
+  // was still in the file.
+  const FIELD_MUTATORS: Record<keyof RegistryRecord, (r: RegistryRecord) => RegistryRecord> = {
+    sessionId: (r) => ({ ...r, sessionId: OTHER_UUID }),
+    name: (r) => ({ ...r, name: "other" }),
+    nameSource: (r) => ({ ...r, nameSource: "other" }),
+    status: (r) => ({ ...r, status: "other" }),
+    waitingFor: (r) => ({ ...r, waitingFor: "other" }),
+    bridgeSessionId: (r) => ({ ...r, bridgeSessionId: "other" }),
+    updatedAt: (r) => ({ ...r, updatedAt: 999 }),
+  };
+
+  it("recordsEqual notices a change in every field RegistryRecordSchema declares", () => {
+    // Runtime half of the same guard: catches a field REMOVED from the schema while a mutator lingers,
+    // which the type alone would not.
+    expect(Object.keys(FIELD_MUTATORS).sort()).toEqual(Object.keys(RegistryRecordSchema.shape).sort());
+    const base: RegistryRecord = { sessionId: VALID_UUID, status: "idle" };
+    expect(recordsEqual(base, { ...base })).toBe(true);
+    for (const [field, mutate] of Object.entries(FIELD_MUTATORS)) {
+      expect(recordsEqual(base, mutate(base)), field).toBe(false);
     }
+  });
+
+  // `undefined` and `null` are the SAME state — the registry omits the key before the first RC connect
+  // and writes a literal null on disconnect, so treating them as different broadcasts a phantom change.
+  it("recordsEqual treats an absent optional and an explicit null as equal", () => {
+    const base: RegistryRecord = { sessionId: VALID_UUID };
+    expect(recordsEqual(base, { ...base, bridgeSessionId: null })).toBe(true);
+    expect(recordsEqual(base, { ...base, bridgeSessionId: "x" })).toBe(false);
   });
 
   it("keeps the previous record and reports the failure when a read degrades", async () => {

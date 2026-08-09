@@ -16,6 +16,33 @@ import { computeRenames } from "./tab-namer.ts";
 import { readRecap } from "./transcript.ts";
 import { detectTransitions, type WorkingMap } from "./transition.ts";
 
+/**
+ * Shallow field compare over every field RegistryRecordSchema declares. It exists so an unchanged read
+ * does not broadcast — the property that makes a short interval affordable — so it must compare
+ * CONTENT, not identity: every tick produces freshly-parsed objects, so `prev.record !== next` always.
+ *
+ * NOT `JSON.stringify`: key order is not guaranteed across reads of a rewritten file, and two identical
+ * records serialised in different orders would compare unequal and broadcast every tick.
+ *
+ * `?? null` on every optional: the registry writes a literal `null` on disconnect but omits the key
+ * before the first connect, so `undefined` and `null` are the same state here and must not compare
+ * unequal — otherwise the first read after a session's very first RC connect broadcasts twice.
+ *
+ * Module scope and exported so the field list can be tested by BEHAVIOUR against the schema. It was a
+ * closure by placement, not by need — it captures nothing — and a source-text assertion over the
+ * comparison chain is satisfied by a commented-out line, which is not a test.
+ */
+export function recordsEqual(a: RegistryRecord | null, b: RegistryRecord | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.sessionId === b.sessionId
+    && (a.name ?? null) === (b.name ?? null)
+    && (a.nameSource ?? null) === (b.nameSource ?? null)
+    && (a.status ?? null) === (b.status ?? null)
+    && (a.waitingFor ?? null) === (b.waitingFor ?? null)
+    && (a.bridgeSessionId ?? null) === (b.bridgeSessionId ?? null)
+    && (a.updatedAt ?? null) === (b.updatedAt ?? null);
+}
+
 export type ListFn = (env: HerdrEnv) => Promise<SessionRow[]>;
 export type RecapFn = (env: HerdrEnv, sessionId: string) => Promise<{ recap: string | null; status: RecapStatus }>;
 export type StatuslineFn = (env: HerdrEnv, sessionId: string) => Promise<{ data: StatuslineData | null; status: StatuslineStatus }>;
@@ -91,29 +118,6 @@ export function createPoller(opts: {
   const warnedDegraded = new Set<string>();
   const subs = new Set<(s: Snapshot) => void>();
   let snapshot: Snapshot = { envs: {}, sessions: [] };
-
-  /**
-   * Shallow field compare over the seven schema fields. It exists so an unchanged read does not
-   * broadcast — the property that makes a short interval affordable — so it must compare CONTENT, not
-   * identity: every tick produces freshly-parsed objects, and `prev.record !== next` is always true.
-   *
-   * NOT `JSON.stringify`: key order is not guaranteed across reads of a rewritten file, and two
-   * identical records serialised in different orders would compare unequal and broadcast every tick.
-   *
-   * `?? null` on every optional: the registry writes a literal `null` on disconnect but omits the key
-   * before the first connect, so `undefined` and `null` are the same state here and must not compare
-   * unequal — otherwise the first read after a session's very first RC connect broadcasts twice.
-   */
-  function recordsEqual(a: RegistryRecord | null, b: RegistryRecord | null): boolean {
-    if (a === null || b === null) return a === b;
-    return a.sessionId === b.sessionId
-      && (a.name ?? null) === (b.name ?? null)
-      && (a.nameSource ?? null) === (b.nameSource ?? null)
-      && (a.status ?? null) === (b.status ?? null)
-      && (a.waitingFor ?? null) === (b.waitingFor ?? null)
-      && (a.bridgeSessionId ?? null) === (b.bridgeSessionId ?? null)
-      && (a.updatedAt ?? null) === (b.updatedAt ?? null);
-  }
 
   /**
    * A PLAIN SET. There is no precedence rule here and there must not be one: each environment has
