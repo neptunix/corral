@@ -1972,3 +1972,22 @@ describe("landing column when position 0 is closed", () => {
     expect(task.status).toBe("done");
   });
 });
+
+it("preserves column order across a PATCH round-trip", async () => {
+  const app = makeApi(tmpDir);
+  await app.request("/api/boards", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label: "Ordered" }),
+  });
+  const reordered = [
+    { id: "doing", label: "Doing", type: "in-progress" },
+    { id: "todo", label: "Todo", type: "to-do" },
+    { id: "done", label: "Done", type: "closed" },
+  ];
+  await app.request("/api/boards/ordered", {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ columns: reordered }),
+  });
+  const board = await (await app.request("/api/boards/ordered")).json() as { columns: { id: string }[] };
+  expect(board.columns.map((c) => c.id)).toEqual(["doing", "todo", "done"]);
+});
