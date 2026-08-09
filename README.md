@@ -48,8 +48,12 @@ mkdir -p ~/.corral
 cp environments.example.json ~/.corral/environments.json
 $EDITOR ~/.corral/environments.json
 
-# 3. start a herdr server for each session you configured — see "Running herdr" below
-HERDR_SESSION=work herdr server &   # corral talks to this; without it the board stays empty
+# 3. one herdr server per session named in environments.json — see "Running herdr" below.
+#    Without them the board comes up empty. Each session gets its own socket, so each
+#    environment points at its own; repeat the line per session, or run just one.
+#    nohup matters: herdr server dies on SIGHUP, i.e. when you close the window.
+nohup herdr --session work server >/dev/null 2>&1 &
+nohup herdr --session personal server >/dev/null 2>&1 &
 
 # 4. run — from a terminal OUTSIDE Claude Code (see "Launching corral" below)
 npm install          # node-pty is native — compiles against your Node ABI
@@ -95,15 +99,25 @@ that server's lifetime is yours to manage. Verified against herdr 0.7.1 on macOS
 The TUI is optional — corral needs the server, not the terminal UI:
 
 ```bash
-HERDR_SESSION=work herdr server
+nohup herdr --session work server >/dev/null 2>&1 &
 ```
 
-The session is created on first start; there is no `herdr session create` and nothing to set up
+One server per session, and each `local` environment in `environments.json` points at one of them —
+so if you keep separate sessions for separate Claude accounts, you run one of these per session. The
+session is created on first start; there is no `herdr session create` and nothing to set up
 beforehand. Run it from a terminal outside Claude Code, for the same reason corral itself refuses to
-start there (see [Launching corral](#launching-corral)). `HERDR_SESSION` is how you pick which session
-the server serves; it works but is undocumented upstream — `herdr --help` lists only
-`HERDR_CONFIG_PATH`. The alternative, `HERDR_SOCKET_PATH`, also works but sends the log to a shared
-`~/.config/herdr/herdr-server.log` instead of the session's own.
+start there (see [Launching corral](#launching-corral)).
+
+Use the `--session <name>` **flag**, not the `HERDR_SESSION` environment variable. Every herdr pane
+exports `HERDR_SOCKET_PATH`, and that variable silently outranks `HERDR_SESSION` — run
+`HERDR_SESSION=work herdr server` from inside a pane and it reports `herdr server is already running`
+against whichever session that pane belongs to, which is not a session you named. The flag wins over
+the ambient variable, so it works from anywhere.
+
+`nohup` is not decoration: `herdr server` is an ordinary child of your shell and dies on `SIGHUP`, so
+a bare `herdr --session work server &` goes down when you close the terminal window. (The TUI form,
+`herdr --session work`, forks a detached daemon instead and does survive — that is why servers started
+that way outlive their tab.) A supervisor, below, removes the question entirely.
 
 That command puts the socket at `~/.config/herdr/sessions/work/herdr.sock`, and **that exact path is
 what the environment's `socket` must contain** in `environments.json`. Pin it explicitly rather than
@@ -111,21 +125,18 @@ leaving `socket` out: a `local` environment with no `socket` inherits the launch
 `HERDR_SOCKET_PATH`, and once servers start from a launchd agent or a systemd unit there is no such
 variable to inherit.
 
-`herdr --session work` **attaches** to a server that is already running. Run it when nothing is
-running and it starts the server inside your terminal tab instead. That server works and outlives the
-tab — Terminal.app's close dialog will list your whole fleet, but closing the tab does not end the
-session. What you lose is supervision, which is the next part.
+`herdr --session work` with no `server` argument **attaches** to a server that is already up. Run it
+when nothing is up and it starts one inside your terminal tab — that works, and Terminal.app's close
+dialog will list your whole fleet, but closing the tab does not end the session.
 
 ### Keep it running
 
-A hand-started server survives a tab close and a logout, but not a reboot. Give it a supervisor.
+A hand-started server does not survive a reboot. Give it a supervisor. **One service per session**,
+named so you can find it later.
 
-**One service per session**, named so you can find it later — the name is what `launchctl list | grep
-corral` and `systemctl --user list-unit-files 'corral-herdr*'` match on.
-
-Check first. herdr will not let two servers share a session: the second exits with `herdr server is
-already running` and the first is untouched. But a supervisor then retries that failing job forever,
-which reads as "the recipe is broken":
+Check first — herdr will not let two servers share a session (the second exits with `herdr server is
+already running` and the first is untouched), but the supervisor then keeps retrying a job that cannot
+succeed:
 
 ```bash
 herdr session list                                   # already serving this session by hand?
@@ -135,8 +146,7 @@ systemctl --user list-unit-files 'corral-herdr*'     # Linux: same question
 
 **macOS** — `~/Library/LaunchAgents/dev.corral.herdr.work.plist`. `ProgramArguments[0]` **must be an
 absolute path**: launchd gives an agent a minimal `PATH`, and a bare `herdr` fails with `EX_CONFIG`
-before it ever runs. You do not need a `PATH` entry for the agent sessions themselves — the pane's
-login shell supplies that.
+before it ever runs. The agent panes themselves need no `PATH` entry — the pane's shell supplies that.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -148,17 +158,18 @@ login shell supplies that.
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/herdr</string>  <!-- substitute $(command -v herdr) -->
+        <string>--session</string>
+        <string>work</string>
         <string>server</string>
     </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>HERDR_SESSION</key>
-        <string>work</string>
-    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/dev.corral.herdr.work.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/dev.corral.herdr.work.log</string>
 </dict>
 </plist>
 ```
@@ -166,6 +177,9 @@ login shell supplies that.
 ```bash
 launchctl bootstrap gui/$UID ~/Library/LaunchAgents/dev.corral.herdr.work.plist
 ```
+
+launchd does not re-read a plist you have edited — `launchctl bootout gui/$UID/dev.corral.herdr.work`
+and bootstrap it again.
 
 Two macOS-only things to expect. A LaunchAgent belongs to the GUI login session, so the server comes
 back **when you log in** — not while the machine sits at the login window; a Mac used as an unattended
@@ -179,12 +193,10 @@ if anyone turns its toggle off, the server stops starting at login and nothing s
 ```ini
 [Unit]
 Description=herdr server (work)
-After=network.target
 
 [Service]
 Type=simple
-Environment=HERDR_SESSION=work
-ExecStart=%h/.local/bin/herdr server
+ExecStart=%h/.local/bin/herdr --session work server
 Restart=always
 RestartSec=2
 
@@ -198,17 +210,27 @@ systemctl --user enable --now corral-herdr-work.service
 loginctl enable-linger "$USER"        # survive logout, come up at boot
 ```
 
-**Did it work?** `herdr session list` shows the session `running`, and the server's log is at
-`~/.config/herdr/sessions/work/herdr-server.log`.
+**Did it work?** `herdr session list` shows the session `running`, and the server's own log is at
+`~/.config/herdr/sessions/work/herdr-server.log`. If the session never appears, the server never ran,
+so that log will not exist — look at the supervisor instead: `launchctl print
+gui/$UID/dev.corral.herdr.work` and read `last exit code` (plus `/tmp/dev.corral.herdr.work.log`), or
+`journalctl --user -u corral-herdr-work.service`. The two supervisors give up differently: launchd
+retries indefinitely, while systemd stops after a burst of restarts and parks the unit in `failed`.
+Once you have fixed the cause, `systemctl --user start corral-herdr-work.service` brings it back.
 
 **Stopping it.** `herdr server stop` on its own will not keep it down — the supervisor replaces the
-process within seconds. Unload the service first, and use the same order when upgrading herdr:
+process within seconds — and it acts on whichever server your shell's socket points at, not on a
+session by name. Stop the service, then the session:
 
 ```bash
-launchctl bootout gui/$UID/dev.corral.herdr.work          # macOS
-systemctl --user disable --now corral-herdr-work.service  # Linux
+launchctl bootout gui/$UID/dev.corral.herdr.work    # macOS
+systemctl --user stop corral-herdr-work.service     # Linux
 herdr session stop work
 ```
+
+That is also the herdr-upgrade sequence; start the service again afterwards (on macOS, bootstrap it
+again — `bootout` only lasts until the next login). To remove supervision for good, delete the plist
+or `systemctl --user disable corral-herdr-work.service`.
 
 What supervision buys is precise: the server comes back on its own, and the workspace/tab/pane layout
 comes back with it — but **the processes inside those panes do not**. A restarted server hands you the
@@ -222,8 +244,7 @@ geometry follows whichever client was active last, so moving between them resize
 tears. herdr has no setting that pins pane size, so the fix is to use one at a time: `ctrl+b` then `q`
 detaches the TUI and leaves the server and every agent running.
 
-Attaching the TUI to an already-headless server is otherwise fine — it reuses that server rather than
-starting a second one, and the server stays outside the tab's process tree.
+Attaching the TUI to an already-headless server is otherwise fine.
 
 **Already started one inside a tab?** It cannot be moved out without stopping it, and stopping it
 takes the agents with it. Adopt the recipe above at your next reboot or planned restart.
@@ -318,9 +339,11 @@ Each entry describes one place corral can see and spawn sessions into:
   Defaults to `claude`. One hard constraint: it must be a **single token** — no spaces and no
   arguments, which the config schema rejects outright, so wrap any flags in a script. It does not
   have to be an executable file: corral types the launch line into the pane with `herdr pane run`,
-  and that pane runs your interactive login shell, so a function or alias from your `.zshrc` /
-  `.bashrc` resolves there just as an executable on `PATH` does. A script is still the more portable
-  choice, and it is what the *Multiple Claude accounts* example below uses.
+  and that pane runs an interactive shell, so a function or alias from your `.zshrc` / `.bashrc`
+  resolves there just as an executable on `PATH` does. Put it in the interactive rc file, not
+  `.zprofile` / `.bash_profile` — herdr's `[terminal] shell_mode` defaults to a login shell only on
+  macOS. A script is still the more portable choice, and it is what the *Multiple Claude accounts*
+  example below uses.
   corral now appends `--name <session-name>` — plus `--model <model>` and `--remote-control
   <session-name>` when those are chosen — to every launch except `--resume`, so the command **must
   forward its arguments**. The `exec … claude "$@"` wrapper shown under *Multiple Claude accounts* below
@@ -356,9 +379,9 @@ complete local and remote entries.
 ## Multiple Claude accounts
 
 If you keep separate Claude accounts (say, work and personal), give each one its own config dir
-and a tiny wrapper **script**. It has to be a real executable on `PATH`: corral spawns sessions
-non-interactively, so the same wrappers written as shell functions in `.zshrc` work in your own
-terminal but are invisible to `spawnCommand` — the most common way this trips people up.
+and a tiny wrapper **script** on `PATH`. A shell function works too (see `spawnCommand` above), but a
+script is portable across shells and across remote environments, and it is the form the
+argument-forwarding example below depends on.
 
 ```bash
 # ~/bin/claude-work — and ~/bin/claude-personal alongside it, with ~/bin on PATH
@@ -373,8 +396,8 @@ chmod +x ~/bin/claude-work ~/bin/claude-personal
 Each account also needs its own herdr socket. A `local` environment with no `socket` inherits
 whatever `HERDR_SOCKET_PATH` corral itself was launched under — so if two environments both omit
 `socket` they route to the same herdr instance and show the same sessions twice. Give each
-account its own named herdr session — `HERDR_SESSION=work herdr server`,
-`HERDR_SESSION=personal herdr server`, one supervised service each (see
+account its own named herdr session — `herdr --session work server`,
+`herdr --session personal server`, one supervised service each (see
 [Running herdr](#running-herdr)) — and point that environment's `socket` at the session's own
 `~/.config/herdr/sessions/<name>/herdr.sock`. Only one `local` environment should omit `socket` — the
 zero-config one that inherits whichever session you launched corral from.
