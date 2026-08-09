@@ -14,6 +14,7 @@ const poller: Poller = {
   onSnapshot: () => () => undefined, pollOnce: () => Promise.resolve(undefined),
   refreshEnv: () => Promise.resolve(undefined),
   runClaudeSweepOnce: () => Promise.resolve(undefined), start: () => undefined, stop: () => undefined,
+  applyRegistry: () => undefined,
 };
 const ORIGIN = "http://localhost:5173";
 

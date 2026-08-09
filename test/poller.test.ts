@@ -1,9 +1,10 @@
-import type { AttentionMap, SessionRow, StatuslineData } from "@shared/schema";
+import type { AttentionMap, SessionRow, Snapshot, StatuslineData } from "@shared/schema";
 import { describe, it, expect, vi } from "vitest";
 
 import type { HerdrEnv } from "../environments.ts";
 import type { AttentionStore } from "../server/attention-store.ts";
 import { createPoller, type ListFn, type RecapFn, type StatuslineFn } from "../server/poller.ts";
+import type { RegistryRead } from "../server/session-registry.ts";
 
 const A: HerdrEnv = { id: "a", label: "A", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
 const B: HerdrEnv = { id: "b", label: "B", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
@@ -401,5 +402,376 @@ describe("createPoller — install-drift warning", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+const reads = (read: RegistryRead) => () => Promise.resolve(read);
+const ok = (records: RegistryRead["records"]): RegistryRead => ({ records, status: "ok", truncated: false });
+
+describe("createPoller — registry join", () => {
+  it("applyRegistry patches the matching row and pushes a snapshot", async () => {
+    const p = createPoller({ envs: [A], list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]) });
+    await p.pollOnce();
+    const seen: Snapshot[] = [];
+    p.onSnapshot((s) => seen.push(s));
+    p.applyRegistry(A, ok([{ sessionId: VALID_UUID, status: "waiting", waitingFor: "input needed", bridgeSessionId: "session_01X" }]));
+    // Without the rebuild+notify inside applyRegistry the record would land in a cache with no path
+    // out: SSE frames come only from the poller's snapshot subscribers.
+    const patched = seen.at(-1)?.sessions.find((r) => r.paneId === "p1");
+    expect(patched?.claudeStatus).toBe("waiting");
+    expect(patched?.waitingFor).toBe("input needed");
+    expect(patched?.remoteControl).toBe(true);
+    expect(patched?.registryStatus).toBe("ok");
+  });
+
+  it("drops a record whose sessionId matches no live row", async () => {
+    const p = createPoller({ envs: [A], list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]) });
+    await p.pollOnce();
+    p.applyRegistry(A, ok([{ sessionId: OTHER_UUID, status: "busy" }]));
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBeNull();
+    // "we looked and this session was not there" — NOT the null of "we have not looked yet".
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBe("not-found");
+  });
+
+  it("never applies a cached record to a pane that has since changed session", async () => {
+    let sid = VALID_UUID;
+    const p = createPoller({ envs: [A], list: () => Promise.resolve([rowWithSession(A.id, "p1", sid)]) });
+    await p.pollOnce();
+    p.applyRegistry(A, ok([{ sessionId: VALID_UUID, status: "waiting" }]));
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBe("waiting");
+    sid = OTHER_UUID; // herdr recycled the pane onto a different session
+    await p.refreshEnv(A.id);
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBeNull();
+    // And the stale entry's STATUS must not leak either — the new session has not been read yet.
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBeNull();
+  });
+
+  // The window between pane creation and Claude registering — the board must say "starting", not
+  // "idle", and remoteControl must be null (unknown) rather than false.
+  it("marks a row with no sessionId as no-session-ref, not as idle", async () => {
+    const p = createPoller({ envs: [A], list: () => Promise.resolve([row(A.id, "p1")]) });
+    await p.pollOnce();
+    const r = p.getSnapshot().sessions[0];
+    expect(r?.registryStatus).toBe("no-session-ref");
+    expect(r?.claudeStatus).toBeNull();
+    expect(r?.remoteControl).toBeNull();
+  });
+
+  // "the sweep has not run for this pane yet" is a sixth distinct state, and the reason a bare
+  // `claudeStatus: null` could not have carried this information on its own.
+  it("leaves registryStatus null for a row with a sessionId that has never been read", async () => {
+    const p = createPoller({ envs: [A], list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]) });
+    await p.pollOnce();
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBeNull();
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBeNull();
+  });
+
+  it("applyRegistry on an environment with no polled rows is a no-op, not a throw", async () => {
+    const p = createPoller({ envs: [A], list: () => Promise.resolve([]) });
+    await p.pollOnce();
+    const seen: Snapshot[] = [];
+    p.onSnapshot((s) => seen.push(s));
+    p.applyRegistry(A, ok([{ sessionId: VALID_UUID, status: "busy" }]));
+    expect(seen).toEqual([]);
+  });
+
+  // The registry cache is keyed by pane and must be pruned with the others, or a closed pane's record
+  // outlives it for the life of the process.
+  it("prunes the registry cache when a pane disappears", async () => {
+    let rows = [rowWithSession(A.id, "p1", VALID_UUID)];
+    const p = createPoller({
+      envs: [A],
+      list: () => Promise.resolve(rows),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
+    });
+    await p.pollOnce();
+    p.applyRegistry(A, ok([{ sessionId: VALID_UUID, status: "busy" }]));
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBe("busy");
+    rows = []; // pane closed
+    await p.refreshEnv(A.id);
+    await p.runClaudeSweepOnce(); // prunes
+    rows = [rowWithSession(A.id, "p1", VALID_UUID)]; // herdr hands the same pane id back out
+    await p.refreshEnv(A.id);
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBeNull();
+  });
+});
+
+// THE SWEEP READS REMOTE ENVIRONMENTS ONLY — local ones are the interval's job, and a second reader
+// for one environment is exactly what the one-writer property forbids. So every test in this block
+// drives a REMOTE env; `A` is kind: "local".
+//
+// `recap` and `statusline` MUST be stubbed here. createPoller defaults them to the real readRecap /
+// readStatusline, and on a remote env those open SSH connections — the suite would hang on a real
+// network. The rows below carry sessionIds, so the sweep reaches them.
+const R: HerdrEnv = {
+  id: "r", label: "R", kind: "remote", sshHost: "h", socket: "~/s.sock", herdrBin: "~/herdr",
+  claudeConfigDirs: ["/home/u/.claude"], spawnCommand: "claude", repos: {},
+};
+const sweepPoller = (over: {
+  list: ListFn;
+  readRegistry: (env: HerdrEnv) => Promise<RegistryRead>;
+}) => createPoller({
+  envs: [R],
+  recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+  statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
+  ...over,
+});
+
+describe("createPoller — the sweep is the backstop", () => {
+  it("reads the registry once per environment and merges it", async () => {
+    let calls = 0;
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID), rowWithSession(R.id, "p2", OTHER_UUID)]),
+      readRegistry: () => { calls++; return Promise.resolve(ok([{ sessionId: VALID_UUID, status: "busy" }])); },
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    expect(calls).toBe(1); // ONE round trip per env, not one per session
+    const rows = p.getSnapshot().sessions;
+    expect(rows.find((r) => r.paneId === "p1")?.claudeStatus).toBe("busy");
+    // A live row with a sessionId the read did not return: the read WORKED, this session just is not
+    // in it. That is not-found, and it must not read as "idle" or as an error.
+    expect(rows.find((r) => r.paneId === "p2")?.registryStatus).toBe("not-found");
+    expect(rows.find((r) => r.paneId === "p2")?.claudeStatus).toBeNull();
+  });
+
+  // The other half of "remote only": a LOCAL environment must not be read by the sweep at all, or it
+  // has two writers and absence stops being authoritative for either of them.
+  it("does not read the registry for a local environment", async () => {
+    let calls = 0;
+    const p = createPoller({
+      envs: [A],
+      list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
+      readRegistry: () => { calls++; return Promise.resolve(ok([])); },
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    expect(calls).toBe(0);
+  });
+
+  it("propagates a read failure to the row instead of blanking it silently", async () => {
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: reads({ records: [], status: "read-error", truncated: false }),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBe("read-error");
+  });
+
+  it("propagates no-config-dirs so the card can fall back to herdr's status", async () => {
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: reads({ records: [], status: "no-config-dirs", truncated: false }),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBe("no-config-dirs");
+  });
+
+  // A reader that THROWS must not take the rest of the sweep down with it — recap, statusline and the
+  // tab renames all run in the same pass.
+  it("survives a reader that rejects", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: () => Promise.reject(new Error("boom")),
+    });
+    await p.pollOnce();
+    await expect(p.runClaudeSweepOnce()).resolves.toBeUndefined();
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBeNull();
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("boom"))).toBe(true);
+    warn.mockRestore();
+  });
+
+  // ONE WRITER PER ENVIRONMENT, and both writers do FULL reads, so a later read simply supersedes an
+  // earlier one. These two tests pin the plain-supersede semantics.
+  it("lets a later read supersede an earlier one, regardless of updatedAt", async () => {
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: reads(ok([{ sessionId: VALID_UUID, status: "busy", updatedAt: 100 }])),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBe("busy");
+    // A later read wins even though its updatedAt is LOWER — the bridge writer stamps no updatedAt, so
+    // an RC transition legitimately arrives with an equal or stale one. Ordering by updatedAt here is
+    // what would have silently frozen the RC badge.
+    p.applyRegistry(R, ok([{ sessionId: VALID_UUID, status: "waiting", updatedAt: 50 }]));
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBe("waiting");
+  });
+
+  it("treats an RC transition with an unchanged updatedAt as a real change", async () => {
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: reads(ok([{ sessionId: VALID_UUID, status: "idle", updatedAt: 100 }])),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    expect(p.getSnapshot().sessions[0]?.remoteControl).toBe(false);
+    // Same updatedAt, bridgeSessionId appears: the exact shape the bridge writer produces.
+    p.applyRegistry(R, ok([{ sessionId: VALID_UUID, status: "idle", updatedAt: 100, bridgeSessionId: "b-1" }]));
+    expect(p.getSnapshot().sessions[0]?.remoteControl).toBe(true);
+  });
+
+  // The freeze this replaced: an earlier draft made "absence never overwrites a record" unconditional,
+  // so one successful read pinned a pane forever. That is the exact frozen-row bug the sweep exists to
+  // prevent, reintroduced one layer down.
+  it("lets the sweep clear a record the registry no longer holds", async () => {
+    let holdsRecord = true;
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: () => Promise.resolve(holdsRecord
+        ? ok([{ sessionId: VALID_UUID, status: "busy", updatedAt: 100 }])
+        : ok([])),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBe("busy");
+    holdsRecord = false;
+    await p.runClaudeSweepOnce();
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBeNull();
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBe("not-found");
+  });
+
+  // Absence is ALWAYS authoritative, because every reader does a full directory read.
+  it("clears a record when a full read no longer holds it", async () => {
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: reads(ok([{ sessionId: VALID_UUID, status: "busy", updatedAt: 100 }])),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBe("busy");
+    p.applyRegistry(R, ok([]));
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBeNull();
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBe("not-found");
+  });
+
+  // A FAILED read is not an empty one. `read-error` must never be mistaken for "the session is gone",
+  // or a momentary EACCES would blank the board.
+  it("leaves the previous record alone when the read failed", async () => {
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: reads(ok([{ sessionId: VALID_UUID, status: "busy", updatedAt: 100 }])),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    p.applyRegistry(R, { records: [], status: "read-error", truncated: false });
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBe("busy");
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBe("read-error");
+  });
+
+  // And it recovers: the failure must not be sticky either.
+  it("returns to ok once a later read succeeds", async () => {
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: reads(ok([{ sessionId: VALID_UUID, status: "busy", updatedAt: 100 }])),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    p.applyRegistry(R, { records: [], status: "read-error", truncated: false });
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBe("read-error");
+    p.applyRegistry(R, ok([{ sessionId: VALID_UUID, status: "idle", updatedAt: 200 }]));
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBe("ok");
+    expect(p.getSnapshot().sessions[0]?.claudeStatus).toBe("idle");
+  });
+
+  // THE test that makes a sub-minute interval affordable. Without it every tick rebuilds the whole
+  // session array and pushes a full snapshot to every SSE subscriber, forever, on a fleet that barely
+  // changes. A flush's cost scales with the size of the BOARD, not the size of the change.
+  it("does not broadcast when a read changes nothing", async () => {
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: reads(ok([{ sessionId: VALID_UUID, status: "idle", updatedAt: 300 }])),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    const seen: Snapshot[] = [];
+    p.onSnapshot((s) => seen.push(s));
+    // Field-for-field equal to what the cache already holds — the shape of almost every tick. Note the
+    // record is a NEW object every read, so the comparison must be on content, not identity.
+    p.applyRegistry(R, ok([{ sessionId: VALID_UUID, status: "idle", updatedAt: 300 }]));
+    expect(seen).toEqual([]);
+    // A real change does broadcast, exactly once.
+    p.applyRegistry(R, ok([{ sessionId: VALID_UUID, status: "busy", updatedAt: 400 }]));
+    expect(seen).toHaveLength(1);
+  });
+
+  // The registry omits a key before the first RC connect and writes a literal null on every disconnect
+  // afterwards. Those are the same state, so the transition between them must not broadcast — without
+  // the `?? null` normalisation the first read after a session's very first connect fires twice.
+  it("treats an absent optional field and a literal null as the same state", async () => {
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: reads(ok([{ sessionId: VALID_UUID, status: "idle", updatedAt: 300 }])),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    const seen: Snapshot[] = [];
+    p.onSnapshot((s) => seen.push(s));
+    p.applyRegistry(R, ok([{ sessionId: VALID_UUID, status: "idle", updatedAt: 300, bridgeSessionId: null, waitingFor: null, name: null }]));
+    expect(seen).toEqual([]);
+  });
+
+  // A permanent condition logged every pass is a log flood that trains the operator to ignore the
+  // file. `bad-schema` above all must still be SAID once — it is the drift detector, and a detector
+  // nothing reports is not a detector.
+  it("logs a degraded read once per environment, not once per sweep", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: reads({ records: [], status: "bad-schema", truncated: false }),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    await p.runClaudeSweepOnce();
+    await p.runClaudeSweepOnce();
+    const degraded = warn.mock.calls.filter((c) => String(c[0]).includes("registry read degraded"));
+    expect(degraded).toHaveLength(1);
+    expect(String(degraded[0]?.[0])).toContain("bad-schema");
+    warn.mockRestore();
+  });
+
+  // no-config-dirs is the DEFAULT on every remote environment, so warning on it would fire once per
+  // process on a completely healthy fleet.
+  it("does not log a degraded read for no-config-dirs", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: reads({ records: [], status: "no-config-dirs", truncated: false }),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes("registry read degraded"))).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it("warns once when a read was truncated", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: reads({ records: [{ sessionId: VALID_UUID, status: "idle" }], status: "ok", truncated: true }),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    await p.runClaudeSweepOnce();
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes("truncated"))).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it("does not warn about truncation on an untruncated read", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const p = sweepPoller({
+      list: () => Promise.resolve([rowWithSession(R.id, "p1", VALID_UUID)]),
+      readRegistry: reads(ok([{ sessionId: VALID_UUID, status: "idle" }])),
+    });
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes("truncated"))).toEqual([]);
+    warn.mockRestore();
   });
 });

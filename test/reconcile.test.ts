@@ -27,6 +27,7 @@ function fakePoller() {
   refreshEnv: async () => {},
     // eslint-disable-next-line @typescript-eslint/no-empty-function
     runClaudeSweepOnce: async () => {},
+    applyRegistry: () => undefined,
     // eslint-disable-next-line @typescript-eslint/no-empty-function
     start: () => {},
     // eslint-disable-next-line @typescript-eslint/no-empty-function
