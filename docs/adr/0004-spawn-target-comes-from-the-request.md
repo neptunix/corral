@@ -33,10 +33,28 @@ workspaces, hence several repositories. A card therefore cannot own a repository
    land beside the caller, inheriting the surrounding directory, so a worktree checkout
    stays visible. Given, it means "work in project X".
 
-2. **The precedence lives in the MCP tool.** When `repo` is present the tool does not
-   send a target workspace id. Only that layer knows the caller's own workspace; the
-   route receives a workspace id string and cannot distinguish the browser's deliberate
-   "create a new space" from the tool simply omitting the field.
+2. **The target workspace field carries three states, and the route reads all three.**
+   A workspace id joins it; an explicit `null` creates a new space at the repository's
+   configured path; an absent key together with `repo` resolves that repository to its
+   workspace, joining an existing one or creating it. An absent key with no `repo` is no
+   target at all and is refused.
+
+   The route's schema already parses an omitted field and an explicit `null` into
+   different values and then discards the difference; keeping it is what makes this
+   rule expressible. An earlier draft asserted the opposite — that the route could not
+   tell them apart — and moved the precedence into the MCP tool to compensate. That was
+   simply wrong about the code, and two review rounds reasoned from it.
+
+   Keeping "create a new space" as something a client *states* rather than something
+   inferred from a missing field is the point: the browser keeps its existing meaning
+   untouched, and only the new absent-key shape carries the resolve-by-repository
+   behaviour. The price is a contract that distinguishes an absent key from a null one,
+   which is easy to break silently — so it is documented at the schema and all three
+   shapes are tested.
+
+   The tool still omits the target id whenever it passes `repo`, and still decides the
+   no-target refusal itself, because only it knows whether the caller has a workspace to
+   continue in.
 
 3. **`repo` resolves to the workspace of that repository.** The configured-path lookup
    runs first, on both branches; only then is a workspace with that label sought
@@ -45,19 +63,20 @@ workspaces, hence several repositories. A card therefore cannot own a repository
    when it is omitted the directory still comes from the neighbours, which is what makes
    "continue where I am" keep a worktree visible. The name selects the workspace; the
    configuration selects the directory. A workspace renamed by hand can group a session
-   oddly — it cannot place it anywhere but the repository root.
+   oddly — it cannot place a newly created tab anywhere but the repository root.
 
-   Because this redefines what `targetWorkspaceId: null` plus `repo` means, it changes
-   the browser too: the picker's "new space from this repo" option joins an existing
-   space of that name rather than creating a second one. That follows from one workspace
-   per repository, and is accepted rather than worked around.
+   The rule governs tabs this design creates. On the idempotent rejoin no tab is created
+   at all: an already-running session is adopted and keeps its own directory. The spawn
+   reply says which case happened, so the caller is never told a session was started when
+   an existing one was adopted.
 
 4. **A missing or unknown target is refused, never inferred, and the refusal lists the
    valid names** for that environment. Both cases refuse: no target at all, and a name
    that is not configured. The refusal reaches the caller as a returned value from the
    MCP tool rather than a thrown server error — including the unknown-name case, which
-   the route detects and the tool re-renders — and is built by the digest module beside
-   the existing column-id refusal. The names are read, only on that path, from the
+   the route rejects under a **dedicated error code of its own** so the tool can
+   re-render that case and no other. The refusal is built by the digest module beside the
+   existing column-id refusal, and the names are read, only on that path, from the
    spawn-target route the browser's picker already uses.
 
 5. **`Task.repo` is removed** from the schema, the three request schemas, their writes,
@@ -71,9 +90,17 @@ joining an existing space safe. Every earlier attempt to reconcile the two in on
 produced a silent mislanding: a session handed off from a worktree would land in the
 main checkout, carrying a brief that describes the worktree's work.
 
-Point 2 is not layering pedantry. Without it, adding the parameter alone leaves a
-same-environment spawn carrying `repo` landing beside the caller with the parameter
+Point 2 earns its complexity twice. Without the tool omitting the target id, a
+same-environment spawn carrying `repo` lands beside the caller with the parameter
 silently discarded — the single most likely use of the new parameter, silently broken.
+And without the third state, "create a new space" has to be inferred from a missing
+field, which is what forced an earlier draft to change the browser's meaning to make room
+for the agent's. Reading the state the client actually sent costs one line and leaves both
+clients saying what they mean.
+
+The lesson worth keeping: that draft was not wrong because the reasoning was sloppy, but
+because a claim about the code was never checked against the code. It then survived two
+review rounds, each of which built on it.
 
 Point 4 keeps discovery free. A refusal is needed regardless, because a mistyped name
 must produce a usable answer; making it carry the valid names means nothing is paid
