@@ -41,3 +41,48 @@ export function sessionStateLabel(s: SessionStateFields | null): string {
   }
   return s.claudeStatus;
 }
+
+/**
+ * The colour of the dot that sits beside the label. Deliberately a SMALL semantic set rather than one
+ * token per status: two vocabularies feed the label (Claude's and herdr's) and they overlap only on
+ * `idle`, so a per-status palette would have to name the same colour twice under different keys.
+ */
+export type SessionStateTone = "working" | "attention" | "idle" | "done" | "unknown";
+
+/**
+ * herdr's `agent_status` vocabulary. Everything outside it lands on `unknown`, which is what the
+ * optimistic "closing…"/"resuming…" synthetics and a detached row's "unknown" want anyway — and both
+ * call sites map `unknown` to the exact fallback class they already used, so those look unchanged.
+ */
+function herdrTone(status: string): SessionStateTone {
+  if (status === "working") return "working";
+  if (status === "blocked") return "attention";
+  if (status === "done") return "done";
+  if (status === "idle") return "idle";
+  return "unknown";
+}
+
+/**
+ * The dot's tone, from the SAME fields and in the SAME branch order as sessionStateLabel.
+ *
+ * A SIBLING of the label, never a lookup on the string it returns: the label is display text
+ * ("waiting · input needed" is not a key). And it must not be derived from herdr's `status` on its own
+ * — that is precisely how the dot came to contradict the words next to it, colouring a row `done` in
+ * herdr's vocabulary while the label read `idle` in Claude's.
+ */
+export function sessionStateTone(s: SessionStateFields | null): SessionStateTone {
+  if (s === null) return "unknown";
+  if (s.registryStatus === null) return herdrTone(s.status);
+  if (s.registryStatus === "no-config-dirs") return herdrTone(s.status);
+  // "starting" — the pane is up and Claude has not registered yet. That is activity, not rest.
+  if (s.registryStatus === "no-session-ref") return "working";
+  // "state unavailable" — corral cannot say what this session is doing, so the dot must not claim to.
+  if (s.registryStatus !== "ok") return "unknown";
+  if (s.claudeStatus === null) return herdrTone(s.status);
+  if (s.claudeStatus === "busy") return "working";
+  // `waiting` is the one Claude state that needs a human, so it takes the same red as herdr's
+  // `blocked` and as the attention feed's `text-destructive`.
+  if (s.claudeStatus === "waiting") return "attention";
+  if (s.claudeStatus === "idle" || s.claudeStatus === "shell") return "idle";
+  return "unknown";
+}

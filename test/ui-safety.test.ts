@@ -92,6 +92,29 @@ describe("UI wiring — every surface renders session state through sessionState
     expect(src).toContain("subtitle={`${sessionStateLabel(session)} · ");
   });
 
+  // The dot and the words beside it must come from ONE decision. Colouring the dot from herdr's
+  // agent_status while the label reads Claude's produced a sky-blue "done" dot next to the word "idle".
+  // Asserting the whole className expression, not just that sessionStateTone appears in the file: the
+  // weaker form stays green if the tone is computed and then dropped on the floor.
+  it("colours TaskCard's dot from the tone, not from the raw herdr status", () => {
+    const src = read("components/TaskCard.tsx");
+    expect(src).toContain('${detached ? "bg-slate-600" : TONE_DOT[sessionStateTone(s.live)]}');
+    expect(src).not.toContain("STATUS_DOT[s.live?.status");
+  });
+
+  it("colours UnassignedView's dot from the tone, not from the raw herdr status", () => {
+    const src = read("components/UnassignedView.tsx");
+    expect(src).toContain("className={TONE_COLOR[sessionStateTone(session)]}");
+    expect(src).not.toContain("STATUS_COLOR[session.status]");
+  });
+
+  // Both palettes must be TOTAL over the tone union, or a tone added later silently renders no colour
+  // class at all. `Record<SessionStateTone, string>` is what makes typecheck enforce that.
+  it("keys both dot palettes on the tone union so typecheck keeps them total", () => {
+    expect(read("components/TaskCard.tsx")).toContain("const TONE_DOT: Record<SessionStateTone, string>");
+    expect(read("components/UnassignedView.tsx")).toContain("const TONE_COLOR: Record<SessionStateTone, string>");
+  });
+
   it("SessionModal renders the label too", () => {
     expect(read("components/SessionModal.tsx"))
       .toContain("sessionStateLabel({ status, claudeStatus, waitingFor, registryStatus })");

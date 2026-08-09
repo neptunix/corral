@@ -1,7 +1,8 @@
 import type { LiveSessionData } from "@shared/board-schema";
 import { describe, expect, it } from "vitest";
 
-import { sessionStateLabel } from "../web/src/lib/session-state.ts";
+import { CLOSING_STATUS, RESUMING_STATUS } from "../web/src/lib/optimistic.ts";
+import { sessionStateLabel, sessionStateTone } from "../web/src/lib/session-state.ts";
 
 const live = (over: Partial<LiveSessionData>): LiveSessionData => ({
   status: "working", model: null, ctxPct: null, detached: false,
@@ -86,5 +87,71 @@ describe("sessionStateLabel", () => {
 
   it("is 'unknown' with no live row at all", () => {
     expect(sessionStateLabel(null)).toBe("unknown");
+  });
+});
+
+// The dot beside the label. It used to be coloured from herdr's agent_status while the words came from
+// Claude's, and the two vocabularies overlap only on `idle` — so the board showed a "done"-coloured dot
+// next to the word "idle". These pin that the two now agree, branch for branch with the label above.
+describe("sessionStateTone", () => {
+  it("is green while Claude is busy, whatever herdr says underneath", () => {
+    expect(sessionStateTone(live({ status: "done", claudeStatus: "busy", registryStatus: "ok" }))).toBe("working");
+  });
+
+  // THE case that motivated this: herdr "done" + Claude "idle" used to render a sky-blue dot next to
+  // the word "idle". The label wins, so the tone is idle's.
+  it("follows Claude's idle even when herdr still says done", () => {
+    expect(sessionStateTone(live({ status: "done", claudeStatus: "idle", registryStatus: "ok" }))).toBe("idle");
+  });
+
+  // ...and the mirror: herdr "working" + Claude "idle" used to render green next to the word "idle".
+  it("follows Claude's idle even when herdr still says working", () => {
+    expect(sessionStateTone(live({ status: "working", claudeStatus: "idle", registryStatus: "ok" }))).toBe("idle");
+  });
+
+  // A session that needs a human takes the same red as herdr's `blocked` and the attention feed.
+  it("is the attention tone whenever Claude is waiting, with or without a reason", () => {
+    expect(sessionStateTone(live({ status: "working", claudeStatus: "waiting", registryStatus: "ok" }))).toBe("attention");
+    expect(sessionStateTone(live({ claudeStatus: "waiting", waitingFor: "input needed", registryStatus: "ok" }))).toBe("attention");
+  });
+
+  it("treats a Claude shell as at rest", () => {
+    expect(sessionStateTone(live({ status: "working", claudeStatus: "shell", registryStatus: "ok" }))).toBe("idle");
+  });
+
+  // Every branch where the LABEL falls back to herdr's status, the tone must fall back too — otherwise
+  // the pair disagrees again on exactly the rows that made this necessary.
+  it("falls back to herdr's vocabulary wherever the label does", () => {
+    for (const registryStatus of [null, "no-config-dirs"] as const) {
+      expect(sessionStateTone(live({ status: "working", registryStatus })), `working/${String(registryStatus)}`).toBe("working");
+      expect(sessionStateTone(live({ status: "blocked", registryStatus })), `blocked/${String(registryStatus)}`).toBe("attention");
+      expect(sessionStateTone(live({ status: "done", registryStatus })), `done/${String(registryStatus)}`).toBe("done");
+      expect(sessionStateTone(live({ status: "idle", registryStatus })), `idle/${String(registryStatus)}`).toBe("idle");
+    }
+    // ...including an ok read that simply carries no claudeStatus.
+    expect(sessionStateTone(live({ status: "blocked", claudeStatus: null, registryStatus: "ok" }))).toBe("attention");
+  });
+
+  // "state unavailable" must not be coloured as though corral knew something. A stale claudeStatus is
+  // still attached on a failed read, and colouring from it would contradict the words outright.
+  it("claims nothing when the label says state unavailable", () => {
+    for (const registryStatus of ["not-found", "bad-schema", "read-error"] as const) {
+      expect(sessionStateTone(live({ status: "working", claudeStatus: "busy", registryStatus })), registryStatus).toBe("unknown");
+    }
+  });
+
+  it("is the working tone while the label says starting", () => {
+    expect(sessionStateTone(live({ status: "idle", registryStatus: "no-session-ref" }))).toBe("working");
+  });
+
+  // The optimistic close/resume synthetics and a detached row are outside herdr's vocabulary. They land
+  // on `unknown`, which both call sites map to the class the old herdr-keyed lookup already fell back
+  // to — so this change does not repaint them.
+  it("is unknown for the optimistic transients and for no live row", () => {
+    // The real constants, not copies — a test that re-declares them stops testing the day they change.
+    for (const status of [CLOSING_STATUS, RESUMING_STATUS, "unknown"]) {
+      expect(sessionStateTone(live({ status, registryStatus: null })), status).toBe("unknown");
+    }
+    expect(sessionStateTone(null)).toBe("unknown");
   });
 });
