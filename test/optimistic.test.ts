@@ -4,12 +4,13 @@ import { describe, expect, it } from "vitest";
 import {
   applyOptimisticState, overrideKey, CLOSING_STATUS, RESUMING_STATUS, type OptimisticState,
 } from "../web/src/lib/optimistic.ts";
+import { sessionStateLabel } from "../web/src/lib/session-state.ts";
 
 function link(over: Partial<EnrichedSessionLink> = {}): EnrichedSessionLink {
   return {
     env: "e", paneId: "p1", tabId: "t1", tabLabel: "tl", workspaceId: "w1", workspaceLabel: "wl",
     name: "n", cwdSnapshot: "/tmp", sessionId: null,
-    live: { status: "working", model: null, ctxPct: null, detached: false, recap: null, recapAt: null, statusline: null },
+    live: { status: "working", model: null, ctxPct: null, detached: false, recap: null, recapAt: null, statusline: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null },
     ...over,
   };
 }
@@ -42,7 +43,7 @@ describe("applyOptimisticState", () => {
   });
 
   it("flips a detached session to live on 'resuming'", () => {
-    const s = link({ sessionId: "abc", live: { status: "unknown", model: null, ctxPct: null, detached: true, recap: null, recapAt: null, statusline: null } });
+    const s = link({ sessionId: "abc", live: { status: "unknown", model: null, ctxPct: null, detached: true, recap: null, recapAt: null, statusline: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null } });
     const overrides = new Map<string, OptimisticState>([["abc", "resuming"]]);
     const [t] = applyOptimisticState([task([s])], overrides);
     const out = t?.sessions[0]?.live;
@@ -52,7 +53,7 @@ describe("applyOptimisticState", () => {
 
   it("matches by sessionId even after the paneId churns (resume rebind)", () => {
     // Override was recorded against the session's stable id; the enriched link now has a NEW paneId.
-    const s = link({ sessionId: "abc", paneId: "p2", live: { status: "unknown", model: null, ctxPct: null, detached: true, recap: null, recapAt: null, statusline: null } });
+    const s = link({ sessionId: "abc", paneId: "p2", live: { status: "unknown", model: null, ctxPct: null, detached: true, recap: null, recapAt: null, statusline: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null } });
     const overrides = new Map<string, OptimisticState>([["abc", "resuming"]]);
     const [t] = applyOptimisticState([task([s])], overrides);
     expect(t?.sessions[0]?.live?.detached).toBe(false);
@@ -78,5 +79,37 @@ describe("applyOptimisticState", () => {
     applyOptimisticState([task([s])], overrides);
     expect(s.live?.detached).toBe(false);
     expect(s.live?.status).toBe("working");
+  });
+});
+
+describe("applyOptimisticState — the overlay must beat Claude's own state", () => {
+  it("nulls registryStatus so the label shows the optimistic status, not the stale claudeStatus", () => {
+    // A session that Claude's registry says is busy, which the operator has just asked to resume. If
+    // the overlay carried registryStatus: "ok" through, sessionStateLabel would render "busy" and the
+    // row would look untouched.
+    const s = link({
+      sessionId: "abc",
+      live: {
+        status: "working", model: null, ctxPct: null, detached: true, recap: null, recapAt: null,
+        statusline: null, claudeStatus: "busy", waitingFor: null, remoteControl: true, registryStatus: "ok",
+      },
+    });
+    const [t] = applyOptimisticState([task([s])], new Map<string, OptimisticState>([["abc", "resuming"]]));
+    const out = t?.sessions[0]?.live;
+    expect(out?.registryStatus).toBeNull();
+    expect(out?.claudeStatus).toBeNull();
+    expect(sessionStateLabel(out ?? null)).toBe(RESUMING_STATUS);
+  });
+
+  it("does the same for closing", () => {
+    const s = link({
+      sessionId: "abc",
+      live: {
+        status: "working", model: null, ctxPct: null, detached: false, recap: null, recapAt: null,
+        statusline: null, claudeStatus: "busy", waitingFor: null, remoteControl: true, registryStatus: "ok",
+      },
+    });
+    const [t] = applyOptimisticState([task([s])], new Map<string, OptimisticState>([["abc", "closing"]]));
+    expect(sessionStateLabel(t?.sessions[0]?.live ?? null)).toBe(CLOSING_STATUS);
   });
 });

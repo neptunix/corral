@@ -5,7 +5,7 @@ import { buildLiveIndex, resolveLiveRow } from "../server/live-resolve.ts";
 
 const row = (over: Partial<SessionRow> & { paneId: string }): SessionRow => ({
   env: "e", status: "idle", agent: "claude", cwd: "/c", tab: "t", workspace: "w",
-  sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+  sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
   ...over,
 });
 const S = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";

@@ -7,6 +7,7 @@ import { CloseSessionModal } from "./CloseSessionModal";
 import { RestoreSessionModal } from "./RestoreSessionModal";
 import { api } from "../lib/api";
 import { CLOSING_STATUS, RESUMING_STATUS } from "../lib/optimistic";
+import { sessionStateLabel, sessionStateTone, type SessionStateTone } from "../lib/session-state";
 import { relativeTime } from "../lib/time";
 
 const PRIORITY_STYLE: Record<string, string> = {
@@ -16,11 +17,16 @@ const PRIORITY_STYLE: Record<string, string> = {
   p3: "bg-slate-700 text-slate-300 light:bg-slate-200 light:text-slate-700",
 };
 const PRIORITY_LABEL: Record<string, string> = { p0: "P0", p1: "P1", p2: "P2", p3: "P3" };
-const STATUS_DOT: Record<string, string> = {
+// Keyed by tone, NOT by herdr's agent_status — the dot and the label must come from one decision.
+// `unknown` keeps the class the herdr-keyed lookup fell back to, so the closing/resuming transients are
+// not repainted; the values are pinned in test/ui-safety.test.ts.
+const TONE_DOT: Record<SessionStateTone, string> = {
   working: "bg-emerald-400 light:bg-emerald-600",
+  attention: "bg-red-400 light:bg-red-600",
   idle: "bg-slate-500",
-  blocked: "bg-red-400 light:bg-red-600",
   done: "bg-sky-400 light:bg-sky-600",
+  unavailable: "bg-amber-400 light:bg-amber-600",
+  unknown: "bg-slate-500",
 };
 
 interface Props {
@@ -150,7 +156,7 @@ function SessionRow({ s, title, onOpenSession, onCloseSession, onResumeSession, 
         className="flex items-center gap-1.5 flex-1 min-w-0 text-left py-0.5"
         title={pending ? (isClosing ? "Closing…" : "Resuming…") : detached ? "Session ended — click to restore" : "Open this session"}
       >
-        <span className={`w-2 h-2 rounded-full shrink-0 ${detached ? "bg-slate-600" : (STATUS_DOT[s.live?.status ?? ""] ?? "bg-slate-500")}`} />
+        <span className={`w-2 h-2 rounded-full shrink-0 ${detached ? "bg-slate-600" : TONE_DOT[sessionStateTone(s.live)]}`} />
         <span className="text-xs truncate">
           {detached ? (
             <span className="text-muted-foreground">
@@ -161,7 +167,7 @@ function SessionRow({ s, title, onOpenSession, onCloseSession, onResumeSession, 
             </span>
           ) : (
             <>
-              <span className="text-muted-foreground">{s.live?.status ?? "unknown"}</span>
+              <span className="text-muted-foreground">{sessionStateLabel(s.live)}</span>
               {s.tabLabel !== "" && (
                 // Workspace/repo label intentionally omitted here — it lives in the terminal header now.
                 <span className="text-muted-foreground/70"> · {s.tabLabel}</span>

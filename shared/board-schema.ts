@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
-import { AccountUsageSchema, AttentionMapSchema, EnvStateSchema, SessionRowSchema, StatuslineDataSchema } from "./schema.ts";
+import { AccountUsageSchema, AttentionMapSchema, EnvStateSchema, RegistryStatusSchema, SessionRowSchema, StatuslineDataSchema } from "./schema.ts";
 
 export const ColumnTypeSchema = z.enum(["to-do", "in-progress", "closed"]);
 
@@ -62,6 +62,13 @@ export const LiveSessionDataSchema = z.object({
   recap: z.string().nullable().default(null),
   recapAt: z.number().nullable().default(null),
   statusline: StatuslineDataSchema.nullable().default(null),
+  // Claude's own state, projected from SessionRow. This schema is a CLOSED field list built
+  // field-by-field in server/api.ts — a new SessionRow field that is not added in BOTH places never
+  // reaches the web, and the omission is silent.
+  claudeStatus: z.string().nullable().default(null),
+  waitingFor: z.string().nullable().default(null),
+  remoteControl: z.boolean().nullable().default(null),
+  registryStatus: RegistryStatusSchema.nullable().default(null),
 });
 
 export const EnrichedSessionLinkSchema = SessionLinkSchema.extend({

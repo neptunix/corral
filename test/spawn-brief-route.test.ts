@@ -20,6 +20,7 @@ const poller: Poller = {
   pollOnce: async () => undefined,
   refreshEnv: async () => undefined,
   runClaudeSweepOnce: async () => undefined,
+  applyRegistry: () => undefined,
   start: () => undefined,
   stop: () => undefined,
 };

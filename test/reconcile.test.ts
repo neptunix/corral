@@ -27,6 +27,7 @@ function fakePoller() {
   refreshEnv: async () => {},
     // eslint-disable-next-line @typescript-eslint/no-empty-function
     runClaudeSweepOnce: async () => {},
+    applyRegistry: () => undefined,
     // eslint-disable-next-line @typescript-eslint/no-empty-function
     start: () => {},
     // eslint-disable-next-line @typescript-eslint/no-empty-function
@@ -63,7 +64,7 @@ async function seedLink(storage: ReturnType<typeof makeStorage>["storage"], sess
 }
 
 function rowWithId(sessionId: string): SessionRow {
-  return { env: "work-local", paneId: "p1", status: "working", agent: "claude", cwd: "/r", tab: "t", workspace: "w", sessionId, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null };
+  return { env: "work-local", paneId: "p1", status: "working", agent: "claude", cwd: "/r", tab: "t", workspace: "w", sessionId, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null };
 }
 
 describe("startReconciler", () => {

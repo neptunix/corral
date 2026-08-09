@@ -109,7 +109,9 @@ export const defaultExec: ExecFn = (file, args, options) =>
     );
   });
 
-const SSH_NOISE = /^(bind|channel_setup|Could not|Warning: remote port).*$/gm;
+// Exported for server/session-registry.ts's remote read: the ONE definition of "lines the ssh client
+// wrote, not the remote command". A second copy would drift the day one of them is extended.
+export const SSH_NOISE = /^(bind|channel_setup|Could not|Warning: remote port).*$/gm;
 
 export async function runHerdr(
   env: HerdrEnv,
@@ -203,6 +205,10 @@ export async function listSessions(env: HerdrEnv, exec?: ExecFn): Promise<Sessio
       recapStatus: null,
       statusline: null,
       statuslineStatus: null,
+      claudeStatus: null,
+      waitingFor: null,
+      remoteControl: null,
+      registryStatus: null,
     };
   });
 }

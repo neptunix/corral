@@ -9,10 +9,15 @@ import { SessionCard } from "./SessionCard";
 import { api } from "../lib/api";
 import { envLabel } from "../lib/env";
 import { toSnapshotPreview } from "../lib/preview";
+import { sessionStateLabel, sessionStateTone, type SessionStateTone } from "../lib/session-state";
 
-const STATUS_COLOR: Record<string, string> = {
+// Keyed by tone, NOT by herdr's agent_status — the dot and the state word at the front of the subtitle
+// must come from one decision. Values pinned in test/ui-safety.test.ts.
+const TONE_COLOR: Record<SessionStateTone, string> = {
   working: "text-emerald-400 light:text-emerald-600", idle: "text-slate-500",
-  blocked: "text-red-400 light:text-red-600", done: "text-sky-400 light:text-sky-600",
+  attention: "text-red-400 light:text-red-600", done: "text-sky-400 light:text-sky-600",
+  unavailable: "text-amber-400 light:text-amber-600",
+  unknown: "text-slate-400 light:text-slate-500",
 };
 
 // Re-read each visible card's pane while the Unassigned view is open (read-only, no takeover). Cards
@@ -65,9 +70,9 @@ function UnassignedCard({ session, envLabelText, onOpen, onCreate, onAssign }: C
   return (
     <SessionCard
       onOpen={() => { onOpen(env, paneId, false, label); }}
-      indicator={<span className={STATUS_COLOR[session.status] ?? "text-slate-400 light:text-slate-500"} aria-hidden>●</span>}
+      indicator={<span className={TONE_COLOR[sessionStateTone(session)]} aria-hidden>●</span>}
       title={displayTitle}
-      subtitle={`${session.workspace} / ${session.tab} · ${envLabelText}`}
+      subtitle={`${sessionStateLabel(session)} · ${session.workspace} / ${session.tab} · ${envLabelText}`}
       meta={((): string => {
         const sl = session.statusline;
         if (sl === null) return "";

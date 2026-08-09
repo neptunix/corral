@@ -8,7 +8,7 @@ function row(env: string, paneId: string, cwd: string): SessionRow {
   return {
     env, paneId, status: "working", agent: "claude", cwd, tab: "t", workspace: "w",
     sessionId: null, recap: null, recapAt: null, recapStatus: null,
-    statusline: null, statuslineStatus: null,
+    statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
   };
 }
 const snapshot = (sessions: SessionRow[]): Snapshot => ({ envs: {}, sessions });

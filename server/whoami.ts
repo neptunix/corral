@@ -150,6 +150,10 @@ export async function resolveSelfViaPane(input: {
         recapStatus: null,
         statusline: null,
         statuslineStatus: null,
+        claudeStatus: null,
+        waitingFor: null,
+        remoteControl: null,
+        registryStatus: null,
       },
     };
   }

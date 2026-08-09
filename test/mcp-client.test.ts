@@ -100,7 +100,7 @@ describe("corral client", () => {
       sessions: [{
         env: "work-local", paneId: "w1:p1", status: "working", agent: "claude", cwd: "/repo",
         tab: "t1", workspace: "ws1", tabId: "tab-1", workspaceId: "ws-1", sessionId: null,
-        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null,
+        recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
       }],
     };
     const client = createClient("http://127.0.0.1:8787", async (input) => {

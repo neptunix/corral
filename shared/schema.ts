@@ -45,6 +45,17 @@ export const StatuslineDataSchema = z.object({
 
 export const StatuslineStatusSchema = z.enum(["ok", "no-session-ref", "not-found", "bad-schema", "read-error"]);
 
+// Health of the registry read behind claudeStatus/waitingFor/remoteControl, mirroring the discipline
+// recapStatus and statuslineStatus already have. Without it a bare `claudeStatus: null` would mean all
+// of "no config dirs", "unreadable", "unparseable", "no record for this session" and "the sweep has
+// not run yet" at once — a degraded state indistinguishable from a healthy one.
+//
+// `bad-schema` is also the DRIFT DETECTOR: this feature reads an undocumented file format from an
+// auto-updating CLI, and a format change must surface as an error rather than as silence.
+export const RegistryStatusSchema = z.enum([
+  "ok", "no-session-ref", "no-config-dirs", "not-found", "bad-schema", "read-error",
+]);
+
 export const AccountUsageSchema = z.object({
   uuid: z.string(),
   email: z.string().nullable(),
@@ -76,6 +87,17 @@ export const SessionRowSchema = z.object({
   recapStatus: RecapStatusSchema.nullable().default(null),
   statusline: StatuslineDataSchema.nullable().default(null),
   statuslineStatus: StatuslineStatusSchema.nullable().default(null),
+  // Claude's OWN session state, from <claude-config-dir>/sessions/<pid>.json. Exactly ONE writer per
+  // environment fills these: a 3 s interval for local environments, the 60 s sweep for remote ones,
+  // both doing full directory reads through the same reader — so absence is always authoritative and
+  // there is no precedence rule between them.
+  // `claudeStatus` is Claude's idle | busy | waiting | shell, distinct from `status`, which is herdr's
+  // agent_status. `waitingFor` names what is holding the input line. `remoteControl` is null when
+  // UNKNOWN — not false; see the tri-state in server/session-registry.ts.
+  claudeStatus: z.string().nullable().default(null),
+  waitingFor: z.string().nullable().default(null),
+  remoteControl: z.boolean().nullable().default(null),
+  registryStatus: RegistryStatusSchema.nullable().default(null),
 });
 
 export const SnapshotSchema = z.object({
@@ -125,4 +147,5 @@ export type UploadResponse = z.infer<typeof UploadResponseSchema>;
 export type RateWindow = z.infer<typeof RateWindowSchema>;
 export type StatuslineData = z.infer<typeof StatuslineDataSchema>;
 export type StatuslineStatus = z.infer<typeof StatuslineStatusSchema>;
+export type RegistryStatus = z.infer<typeof RegistryStatusSchema>;
 export type AccountUsage = z.infer<typeof AccountUsageSchema>;
