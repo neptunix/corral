@@ -50,21 +50,33 @@ export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, on
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-card border border-border rounded-lg p-6 w-[480px] max-h-[80vh] overflow-y-auto" onClick={(e) => { e.stopPropagation(); }}>
-        <h2 className="text-foreground font-semibold mb-4">Edit task</h2>
+      <div className="bg-card border border-border rounded-lg w-[min(900px,92vw)] max-h-[80vh] flex flex-col" onClick={(e) => { e.stopPropagation(); }}>
+        <h2 className="text-foreground font-semibold px-6 pt-6 pb-4">Edit task</h2>
+        <div className="px-6 overflow-y-auto flex-1">
 
-        <label className="block text-xs text-muted-foreground mb-1">Board / Project</label>
-        <div className="flex gap-2 mb-3">
-          <select className="flex-1 bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
-            value={targetBoardId} onChange={(e) => { setTargetBoardId(e.target.value); }}>
-            {boards.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
-          </select>
-          {targetBoardId !== board.id && (
-            <button onClick={() => { void handleMove(); }} disabled={moving}
-              className="shrink-0 px-3 py-2 text-sm rounded border border-primary/60 text-primary hover:bg-primary/10 disabled:opacity-50">
-              {moving ? "Moving…" : "Move"}
-            </button>
-          )}
+        <div className="flex gap-3 mb-3">
+          <div className="flex-1 min-w-0">
+            <label className="block text-xs text-muted-foreground mb-1">Board / Project</label>
+            <div className="flex gap-2">
+              <select className="flex-1 bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
+                value={targetBoardId} onChange={(e) => { setTargetBoardId(e.target.value); }}>
+                {boards.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+              </select>
+              {targetBoardId !== board.id && (
+                <button onClick={() => { void handleMove(); }} disabled={moving}
+                  className="shrink-0 px-3 py-2 text-sm rounded border border-primary/60 text-primary hover:bg-primary/10 disabled:opacity-50">
+                  {moving ? "Moving…" : "Move"}
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <label className="block text-xs text-muted-foreground mb-1">Column</label>
+            <select className="w-full bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
+              value={status} onChange={(e) => { setStatus(e.target.value); }}>
+              {board.columns.map((col) => <option key={col.id} value={col.id}>{col.label}</option>)}
+            </select>
+          </div>
         </div>
         {moveError !== null && <p className="text-xs text-destructive mb-3">{moveError}</p>}
 
@@ -73,7 +85,7 @@ export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, on
           value={title} onChange={(e) => { setTitle(e.target.value); }} />
 
         <label className="block text-xs text-muted-foreground mb-1">Description (markdown)</label>
-        <textarea rows={4} className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-3 resize-none"
+        <textarea rows={11} className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-3 resize-y"
           value={description} onChange={(e) => { setDescription(e.target.value); }} />
 
         <label className="block text-xs text-muted-foreground mb-1">Priority</label>
@@ -86,20 +98,15 @@ export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, on
           ))}
         </div>
 
-        <label className="block text-xs text-muted-foreground mb-1">Column</label>
-        <select className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-4"
-          value={status} onChange={(e) => { setStatus(e.target.value); }}>
-          {board.columns.map((col) => <option key={col.id} value={col.id}>{col.label}</option>)}
-        </select>
-
         <SpawnPanel
           envs={envs}
           hasSessions={task.sessions.length > 0}
           onSpawn={onSpawn}
           onSpawned={(link) => { onClose(); onOpenSession(link.env, link.paneId, true, task.title); }}
         />
+        </div>
 
-        <div className="flex justify-between">
+        <div className="flex justify-between px-6 py-4 border-t border-border bg-card">
           {confirmDelete
             ? <div className="flex gap-2">
                 <span className="text-xs text-destructive self-center">Delete this task?</span>
