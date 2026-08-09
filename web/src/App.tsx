@@ -1,5 +1,5 @@
 import { StreamFrameSchema, type Board, type BoardState } from "@shared/board-schema";
-import type { SessionRow, StatuslineData } from "@shared/schema";
+import type { RegistryStatus, SessionRow, StatuslineData } from "@shared/schema";
 import { useState, useEffect, useCallback, useMemo, type JSX } from "react";
 
 import { AttentionFeed } from "./components/AttentionFeed";
@@ -130,13 +130,28 @@ export function App(): JSX.Element {
   // Recap/statusline lookup for the live-terminal header's second line, keyed by `env:paneId` — covers
   // both unassigned rows and every task's enriched session link (`live` is null for a detached link).
   const liveByKey = useMemo(() => {
-    const m = new Map<string, { recap: string | null; statusline: StatuslineData | null; workspace: string }>();
+    // Carries the four registry fields plus `status`, which sessionStateLabel needs and SessionModal
+    // does not otherwise have. `unassigned` rows are SessionRows and hold all five directly; a board
+    // link holds them on `link.live` (LiveSessionData) after the projection.
+    const m = new Map<string, {
+      recap: string | null; statusline: StatuslineData | null; workspace: string;
+      status: string; claudeStatus: string | null; waitingFor: string | null;
+      remoteControl: boolean | null; registryStatus: RegistryStatus | null;
+    }>();
     // workspace (≈ repo) shown in the terminal header; "?" is herdr's unknown-label sentinel → drop it.
     const clean = (w: string): string => (w === "?" ? "" : w);
-    for (const s of globalState?.unassigned ?? []) m.set(`${s.env}:${s.paneId}`, { recap: s.recap, statusline: s.statusline, workspace: clean(s.workspace) });
+    for (const s of globalState?.unassigned ?? []) m.set(`${s.env}:${s.paneId}`, {
+      recap: s.recap, statusline: s.statusline, workspace: clean(s.workspace),
+      status: s.status, claudeStatus: s.claudeStatus, waitingFor: s.waitingFor,
+      remoteControl: s.remoteControl, registryStatus: s.registryStatus,
+    });
     if (activeBoardState !== null) {
       for (const t of activeBoardState.tasks) for (const link of t.sessions) {
-        if (link.live !== null) m.set(`${link.env}:${link.paneId}`, { recap: link.live.recap, statusline: link.live.statusline, workspace: clean(link.workspaceLabel) });
+        if (link.live !== null) m.set(`${link.env}:${link.paneId}`, {
+          recap: link.live.recap, statusline: link.live.statusline, workspace: clean(link.workspaceLabel),
+          status: link.live.status, claudeStatus: link.live.claudeStatus, waitingFor: link.live.waitingFor,
+          remoteControl: link.live.remoteControl, registryStatus: link.live.registryStatus,
+        });
       }
     }
     return m;
@@ -318,6 +333,11 @@ export function App(): JSX.Element {
           workspace={liveByKey.get(`${session.env}:${session.paneId}`)?.workspace ?? ""}
           recap={liveByKey.get(`${session.env}:${session.paneId}`)?.recap ?? null}
           statusline={liveByKey.get(`${session.env}:${session.paneId}`)?.statusline ?? null}
+          status={liveByKey.get(`${session.env}:${session.paneId}`)?.status ?? "unknown"}
+          claudeStatus={liveByKey.get(`${session.env}:${session.paneId}`)?.claudeStatus ?? null}
+          waitingFor={liveByKey.get(`${session.env}:${session.paneId}`)?.waitingFor ?? null}
+          remoteControl={liveByKey.get(`${session.env}:${session.paneId}`)?.remoteControl ?? null}
+          registryStatus={liveByKey.get(`${session.env}:${session.paneId}`)?.registryStatus ?? null}
           canAttachFiles={globalState?.envs[session.env]?.kind === "local"}
           onClose={closeSession}
         />

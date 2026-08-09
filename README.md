@@ -40,7 +40,7 @@ lacking one of these flags will fail the launch visibly in the pane.
 # 0. prerequisite check — without jq the metrics capture silently does nothing
 command -v jq >/dev/null || echo "install jq first — the live metrics need it"
 
-# 1. herdr's Claude integration (per machine) — enables session recaps
+# 1. herdr's Claude integration (per machine) — REQUIRED: recaps, live metrics and live session state
 herdr integration install claude
 
 # 2. configure your environments
@@ -409,6 +409,15 @@ and that UUID is the key corral uses to find a session's transcript and its stat
 without `herdr integration install claude`, `corral_whoami` reports `session id: not registered yet`
 permanently and leaves `model`, `ctx` and `cost` empty — which removes exactly the signal a session
 watches to notice its own context pressure and hand off in time.
+
+It also gates the board's live session state: a pane with no session id has nothing to join Claude's
+own registry record to, so its row reads **"starting"** — permanently, on a machine where the
+integration is missing.
+
+The same is true of a pane herdr's hook never saw, integration or not: the hook reports nothing unless
+`HERDR_ENV`, `HERDR_SOCKET_PATH` and `HERDR_PANE_ID` are all set in that pane, so a session started by
+hand rather than through herdr reads "starting" for its whole life. Start sessions through herdr (or
+corral) and this does not arise.
 
 It resolves that address from **its own** environment (`CORRAL_URL`, else
 `http://127.0.0.1:$HERDR_DASH_PORT`), and it inherits the pane's shell, not the corral server's. So

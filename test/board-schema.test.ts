@@ -141,4 +141,31 @@ describe("statusline frame fields", () => {
     expect(parsed.recap).toBe("did X");
     expect(parsed.statusline).toBeNull();
   });
+
+  it("LiveSessionData carries Claude's own state and its health", () => {
+    const parsed = LiveSessionDataSchema.parse({
+      status: "working", model: null, ctxPct: null, detached: false,
+      claudeStatus: "waiting", waitingFor: "input needed", remoteControl: true, registryStatus: "ok",
+    });
+    expect(parsed.claudeStatus).toBe("waiting");
+    expect(parsed.waitingFor).toBe("input needed");
+    expect(parsed.remoteControl).toBe(true);
+    expect(parsed.registryStatus).toBe("ok");
+  });
+
+  it("LiveSessionData defaults them to null for a payload that predates them", () => {
+    const parsed = LiveSessionDataSchema.parse({ status: "working", model: null, ctxPct: null, detached: false });
+    expect(parsed.claudeStatus).toBeNull();
+    expect(parsed.waitingFor).toBeNull();
+    expect(parsed.registryStatus).toBeNull();
+    // null, NOT false — the tri-state survives the projection or the badge lies about disconnected
+    // sessions on every payload written by an older server.
+    expect(parsed.remoteControl).toBeNull();
+  });
+
+  it("rejects an unknown registryStatus on the wire too", () => {
+    expect(LiveSessionDataSchema.safeParse({
+      status: "working", model: null, ctxPct: null, detached: false, registryStatus: "made-up",
+    }).success).toBe(false);
+  });
 });

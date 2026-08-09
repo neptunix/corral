@@ -1,4 +1,4 @@
-import type { StatuslineData } from "@shared/schema";
+import type { RegistryStatus, StatuslineData } from "@shared/schema";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef, useState, type JSX } from "react";
@@ -10,6 +10,7 @@ import {
 import { contextLevelClass } from "../lib/level";
 import { formatDropInjection, formatPaste } from "../lib/paste";
 import { closeMessage } from "../lib/protocol";
+import { sessionStateLabel } from "../lib/session-state";
 import { isStale } from "../lib/time";
 import { isFileDrag, uploadFile, UPLOAD_MAX_BYTES } from "../lib/upload";
 
@@ -38,6 +39,14 @@ interface Props {
   // Enables drop-to-attach (upload + path injection). True for local envs only; remote needs SSH
   // byte transfer (v2), so the drop affordance is hidden there (the server also refuses remote uploads).
   readonly canAttachFiles?: boolean;
+  // Required, not optional: SessionStateFields declares these non-undefined, and under
+  // exactOptionalPropertyTypes a `?:` prop widens to `| undefined` and no longer satisfies it.
+  // App.tsx already defaults every one of them at the call site, so this costs nothing there.
+  readonly status: string;
+  readonly claudeStatus: string | null;
+  readonly waitingFor: string | null;
+  readonly remoteControl: boolean | null;
+  readonly registryStatus: RegistryStatus | null;
   readonly onClose: () => void;
 }
 
@@ -74,7 +83,7 @@ function MetricChips({ sl }: { readonly sl: StatuslineData }): JSX.Element {
 
 export function SessionModal({
   env, envLabel, paneId, awaitAgent = false, title = "", workspace = "", recap = null, statusline = null,
-  canAttachFiles = false, onClose,
+  canAttachFiles = false, status, claudeStatus, waitingFor, remoteControl, registryStatus, onClose,
 }: Props): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [closeInfo, setCloseInfo] = useState<{ code: number; reason: string } | null>(null);
@@ -341,6 +350,9 @@ export function SessionModal({
         <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
           <span className="text-foreground text-sm font-semibold">{title !== "" ? title : paneId}</span>
           <span className="text-xs text-muted-foreground/70">{title !== "" ? `${paneId} · ${envLabel}` : envLabel}</span>
+          <span className="text-xs text-muted-foreground">
+            · {sessionStateLabel({ status, claudeStatus, waitingFor, registryStatus })}
+          </span>
           {workspace !== "" && (
             <span className="text-xs text-muted-foreground/60 truncate" title={workspace}>· {workspace}</span>
           )}
@@ -356,10 +368,20 @@ export function SessionModal({
           {dropError !== null && (
             <span className="text-xs text-warning">· {dropError}</span>
           )}
+          {/* `true` only. `false` and `null` both render nothing, and that is deliberate even though
+              they look identical here: `null` means corral has no record and cannot say, `false` is a
+              positive "not connected". Do NOT collapse them with a nullish default.
+              Read-only — Remote Control is turned on at launch and corral never changes it. */}
+          {remoteControl === true && (
+            <span
+              className="ml-auto text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-border text-muted-foreground"
+              title="Remote Control is connected — this session is reachable from claude.ai"
+            >remote</span>
+          )}
           <button
             type="button"
             onClick={onClose}
-            className="ml-auto text-muted-foreground hover:text-foreground text-lg leading-none"
+            className={`${remoteControl === true ? "" : "ml-auto "}text-muted-foreground hover:text-foreground text-lg leading-none`}
             title="Close (Esc)"
           >✕</button>
         </div>

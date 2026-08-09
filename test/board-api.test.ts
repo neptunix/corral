@@ -1664,3 +1664,63 @@ describe("POST attach — UUID-aware idempotency (two same-pane cards)", () => {
     expect(storage.getBoard("test")?.tasks[0]?.sessions).toHaveLength(1); // null-UUID pane-mate claims the pane → no duplicate
   });
 });
+
+// The closed-projection trap: LiveSessionDataSchema is a closed field list built field-by-field in
+// server/api.ts, so a new SessionRow field that is not added in BOTH places never reaches the web —
+// and the omission is silent. This is the test that catches it.
+describe("GET /api/state — Claude's own session state reaches the board", () => {
+  it("projects claudeStatus, waitingFor, remoteControl and registryStatus onto the enriched link", async () => {
+    const storage = createStorage(tmpDir);
+    const snapshot: Snapshot = {
+      envs: { "work-local": { reachable: true } },
+      sessions: [{
+        ...makeLiveRow({ paneId: "w1:p1", sessionId: "11111111-2222-3333-4444-555555555555", tabId: "w1:t1" }),
+        claudeStatus: "waiting", waitingFor: "input needed", remoteControl: true, registryStatus: "ok",
+      }],
+    };
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage });
+    await seedTaskWithLink(app, storage);
+    const state = await (await app.request("/api/state?board=t")).json() as {
+      tasks: { sessions: { live: { claudeStatus: string; waitingFor: string; remoteControl: boolean; registryStatus: string } | null }[] }[];
+    };
+    const live = state.tasks[0]?.sessions[0]?.live;
+    expect(live?.claudeStatus).toBe("waiting");
+    expect(live?.waitingFor).toBe("input needed");
+    expect(live?.remoteControl).toBe(true);
+    expect(live?.registryStatus).toBe("ok");
+  });
+
+  // remoteControl: false must survive the projection as false. If the enrichment ever passed it
+  // through something falsy-collapsing, a disconnected session would be indistinguishable from one
+  // corral has no record for — which is the whole point of the tri-state.
+  it("projects remoteControl: false distinctly from a missing record", async () => {
+    const storage = createStorage(tmpDir);
+    const snapshot: Snapshot = {
+      envs: { "work-local": { reachable: true } },
+      sessions: [{
+        ...makeLiveRow({ paneId: "w1:p1", sessionId: "11111111-2222-3333-4444-555555555555", tabId: "w1:t1" }),
+        claudeStatus: "idle", remoteControl: false, registryStatus: "ok",
+      }],
+    };
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage });
+    await seedTaskWithLink(app, storage);
+    const state = await (await app.request("/api/state?board=t")).json() as {
+      tasks: { sessions: { live: { remoteControl: boolean | null } | null }[] }[];
+    };
+    expect(state.tasks[0]?.sessions[0]?.live?.remoteControl).toBe(false);
+  });
+
+  it("gives a detached link null state, never a stale one", async () => {
+    const storage = createStorage(tmpDir);
+    const app = createApi({ poller, envs: ENVIRONMENTS, storage }); // no live rows
+    await seedTaskWithLink(app, storage);
+    const state = await (await app.request("/api/state?board=t")).json() as {
+      tasks: { sessions: { live: { claudeStatus: string | null; waitingFor: string | null; remoteControl: boolean | null; registryStatus: string | null } | null }[] }[];
+    };
+    const live = state.tasks[0]?.sessions[0]?.live;
+    expect(live?.claudeStatus).toBeNull();
+    expect(live?.waitingFor).toBeNull();
+    expect(live?.remoteControl).toBeNull();
+    expect(live?.registryStatus).toBeNull();
+  });
+});

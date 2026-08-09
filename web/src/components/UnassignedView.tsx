@@ -9,6 +9,7 @@ import { SessionCard } from "./SessionCard";
 import { api } from "../lib/api";
 import { envLabel } from "../lib/env";
 import { toSnapshotPreview } from "../lib/preview";
+import { sessionStateLabel } from "../lib/session-state";
 
 const STATUS_COLOR: Record<string, string> = {
   working: "text-emerald-400 light:text-emerald-600", idle: "text-slate-500",
@@ -67,7 +68,7 @@ function UnassignedCard({ session, envLabelText, onOpen, onCreate, onAssign }: C
       onOpen={() => { onOpen(env, paneId, false, label); }}
       indicator={<span className={STATUS_COLOR[session.status] ?? "text-slate-400 light:text-slate-500"} aria-hidden>●</span>}
       title={displayTitle}
-      subtitle={`${session.workspace} / ${session.tab} · ${envLabelText}`}
+      subtitle={`${sessionStateLabel(session)} · ${session.workspace} / ${session.tab} · ${envLabelText}`}
       meta={((): string => {
         const sl = session.statusline;
         if (sl === null) return "";

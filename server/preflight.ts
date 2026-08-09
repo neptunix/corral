@@ -90,6 +90,47 @@ export function findMissingBinaries(
  * round's candidates), so a single stale sighting cannot reap a live pane. A stopped poll loop is a
  * separate case, handled by the tick-gap rail in zombie-reaper.ts.
  */
+/** True when `p` is a directory. Sibling of isExecutableFile; same synchronous, injectable shape. */
+export function isDirectory(p: string): boolean {
+  try { return statSync(p).isDirectory(); } catch { return false; }
+}
+
+export interface RegistryPreflight {
+  readonly envId: string;
+  readonly state: "ok" | "no-config-dirs" | "unreadable";
+  readonly detail: string;
+}
+
+/**
+ * Whether corral can see Claude's session registry per environment. Local dirs are stat'd; a remote
+ * one cannot be checked without an SSH round trip at startup — which would hang the launch on an
+ * unreachable box — so only the knowable half is reported: an empty `claudeConfigDirs`, which is what
+ * makes live session state not function on that environment at all.
+ */
+export function checkRegistryDirs(
+  envs: readonly HerdrEnv[],
+  isDir: (p: string) => boolean,
+): RegistryPreflight[] {
+  return envs.map((env) => {
+    if (env.claudeConfigDirs.length === 0) {
+      return {
+        envId: env.id, state: "no-config-dirs" as const,
+        detail: 'no "claudeConfigDirs" — live session state and Remote Control do not function here',
+      };
+    }
+    if (env.kind === "remote") {
+      return { envId: env.id, state: "ok" as const, detail: "remote — readability is checked on the first sweep" };
+    }
+    const missing = env.claudeConfigDirs.filter((d) => !isDir(path.join(d, "sessions")));
+    return missing.length === 0
+      ? { envId: env.id, state: "ok" as const, detail: "" }
+      : {
+          envId: env.id, state: "unreadable" as const,
+          detail: `no sessions/ directory under ${String(missing.length)} of ${String(env.claudeConfigDirs.length)} config dir(s) — normal if Claude has never run there; live state stays empty until it does`,
+        };
+  });
+}
+
 export function resolveReapGrace(
   configuredMs: number,
   pollMs: number,
@@ -120,6 +161,8 @@ export interface BuildReportInput {
   readonly configLine: ReportLine;
   readonly missing: readonly MissingBinary[];
   readonly pathEnv: string;
+  /** Absent = not checked (the config failed to load). */
+  readonly registry?: readonly RegistryPreflight[];
 }
 
 const UNDER_CLAUDE_FATAL =
@@ -209,6 +252,17 @@ export function buildReport(input: BuildReportInput): { lines: readonly ReportLi
       lines.push({ level: "warning", text: missingBinaryMessage(m, input.pathEnv) });
     }
     lines.push(...socketLines(input.env, input.envs));
+
+    const registry = input.registry ?? [];
+    const degraded = registry.filter((r) => r.state !== "ok");
+    if (registry.length > 0 && degraded.length === 0) {
+      lines.push({ level: "ok", text: "Claude session registry readable in every environment" });
+    }
+    // A warning, never fatal: live state is an enhancement, and refusing to boot over it would turn a
+    // degraded board into no board.
+    for (const r of degraded) {
+      lines.push({ level: "warning", text: `registry: environment "${r.envId}" — ${r.detail}` });
+    }
   }
 
   return { lines, fatal: lines.some((l) => l.level === "fatal") };
@@ -291,6 +345,7 @@ export async function runPreflight(): Promise<{
     configLine: cfg.line,
     missing: cfg.ok ? findMissingBinaries(cfg.envs, (bin) => resolveOnPath(bin, pathEnv, isExecutableFile)) : [],
     pathEnv,
+    ...(cfg.ok ? { registry: checkRegistryDirs(cfg.envs, isDirectory) } : {}),
   });
   return { report, envs: cfg.ok ? cfg.envs : null };
 }

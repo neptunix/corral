@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import type { HerdrEnv } from "../environments.ts";
 import type { MissingBinary, ReportLine } from "../server/preflight.ts";
-import { buildReport, formatReport, loadEnvironmentsOrReport } from "../server/preflight.ts";
+import { buildReport, checkRegistryDirs, formatReport, loadEnvironmentsOrReport } from "../server/preflight.ts";
 
 const pinned = (id: string): HerdrEnv => ({
   id, label: id.toUpperCase(), kind: "local", socket: `~/.config/herdr/sessions/${id}/herdr.sock`,
@@ -226,5 +226,78 @@ describe("formatReport", () => {
     const cont = out.split("\n").filter((l) => l.includes("environments.0.id"));
     expect(cont).toHaveLength(1);
     expect(cont[0]).toMatch(/^\s{4,}/);
+  });
+});
+
+describe("buildReport — the registry line", () => {
+  it("says so once when every environment is readable", () => {
+    const r = buildReport(input({ registry: [{ envId: "work", state: "ok", detail: "" }] }));
+    expect(texts(r)).toContain("registry readable in every environment");
+    expect(r.fatal).toBe(false);
+  });
+
+  it("warns per environment, naming the consequence, and never refuses to boot", () => {
+    const r = buildReport(input({
+      registry: [
+        { envId: "work", state: "ok", detail: "" },
+        { envId: "box", state: "no-config-dirs", detail: "no \"claudeConfigDirs\" — live session state and Remote Control do not function here" },
+      ],
+    }));
+    expect(texts(r)).toContain('environment "box"');
+    expect(texts(r)).toContain("do not function here");
+    expect(r.fatal).toBe(false);
+    // And the all-clear must NOT also be printed — one degraded environment means the fleet is not
+    // uniformly readable, and printing both lines would contradict itself.
+    expect(texts(r)).not.toContain("readable in every environment");
+  });
+
+  it("emits nothing when the registry was not checked", () => {
+    expect(texts(buildReport(input()))).not.toContain("registry");
+  });
+
+  it("emits nothing about the registry when the config failed to load", () => {
+    // envs: null is the config-failure path; nothing is known, so nothing may be claimed.
+    expect(texts(buildReport(input({ envs: null, registry: [{ envId: "work", state: "ok", detail: "" }] }))))
+      .not.toContain("registry");
+  });
+});
+
+describe("checkRegistryDirs", () => {
+  it("flags an environment with no config dirs at all", () => {
+    const out = checkRegistryDirs([unpinned("bare")], () => true);
+    expect(out[0]?.state).toBe("no-config-dirs");
+    expect(out[0]?.detail).toContain("do not function here");
+  });
+
+  it("flags a local config dir with no sessions/ directory", () => {
+    const env: HerdrEnv = { ...unpinned("work"), claudeConfigDirs: ["/home/u/.claude"] };
+    expect(checkRegistryDirs([env], () => false)[0]?.state).toBe("unreadable");
+    expect(checkRegistryDirs([env], () => true)[0]?.state).toBe("ok");
+  });
+
+  it("stats the sessions/ subdirectory, not the config dir itself", () => {
+    const seen: string[] = [];
+    const env: HerdrEnv = { ...unpinned("work"), claudeConfigDirs: ["/home/u/.claude"] };
+    checkRegistryDirs([env], (p) => { seen.push(p); return true; });
+    expect(seen).toEqual(["/home/u/.claude/sessions"]);
+  });
+
+  it("counts how many of several local dirs are missing", () => {
+    const env: HerdrEnv = { ...unpinned("work"), claudeConfigDirs: ["/a", "/b", "/c"] };
+    const out = checkRegistryDirs([env], (p) => p === "/a/sessions");
+    expect(out[0]?.state).toBe("unreadable");
+    expect(out[0]?.detail).toContain("2 of 3 config dir(s)");
+  });
+
+  it("does not stat a remote environment", () => {
+    let stats = 0;
+    const env: HerdrEnv = { ...remote("box"), claudeConfigDirs: ["/home/u/.claude"] };
+    expect(checkRegistryDirs([env], () => { stats++; return false; })[0]?.state).toBe("ok");
+    expect(stats).toBe(0);
+  });
+
+  it("reports one entry per environment, in order", () => {
+    const out = checkRegistryDirs([unpinned("a"), remote("b")], () => true);
+    expect(out.map((r) => r.envId)).toEqual(["a", "b"]);
   });
 });

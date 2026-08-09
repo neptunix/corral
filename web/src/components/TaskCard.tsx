@@ -7,6 +7,7 @@ import { CloseSessionModal } from "./CloseSessionModal";
 import { RestoreSessionModal } from "./RestoreSessionModal";
 import { api } from "../lib/api";
 import { CLOSING_STATUS, RESUMING_STATUS } from "../lib/optimistic";
+import { sessionStateLabel } from "../lib/session-state";
 import { relativeTime } from "../lib/time";
 
 const PRIORITY_STYLE: Record<string, string> = {
@@ -161,7 +162,7 @@ function SessionRow({ s, title, onOpenSession, onCloseSession, onResumeSession, 
             </span>
           ) : (
             <>
-              <span className="text-muted-foreground">{s.live?.status ?? "unknown"}</span>
+              <span className="text-muted-foreground">{sessionStateLabel(s.live)}</span>
               {s.tabLabel !== "" && (
                 // Workspace/repo label intentionally omitted here — it lives in the terminal header now.
                 <span className="text-muted-foreground/70"> · {s.tabLabel}</span>
