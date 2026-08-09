@@ -106,22 +106,23 @@ export interface CorralClient {
 
 // The attach route's every non-error path ends in `c.json({ ok: true })` — it never returns a task.
 const OkSchema = z.object({ ok: z.boolean() });
-// The three location fields are OPTIONAL on purpose. The route returns all of them today, but this
-// MCP process restarts with every Claude session while the corral server is long-running, so a
-// `git pull` routinely leaves a new MCP talking to an older server. Requiring them would turn a
-// spawn that actually succeeded into a parse error — a worse reply than one that omits where it
-// landed. Non-strict, so the route's full SessionLink superset still parses and is stripped.
+// Non-strict, so the route's full SessionLink superset parses and the rest is stripped. The three
+// location fields are required: the route returns `{...link, idempotent}`, and a link carries a
+// label and a cwd by schema.
 const SpawnResultSchema = z.object({
   env: z.string(),
   paneId: z.string(),
   name: z.string(),
-  workspaceLabel: z.string().optional(),
-  cwdSnapshot: z.string().optional(),
-  idempotent: z.boolean().optional(),
+  workspaceLabel: z.string(),
+  cwdSnapshot: z.string(),
+  idempotent: z.boolean(),
 });
 const SpawnTargetsSchema = z.object({
   spaces: z.array(z.object({ workspaceId: z.string(), label: z.string() })).default([]),
-  repos: z.array(z.object({ name: z.string() })).default([]),
+  // Deliberately NOT defaulted. `repos: null` means "the names could not be read" to the refusal
+  // formatter; defaulting a missing array to `[]` would turn that into the factual claim "this
+  // environment has no repositories configured", asserted from absent data.
+  repos: z.array(z.object({ name: z.string() })),
 });
 
 export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralClient {

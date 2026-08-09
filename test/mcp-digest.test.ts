@@ -55,7 +55,8 @@ function boardWithCard(sessions: SessionLink[]): Board[] {
     id: "board", label: "Board",
     columns: [{ id: "todo", label: "Todo" }],
     tasks: [{
-      id: "t_card01", title: "Card", description: "", status: "todo", priority: null,       sessions, createdAt: 1, updatedAt: 1,
+      id: "t_card01", title: "Card", description: "", status: "todo", priority: null,
+      sessions, createdAt: 1, updatedAt: 1,
     }],
   }];
 }
@@ -949,12 +950,6 @@ describe("formatSpawnReply", () => {
     expect(out).toContain("read the brief");
   });
 
-  // A server too old to send them must not cost the caller the whole reply.
-  it("degrades to the key alone when the location fields are absent", () => {
-    const out = formatSpawnReply(base);
-    expect(out).toContain("work-local:w1:p2");
-    expect(out).toContain("read the brief");
-  });
 
   // The rejoin returns before the launch command is sent, so the brief is never read. The reply must
   // stop claiming otherwise.

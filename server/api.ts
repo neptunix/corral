@@ -940,7 +940,9 @@ export function createApi(opts: {
       // MCP tool omits it — a client refactor that starts always sending it silently turns
       // resolve-by-repo into create.
       targetWorkspaceId: z.string().nullable().optional(),
-      repo: z.string().nullable().optional(), // config key: roots a NEW space, or names the one to resolve
+      // Bounded like every other field on this body: the value is echoed back in the unknown_repo
+      // 400, and a configured key is never anywhere near this long.
+      repo: z.string().max(200).nullable().optional(), // config key: roots a NEW space, or names the one to resolve
       brief: z.string().min(1).optional(),    // initial prompt, delivered via file indirection
       // Short slug for what THIS session does; composed with the card slug into the one string used
       // as the herdr tab label, the card's link name and `claude --name`.
@@ -989,7 +991,11 @@ export function createApi(opts: {
     const assignedPaneIds = new Set<string>();
     for (const b of allBoards) {
       for (const t of b.tasks) {
-        for (const s of t.sessions) assignedPaneIds.add(s.paneId);
+        // Scoped to the TARGET environment. spawnSession compares this set against sessions listed
+        // from that environment alone, and two local environments are two independent herdr servers
+        // that both number panes from scratch — an unscoped set lets `w1:p1` over there mark `w1:p1`
+        // here as taken, so a retry after a timeout starts a second session instead of rejoining.
+        for (const s of t.sessions) if (s.env === targetEnv.id) assignedPaneIds.add(s.paneId);
       }
     }
 
@@ -1009,8 +1015,12 @@ export function createApi(opts: {
     // The three-state read (see the schema comment). Absent is passed on ABSENT, never collapsed —
     // that is the whole signal spawn.ts resolves a repo from.
     const hasTarget = parsed.data.targetWorkspaceId !== undefined;
-    if (!hasTarget && newSpaceRepo === null) {
-      return c.json({ error: { code: "validation", message: 'no spawn target: send "targetWorkspaceId" (a workspace id, or null to create a new space) or "repo"' } }, 400);
+    // Two of the four shapes carry no target at all: no key and no repo, and an explicit `null` with
+    // no repo — §1's table makes `repo` REQUIRED on the explicit-null row, because a new space has to
+    // be rooted somewhere. Refused here rather than left to fail inside the spawner, which reported a
+    // caller's malformed request as a 500 server fault.
+    if (newSpaceRepo === null && (!hasTarget || parsed.data.targetWorkspaceId === null)) {
+      return c.json({ error: { code: "validation", message: 'no spawn target: send "targetWorkspaceId" (a workspace id, or null together with a "repo" to create a new space) or "repo" on its own' } }, 400);
     }
 
     const slug = sanitizeSlug(task.title);

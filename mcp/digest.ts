@@ -415,9 +415,7 @@ export function formatRepoRefusal(a: {
  *
  * A formatter rather than a template literal in the tool because `workspaceLabel` and `cwdSnapshot`
  * come from herdr — anything with socket access on that machine can rename a workspace — so they
- * need the same line-collapse and length bound as every other untrusted value here. All three
- * location fields are optional: the MCP process and the corral server are not released together, so
- * an older server that omits them must cost the caller the location, not the whole reply.
+ * need the same line-collapse and length bound as every other untrusted value here.
  */
 export function formatSpawnReply(a: {
   readonly name: string;
@@ -425,16 +423,15 @@ export function formatSpawnReply(a: {
   readonly taskId: string;
   readonly env: string;
   readonly paneId: string;
-  readonly workspaceLabel?: string | undefined;
-  readonly cwdSnapshot?: string | undefined;
-  readonly idempotent?: boolean | undefined;
+  readonly workspaceLabel: string;
+  readonly cwdSnapshot: string;
+  readonly idempotent: boolean;
 }): string {
   const key = `${a.env}:${a.paneId}`;
-  const where = [
-    a.workspaceLabel === undefined ? "" : ` in workspace "${truncate(oneLine(a.workspaceLabel), TASK_TITLE_MAX)}"`,
-    a.cwdSnapshot === undefined ? "" : ` at ${truncate(oneLine(a.cwdSnapshot), IDENTITY_FIELD_MAX)}`,
-  ].join("");
-  const adopted = a.idempotent === true;
+  const where = ` in workspace "${truncate(oneLine(a.workspaceLabel), TASK_TITLE_MAX)}" at ${
+    truncate(oneLine(a.cwdSnapshot), IDENTITY_FIELD_MAX)
+  }`;
+  const adopted = a.idempotent;
   return emit([
     `${adopted ? "adopted the existing session" : "spawned"} ${truncate(oneLine(a.name), TASK_TITLE_MAX)} on ${a.boardId}/${a.taskId}${where} — target key ${key}.`,
     adopted

@@ -443,3 +443,20 @@ describe("spawnSession — resolve the workspace from the repo", () => {
     expect(fns.tabCreateFn).not.toHaveBeenCalled();
   });
 });
+
+// The browser's "＋ <repo>" pick, at the layer that decides it. An explicit null is a CREATE even
+// when a space with that label already exists — that is the case resolve-by-repo would have joined,
+// and the route-level test cannot see the difference because it mocks the spawner.
+describe("spawnSession — an explicit null target still creates", () => {
+  it("creates a new space even when one already carries the repo's label", async () => {
+    const fns = baseFns();
+    const strict = vi.fn().mockResolvedValue([{ workspace_id: "w7", label: "corral" }]);
+    await spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      assignedPaneIds: new Set(), targetWorkspaceId: null, repoPath: "/repos/corral",
+      workspaceListStrictFn: strict, ...fns,
+    });
+    expect(fns.workspaceCreateFn).toHaveBeenCalledWith(localEnv, "/repos/corral", "corral");
+    expect(strict).not.toHaveBeenCalled(); // the resolve path is not even consulted
+  });
+});

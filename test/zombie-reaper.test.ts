@@ -137,7 +137,8 @@ function boardWithLink(over: Partial<{ tabId: string; paneId: string; sessionId:
   return {
     id: "b", label: "B", columns: [],
     tasks: [{
-      id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null,       sessions: [{
+      id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null,
+      sessions: [{
         env: "work-local", paneId: over.paneId ?? "w1:p2", tabId: over.tabId ?? "w1:t2",
         tabLabel: over.tabLabel ?? "task-a", workspaceId: "w1", workspaceLabel: "c", name: "task-a",
         cwdSnapshot: "/c", sessionId: over.sessionId ?? SID,
@@ -598,7 +599,8 @@ describe("startZombieReaper", () => {
     });
     const board: Board = {
       id: "b", label: "B", columns: [],
-      tasks: [{ id: "t", title: "x", description: "", status: "todo", priority: null,         createdAt: 1, updatedAt: 1, sessions: [sess("w1:p2", "w1:t2", "w1", SID), sess("w2:p3", "w2:t3", "w2", SID2)] }],
+      tasks: [{ id: "t", title: "x", description: "", status: "todo", priority: null,
+        createdAt: 1, updatedAt: 1, sessions: [sess("w1:p2", "w1:t2", "w1", SID), sess("w2:p3", "w2:t3", "w2", SID2)] }],
     };
     const empty: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };
     const aLive: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [{

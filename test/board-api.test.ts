@@ -284,7 +284,8 @@ describe("GET /api/state — sessionId churn-heal", () => {
       board: {
         id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
         tasks: [{
-          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,           sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-9" }],
+          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
+          sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-9" }],
           createdAt: now, updatedAt: now,
         }],
       },
@@ -319,7 +320,8 @@ describe("GET /api/state — sessionId churn-heal", () => {
       board: {
         id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
         tasks: [{
-          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,           sessions: [
+          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
+          sessions: [
             { env: "work-local", paneId: "p1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "A", cwdSnapshot: "", sessionId: "uuid-A" },
             { env: "work-local", paneId: "p2", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "B", cwdSnapshot: "", sessionId: "uuid-B" },
           ],
@@ -358,7 +360,8 @@ describe("GET /api/state — sessionId churn-heal", () => {
       board: {
         id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
         tasks: [{
-          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,           sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-dead" }],
+          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
+          sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-dead" }],
           createdAt: now, updatedAt: now,
         }],
       },
@@ -383,7 +386,8 @@ describe("GET /api/state — sessionId churn-heal", () => {
       board: {
         id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
         tasks: [{
-          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,           sessions: [{ env: "work-local", paneId: "wQ:p4", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-old" }],
+          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
+          sessions: [{ env: "work-local", paneId: "wQ:p4", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-old" }],
           createdAt: now, updatedAt: now,
         }],
       },
@@ -466,7 +470,8 @@ describe("GET /api/state — name healing for persisted empty-name links", () =>
       board: {
         id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
         tasks: [{
-          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,           sessions: [{ env: "work-local", paneId: "old-1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "", cwdSnapshot: "", sessionId: null }],
+          id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
+          sessions: [{ env: "work-local", paneId: "old-1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "", cwdSnapshot: "", sessionId: null }],
           createdAt: now, updatedAt: now,
         }],
       },
@@ -525,7 +530,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn", () => {
     const { id } = await (await app.request("/api/boards/test/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "My Task", status: "todo" }) })).json() as { id: string };
     const res = await app.request(`/api/boards/test/tasks/${id}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     expect(res.status).toBe(200);
     const body = await res.json() as { paneId: string; env: string; idempotent: boolean };
@@ -556,7 +561,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn", () => {
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
     const { id } = await (await app.request("/api/boards/test/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "T", status: "todo" }) })).json() as { id: string };
     const res = await app.request(`/api/boards/test/tasks/${id}/spawn`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     expect(res.status).toBe(500);
     const err = await res.json() as { error: { message: string } };
@@ -583,7 +588,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["my-task-a"]);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     expect(res.status).toBe(200);
     const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
@@ -596,7 +601,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["my-task-a", "my-task-b", "my-task-c"]);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     expect(res.status).toBe(200);
     const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
@@ -608,7 +613,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, allLetters);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     expect(res.status).toBe(409);
     const err = await res.json() as { error: { code: string; message: string } };
@@ -625,7 +630,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, name: "RC toggle UI" }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "RC toggle UI" }),
     });
     expect(res.status).toBe(200);
     const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
@@ -638,7 +643,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["my-task-a"]);
     await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
     expect(call.sessionName).toBe("my-task-b");
@@ -648,7 +653,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["my-task-rc-toggle-ui"]);
     await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, name: "RC toggle UI" }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "RC toggle UI" }),
     });
     const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
     expect(call.sessionName).toBe("my-task-rc-toggle-ui-a");
@@ -658,7 +663,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, name: "x".repeat(65) }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "x".repeat(65) }),
     });
     expect(res.status).toBe(400);
     expect(spawn).not.toHaveBeenCalled();
@@ -668,7 +673,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
     await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, model: "fable" }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", model: "fable" }),
     });
     const call = spawn.mock.calls[0]?.[0] as { model?: string };
     expect(call.model).toBe("fable");
@@ -678,7 +683,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
     await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     // exactOptionalPropertyTypes: absent must mean ABSENT, not `undefined` — spawn.ts branches on
     // `opts.model === undefined`, and "inherit the last-used model" is the default.
@@ -690,7 +695,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, model: "claude-sonnet-5[1m]" }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", model: "claude-sonnet-5[1m]" }),
     });
     expect(res.status).toBe(200);
     const call = spawn.mock.calls[0]?.[0] as { model?: string };
@@ -709,7 +714,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, model }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", model }),
     });
     expect(res.status).toBe(200);
     expect(spawn).toHaveBeenCalledOnce();
@@ -722,7 +727,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     for (const model of ["; rm -rf /", "--dangerously-skip-permissions", "a b", "$(id)"]) {
       const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, model }),
+        body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", model }),
       });
       expect(res.status, model).toBe(400);
       expect((await res.json() as { error: { message: string } }).error.message, model).toContain("model");
@@ -734,14 +739,14 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     const on = await seedTaskWithSessionNames(tmpDir, []);
     await on.app.request(`/api/boards/test/tasks/${on.tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, remoteControl: true }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", remoteControl: true }),
     });
     expect((on.spawn.mock.calls[0]?.[0] as { remoteControl?: boolean }).remoteControl).toBe(true);
 
     const off = await seedTaskWithSessionNames(tmpDir, []);
     await off.app.request(`/api/boards/test/tasks/${off.tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     // ABSENT, not `false` — exactOptionalPropertyTypes makes those different types.
     expect(off.spawn).toHaveBeenCalledOnce();
@@ -756,7 +761,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, names);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     expect(res.status).toBe(409);
     expect((await res.json() as { error: { code: string } }).error.code).toBe("session_cap");
@@ -880,7 +885,8 @@ async function seedTaskWithLink(app: ReturnType<typeof createApi>, storage: Retu
   await storage.withBoard("t", (b) => {
     if (b === null) return { board: null, result: undefined };
     const task = {
-      id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null,       sessions: [{ env: "work-local", paneId: "w1:p1", tabId: "w1:t1", tabLabel: "x", workspaceId: "w1", workspaceLabel: "c", name: "x-a", cwdSnapshot: "/c", sessionId }],
+      id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null,
+      sessions: [{ env: "work-local", paneId: "w1:p1", tabId: "w1:t1", tabLabel: "x", workspaceId: "w1", workspaceLabel: "c", name: "x-a", cwdSnapshot: "/c", sessionId }],
       createdAt: 1, updatedAt: 1,
     };
     return { board: { ...b, tasks: [task] }, result: undefined };
@@ -1265,7 +1271,8 @@ async function seedLinkOnBoardT(storage: ReturnType<typeof createStorage>, link:
   await storage.withBoard("t", (b) => {
     if (b === null) return { board: null, result: undefined };
     const task = {
-      id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null,       sessions: [{ env: "work-local", paneId: link.paneId, tabId: link.tabId, tabLabel: "x", workspaceId: link.workspaceId ?? "w1", workspaceLabel: "c", name: "x-a", cwdSnapshot: "/c", sessionId: link.sessionId }],
+      id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null,
+      sessions: [{ env: "work-local", paneId: link.paneId, tabId: link.tabId, tabLabel: "x", workspaceId: link.workspaceId ?? "w1", workspaceLabel: "c", name: "x-a", cwdSnapshot: "/c", sessionId: link.sessionId }],
       createdAt: 1, updatedAt: 1,
     };
     return { board: { ...b, tasks: [task] }, result: undefined };
@@ -1508,7 +1515,7 @@ describe("POST spawn — timeout cleanup (#5)", () => {
     });
     const id = await taskOnBoard(app);
     const res = await app.request(`/api/boards/test/tasks/${id}/spawn`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     expect(res.status).toBe(500);
     expect((await res.json() as { error: { code: string } }).error.code).toBe("spawn_timeout");
@@ -1526,7 +1533,7 @@ describe("POST spawn — timeout cleanup (#5)", () => {
     });
     const id = await taskOnBoard(app);
     const res = await app.request(`/api/boards/test/tasks/${id}/spawn`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     expect(res.status).toBe(500);
     resolve(doneResult("rejoin:t", true));
@@ -1546,7 +1553,8 @@ describe("POST from-session — UUID-aware claim-check", () => {
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
     await storage.withBoard("test", (b) => {
       if (b === null) return { board: null, result: undefined };
-      const task = { id: "t_stale00", title: "T", description: "", status: "todo", priority: null,         sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "x", cwdSnapshot: "/c", sessionId: OLD }],
+      const task = { id: "t_stale00", title: "T", description: "", status: "todo", priority: null,
+        sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "x", cwdSnapshot: "/c", sessionId: OLD }],
         createdAt: 1, updatedAt: 1 };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
@@ -1566,7 +1574,8 @@ describe("POST from-session — UUID-aware claim-check", () => {
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
     await storage.withBoard("test", (b) => {
       if (b === null) return { board: null, result: undefined };
-      const task = { id: "t_nul0000", title: "T", description: "", status: "todo", priority: null,         sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "x", cwdSnapshot: "/c", sessionId: OLD }],
+      const task = { id: "t_nul0000", title: "T", description: "", status: "todo", priority: null,
+        sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "x", cwdSnapshot: "/c", sessionId: OLD }],
         createdAt: 1, updatedAt: 1 };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
@@ -1606,7 +1615,8 @@ describe("POST attach — UUID-aware idempotency (two same-pane cards)", () => {
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
     await storage.withBoard("test", (b) => {
       if (b === null) return { board: null, result: undefined };
-      const task = { id: "t_two0000", title: "T", description: "", status: "todo", priority: null,         sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "wm-a", cwdSnapshot: "/c", sessionId: OLD }],
+      const task = { id: "t_two0000", title: "T", description: "", status: "todo", priority: null,
+        sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "wm-a", cwdSnapshot: "/c", sessionId: OLD }],
         createdAt: 1, updatedAt: 1 };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
@@ -1641,7 +1651,8 @@ describe("POST attach — UUID-aware idempotency (two same-pane cards)", () => {
     await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
     await storage.withBoard("test", (b) => {
       if (b === null) return { board: null, result: undefined };
-      const task = { id: "t_leg0000", title: "T", description: "", status: "todo", priority: null,         sessions: [{ env: "work-local", paneId: "pX", tabId: "", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "legacy", cwdSnapshot: "/c", sessionId: null }],
+      const task = { id: "t_leg0000", title: "T", description: "", status: "todo", priority: null,
+        sessions: [{ env: "work-local", paneId: "pX", tabId: "", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "legacy", cwdSnapshot: "/c", sessionId: null }],
         createdAt: 1, updatedAt: 1 };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
@@ -1823,5 +1834,52 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — unknown_repo", () => {
     expect(res.status).toBe(400);
     expect((await res.json() as { error: { code: string } }).error.code).toBe("unknown_repo");
     expect(spawned).toBe(false);
+  });
+});
+
+// The idempotency scan compares this set against sessions listed from the TARGET environment only
+// (server/spawn.ts), so a pane id from another environment must not appear in it. Two local
+// environments are two independent herdr servers, each numbering panes from scratch — `w1:p1` exists
+// in both — and a collision would make a retry start a second session instead of rejoining the first.
+describe("POST /api/boards/:bid/tasks/:tid/spawn — assigned panes are scoped to the target env", () => {
+  it("excludes a same-id pane that belongs to a different environment", async () => {
+    const { app, spawn } = makeApiWithSpawn(tmpDir);
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
+    const { id } = await (await app.request("/api/boards/test/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "My Task", status: "todo" }) })).json() as { id: string };
+    const storage = createStorage(tmpDir);
+    await storage.withBoard("test", (b) => {
+      if (b === null) return { board: null, result: undefined };
+      const link = (env: string, paneId: string, name: string) => ({ env, paneId, tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name, cwdSnapshot: "", sessionId: null });
+      return {
+        board: { ...b, tasks: b.tasks.map((t) => t.id === id ? { ...t, sessions: [link("personal-local", "w7:p1", "other-a"), link("work-local", "w9:p9", "mine-a")] } : t) },
+        result: undefined,
+      };
+    });
+    const res = await app.request(`/api/boards/test/tasks/${id}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: "w1" }),
+    });
+    expect(res.status).toBe(200);
+    const call = spawn.mock.calls[0]?.[0] as { assignedPaneIds: ReadonlySet<string> };
+    expect(call.assignedPaneIds.has("w7:p1")).toBe(false); // personal-local's pane
+    expect(call.assignedPaneIds.has("w9:p9")).toBe(true);  // work-local's own
+  });
+});
+
+// §1's table makes `repo` REQUIRED on the explicit-null row. Without this the request reached
+// spawnSession with no path and came back as a 500 spawn_error — a contract error reported as a
+// server fault.
+describe("POST /api/boards/:bid/tasks/:tid/spawn — explicit null needs a repo", () => {
+  it("400s on an explicit null target with no repo, instead of failing inside the spawner", async () => {
+    const { app, spawn } = makeApiWithSpawn(tmpDir);
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
+    const { id } = await (await app.request("/api/boards/test/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "My Task", status: "todo" }) })).json() as { id: string };
+    const res = await app.request(`/api/boards/test/tasks/${id}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json() as { error: { code: string } }).error.code).toBe("validation");
+    expect(spawn.mock.calls).toHaveLength(0);
   });
 });

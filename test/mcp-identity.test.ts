@@ -29,7 +29,7 @@ function client(body: WhoamiResponse, counter?: { n: number }): CorralClient {
     boards: async () => [],
     patchTask: async () => { throw new Error("unused"); },
     attach: async () => undefined,
-    spawn: async () => ({ env: "work-local", paneId: "w1:p2", name: "n" }),
+    spawn: async () => ({ env: "work-local", paneId: "w1:p2", name: "n", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }),
     closeSession: async () => undefined,
     spawnTargets: async () => [],
   };

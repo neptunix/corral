@@ -71,7 +71,7 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
     if (repo === null && !sameEnv) {
       return formatRepoRefusal({ env, repo: null, repos: await configuredRepos(deps.client, env) });
     }
-    let result;
+    let result: Awaited<ReturnType<CorralClient["spawn"]>>;
     try {
       result = await deps.client.spawn({
         boardId: card.boardId,
@@ -94,9 +94,8 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
     return formatSpawnReply({
       name: result.name, boardId: card.boardId, taskId: card.taskId,
       env: result.env, paneId: result.paneId,
-      ...(result.workspaceLabel === undefined ? {} : { workspaceLabel: result.workspaceLabel }),
-      ...(result.cwdSnapshot === undefined ? {} : { cwdSnapshot: result.cwdSnapshot }),
-      ...(result.idempotent === undefined ? {} : { idempotent: result.idempotent }),
+      workspaceLabel: result.workspaceLabel, cwdSnapshot: result.cwdSnapshot,
+      idempotent: result.idempotent,
     });
   });
 }

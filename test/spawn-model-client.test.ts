@@ -15,7 +15,7 @@ function captureFetch(): { bodies: unknown[]; urls: string[]; methods: (string |
     urls.push(url);
     methods.push(init?.method);
     bodies.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
-    return Promise.resolve(new Response(JSON.stringify({ env: "e", paneId: "p", name: "n" }), {
+    return Promise.resolve(new Response(JSON.stringify({ env: "e", paneId: "p", name: "n", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }), {
       status: 200, headers: { "Content-Type": "application/json" },
     }));
   });

@@ -159,7 +159,7 @@ describe("corral client", () => {
     const bodies: unknown[] = [];
     const client = createClient("http://127.0.0.1:8787", async (_input, init) => {
       bodies.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
-      return jsonResponse({ env: "work-local", paneId: "w2:p3", name: "task-rc" });
+      return jsonResponse({ env: "work-local", paneId: "w2:p3", name: "task-rc", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false });
     });
     await client.spawn({ boardId: "b", taskId: "t_abcdefg", env: "work-local", brief: "go", name: "rc toggle", model: "fable", remoteControl: true });
     expect(bodies[0]).toEqual({ env: "work-local", brief: "go", name: "rc toggle", model: "fable", remoteControl: true });
@@ -172,7 +172,7 @@ describe("corral client", () => {
     const bodies: unknown[] = [];
     const client = createClient("http://127.0.0.1:8787", async (_input, init) => {
       bodies.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
-      return jsonResponse({ env: "work-local", paneId: "w2:p3", name: "task-a" });
+      return jsonResponse({ env: "work-local", paneId: "w2:p3", name: "task-a", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false });
     });
     await client.spawn({ boardId: "b", taskId: "t_abcdefg", env: "work-local", brief: "go" });
     expect(bodies[0]).toEqual({ env: "work-local", brief: "go" });
@@ -207,7 +207,7 @@ describe("corral client — spawn target and location", () => {
     const bodies: unknown[] = [];
     const client = createClient("http://127.0.0.1:8787", async (_input, init) => {
       bodies.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
-      return jsonResponse({ env: "work-local", paneId: "w2:p3", name: "task-a" });
+      return jsonResponse({ env: "work-local", paneId: "w2:p3", name: "task-a", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false });
     });
     await client.spawn({ boardId: "b", taskId: "t_abcdefg", env: "work-local", brief: "go", repo: "corral" });
     await client.spawn({ boardId: "b", taskId: "t_abcdefg", env: "work-local", brief: "go" });
@@ -224,16 +224,6 @@ describe("corral client — spawn target and location", () => {
     expect(r.workspaceLabel).toBe("corral");
     expect(r.cwdSnapshot).toBe("/repos/corral");
     expect(r.idempotent).toBe(true);
-  });
-
-  // The MCP process and the corral server are not released together. A required field here would
-  // turn a spawn that actually succeeded into a parse error.
-  it("still parses a spawn reply from a server that omits the location fields", async () => {
-    const client = createClient("http://127.0.0.1:8787", async () =>
-      jsonResponse({ env: "work-local", paneId: "w2:p3", name: "task-a" }));
-    const r = await client.spawn({ boardId: "b", taskId: "t_abcdefg", env: "work-local", brief: "go" });
-    expect(r.paneId).toBe("w2:p3");
-    expect(r.workspaceLabel).toBeUndefined();
   });
 
   it("reads the configured repo names from the existing spawn-targets route", async () => {
@@ -255,5 +245,15 @@ describe("corral client — spawn target and location", () => {
     });
     await client.spawnTargets("a/b?c");
     expect(new URL(urls[0] ?? "").pathname).toBe("/api/envs/a%2Fb%3Fc/spawn-targets");
+  });
+});
+
+describe("corral client — spawn-targets is a hard boundary", () => {
+  // `repos: null` means "the names could not be read" to the digest formatter. Defaulting a missing
+  // or malformed `repos` to [] would turn that into a factual claim — "this environment has no
+  // repositories configured" — asserted from absent data, straight into a Claude session's context.
+  it("rejects a body with no repos array rather than defaulting it to empty", async () => {
+    const client = createClient("http://127.0.0.1:8787", async () => jsonResponse({ spaces: [] }));
+    await expect(client.spawnTargets("work-local")).rejects.toMatchObject({ code: "bad_response" });
   });
 });

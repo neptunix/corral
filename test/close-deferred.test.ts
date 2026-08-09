@@ -41,7 +41,7 @@ async function boardWithLink(app: ReturnType<typeof createApi>): Promise<string>
   })).json() as { id: string };
   await app.request(`/api/boards/test/tasks/${id}/attach`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ env: "work-local", paneId: "w1:p1", name: "api-refactor-a" }),
+    body: JSON.stringify({ env: "work-local", paneId: "w1:p1", name: "api-refactor-a", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }),
   });
   return id;
 }
