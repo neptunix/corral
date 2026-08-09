@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   BoardSchema, BoardStateSchema, ColumnSchema, GlobalStateSchema, LiveSessionDataSchema, SessionLinkSchema,
-  TaskSchema, closedColumnIds, sortTasks, slugifyBoardId, generateTaskId, DEFAULT_COLUMNS,
+  TaskSchema, closedColumnIds, sortTasks, slugifyBoardId, generateTaskId, generateSpawnPresetId, DEFAULT_COLUMNS,
 } from "../shared/board-schema.ts";
 
 const LINK_BASE = { env: "e", paneId: "p1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "n", cwdSnapshot: "" };
@@ -173,5 +173,27 @@ describe("statusline frame fields", () => {
     expect(LiveSessionDataSchema.safeParse({
       status: "working", model: null, ctxPct: null, detached: false, registryStatus: "made-up",
     }).success).toBe(false);
+  });
+});
+
+describe("spawn presets on the board", () => {
+  it("heals a board persisted before the fields existed", () => {
+    const b = BoardSchema.parse({ id: "b", label: "B", columns: [{ id: "todo", label: "Todo" }] });
+    expect(b.spawnPresets).toEqual([]);
+    expect(b.defaultSpawnPresetId).toBeNull();
+  });
+
+  it("keeps a stored preset whose text is blank or over-long — content rules live at the PATCH boundary", () => {
+    const b = BoardSchema.parse({
+      id: "b", label: "B", columns: [{ id: "todo", label: "Todo" }],
+      spawnPresets: [{ id: "p1", text: "" }, { id: "p2", text: "x".repeat(5000) }],
+      defaultSpawnPresetId: "p2",
+    });
+    expect(b.spawnPresets).toHaveLength(2);
+  });
+
+  it("mints ids that are non-empty and distinct", () => {
+    expect(generateSpawnPresetId()).not.toBe(generateSpawnPresetId());
+    expect(generateSpawnPresetId().length).toBeGreaterThan(0);
   });
 });

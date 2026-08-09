@@ -17,7 +17,7 @@ function task(id: string, sessions: readonly SessionLink[]): Task {
   return { id, title: id, description: "", status: "todo", priority: null, sessions: [...sessions], createdAt: 0, updatedAt: 0 };
 }
 function board(id: string, tasks: readonly Task[]): Board {
-  return { id, label: id, columns: [], tasks: [...tasks] };
+  return { id, label: id, columns: [], tasks: [...tasks], spawnPresets: [], defaultSpawnPresetId: null };
 }
 function rec(state: AttentionState, since: number): AttentionRecord {
   return { state, since, sessionName: null, lastLines: "", captured: false };

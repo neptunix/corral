@@ -58,6 +58,7 @@ async function seedLink(storage: ReturnType<typeof makeStorage>["storage"], sess
         sessions: [{ env: "work-local", paneId: "p1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "n", cwdSnapshot: "", sessionId }],
         createdAt: now, updatedAt: now,
       }],
+      spawnPresets: [], defaultSpawnPresetId: null,
     },
     result: undefined,
   }));

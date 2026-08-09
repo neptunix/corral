@@ -519,7 +519,7 @@ export function createApi(opts: {
       return c.json({ error: { code: "board_id_collision", generatedId: id } }, 409);
     }
     const board = await opts.storage.withBoard(id, () => {
-      const b = { id, label, columns: [...DEFAULT_COLUMNS], tasks: [] };
+      const b = { id, label, columns: [...DEFAULT_COLUMNS], tasks: [], spawnPresets: [], defaultSpawnPresetId: null };
       return { board: b, result: b };
     });
     return c.json(board, 201);

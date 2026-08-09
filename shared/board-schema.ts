@@ -49,11 +49,24 @@ export const TaskSchema = z.object({
   updatedAt: z.number(),
 });
 
+// A start command the operator can pick when spawning from the UI. STORED SHAPE — deliberately
+// permissive: readBoardFile uses BoardSchema.parse (server/storage.ts), so a content constraint here
+// would turn a bad value into an unloadable board. Length, count and the leading-character rule live
+// at the PATCH boundary (server/api.ts).
+export const SpawnPresetSchema = z.object({
+  id: z.string().min(1),
+  text: z.string(),
+});
+
 export const BoardSchema = z.object({
   id: z.string(),
   label: z.string(),
   columns: z.array(ColumnSchema),
   tasks: z.array(TaskSchema).default([]),
+  // Defaults, never .optional(): a board written before these existed heals on parse, and every Board
+  // value is uniformly shaped. A defaultSpawnPresetId matching no preset resolves to no default.
+  spawnPresets: z.array(SpawnPresetSchema).default([]),
+  defaultSpawnPresetId: z.string().nullable().default(null),
 });
 
 export const LiveSessionDataSchema = z.object({
@@ -106,6 +119,7 @@ export type Priority = z.infer<typeof PrioritySchema>;
 export type SessionLink = z.infer<typeof SessionLinkSchema>;
 export type Task = z.infer<typeof TaskSchema>;
 export type Board = z.infer<typeof BoardSchema>;
+export type SpawnPreset = z.infer<typeof SpawnPresetSchema>;
 export type LiveSessionData = z.infer<typeof LiveSessionDataSchema>;
 export type EnrichedSessionLink = z.infer<typeof EnrichedSessionLinkSchema>;
 export type EnrichedTask = z.infer<typeof EnrichedTaskSchema>;
@@ -142,6 +156,12 @@ export function generateTaskId(): string {
 }
 
 export function generateColumnId(): string {
+  return nanoid(8);
+}
+
+// A preset's id is what defaultSpawnPresetId points at, so it must survive editing the text — the same
+// reason ColumnSchema carries an id and tasks key on it rather than on the label.
+export function generateSpawnPresetId(): string {
   return nanoid(8);
 }
 
