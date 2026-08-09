@@ -131,7 +131,7 @@ describe("GET /api/whoami and /api/attention", () => {
       })).json() as { id: string };
       await app.request(`/api/boards/test/tasks/${tid}/attach`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ env: "work-local", paneId: "w1:p1", name: "api-refactor-a" }),
+        body: JSON.stringify({ env: "work-local", paneId: "w1:p1", name: "api-refactor-a", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }),
       });
 
       const parsed = WhoamiResponseSchema.parse(
@@ -248,7 +248,7 @@ describe("GET /api/whoami and /api/attention", () => {
     })).json() as { id: string };
     await app.request(`/api/boards/test/tasks/${tid}/attach`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", paneId: "w1:p1", name: "api-refactor-a" }),
+      body: JSON.stringify({ env: "work-local", paneId: "w1:p1", name: "api-refactor-a", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }),
     });
 
     const parsed = WhoamiResponseSchema.parse(await (await app.request("/api/whoami?paneId=w1%3Ap1&cwd=%2Frepo")).json());

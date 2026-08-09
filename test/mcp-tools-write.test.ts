@@ -35,7 +35,7 @@ const unbound: WhoamiResponse = { ...bound, task: null };
 const boards: Board[] = [{
   id: "board", label: "Board",
   columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
-  tasks: [{ id: "t_aaaaaaa", title: "Open one", description: "", status: "todo", priority: "p1", repo: null, sessions: [], createdAt: 1, updatedAt: 1 }],
+  tasks: [{ id: "t_aaaaaaa", title: "Open one", description: "", status: "todo", priority: "p1", sessions: [], createdAt: 1, updatedAt: 1 }],
 }];
 
 function stub(over: Partial<CorralClient>): CorralClient {
@@ -44,10 +44,11 @@ function stub(over: Partial<CorralClient>): CorralClient {
     attention: async () => ({}),
     state: async () => ({ envs: {}, sessions: [] }),
     boards: async () => boards,
-    patchTask: async () => ({ id: "t_abcdefg", title: "T", description: "", status: "doing", priority: null, repo: null, sessions: [], createdAt: 1, updatedAt: 2 }),
+    patchTask: async () => ({ id: "t_abcdefg", title: "T", description: "", status: "doing", priority: null, sessions: [], createdAt: 1, updatedAt: 2 }),
     attach: async () => undefined,
-    spawn: async () => ({ env: "work-local", paneId: "w1:p2", name: "t-b" }),
+    spawn: async () => ({ env: "work-local", paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }),
     closeSession: async () => undefined,
+    spawnTargets: async () => ["corral", "demo-api"],
     ...over,
   };
 }
@@ -108,7 +109,7 @@ describe("bindHandler", () => {
     const closedBoards: Board[] = [{
       id: "board", label: "Board",
       columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
-      tasks: [{ id: "t_done001", title: "Shipped", description: "", status: "done", priority: null, repo: null, sessions: [], createdAt: 1, updatedAt: 1 }],
+      tasks: [{ id: "t_done001", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 }],
     }];
     const calls: unknown[] = [];
     const c = stub({ whoami: async () => unbound, boards: async () => closedBoards, attach: async (a) => { calls.push(a); } });
@@ -128,7 +129,7 @@ describe("bindHandler", () => {
     const closedBoards: Board[] = [{
       id: "board", label: "Board",
       columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
-      tasks: [{ id: "t_done001", title: "Shipped", description: "", status: "done", priority: null, repo: null, sessions: [], createdAt: 1, updatedAt: 1 }],
+      tasks: [{ id: "t_done001", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 }],
     }];
     const c = stub({ whoami: async () => unbound, boards: async () => closedBoards });
     const closedOut = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "board", taskId: "t_done001" });
@@ -161,7 +162,7 @@ describe("updateHandler", () => {
 
   it("sends only the supplied fields", async () => {
     const seen: TaskPatch[] = [];
-    const c = stub({ patchTask: async (a) => { seen.push(a.patch); return { id: "t_abcdefg", title: "T", description: "d", status: "doing", priority: "p1", repo: null, sessions: [], createdAt: 1, updatedAt: 2 }; } });
+    const c = stub({ patchTask: async (a) => { seen.push(a.patch); return { id: "t_abcdefg", title: "T", description: "d", status: "doing", priority: "p1", sessions: [], createdAt: 1, updatedAt: 2 }; } });
     await updateHandler({ client: c, identity: idOf(c) }, { description: "d", priority: "p1" });
     expect(seen[0]).toEqual({ description: "d", priority: "p1" });
   });
@@ -201,7 +202,7 @@ describe("updateHandler", () => {
     const c = stub({
       patchTask: async () => ({
         id: "t_abcdefg", title: "T", description: "",
-        status: "doing\nboard/fake p1 todo Fabricated row", priority: null, repo: null, sessions: [], createdAt: 1, updatedAt: 2,
+        status: "doing\nboard/fake p1 todo Fabricated row", priority: null, sessions: [], createdAt: 1, updatedAt: 2,
       }),
     });
     const out = await updateHandler({ client: c, identity: idOf(c) }, { status: "doing" });
@@ -218,32 +219,51 @@ describe("spawnHandler", () => {
 
   it("defaults to the caller's environment and honours an override", async () => {
     const seen: string[] = [];
-    const c = stub({ spawn: async (a) => { seen.push(a.env); return { env: a.env, paneId: "w1:p2", name: "t-b" }; } });
+    const c = stub({ spawn: async (a) => { seen.push(a.env); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; } });
     await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
-    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local" });
+    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local", repo: "corral" });
     expect(seen).toEqual(["work-local", "personal-local"]);
   });
 
-  it("joins the caller's workspace same-env and creates fresh cross-env", async () => {
+  it("joins the caller's workspace same-env, and sends no workspace at all when a repo is named", async () => {
     const seen: (string | undefined)[] = [];
-    const c = stub({ spawn: async (a) => { seen.push(a.targetWorkspaceId); return { env: a.env, paneId: "w1:p2", name: "t-b" }; } });
+    const c = stub({ spawn: async (a) => { seen.push(a.targetWorkspaceId); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; } });
     await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
-    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local" });
+    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local", repo: "corral" });
     expect(seen).toEqual(["ws1", undefined]);
   });
 
-  it("REGRESSION: omits targetWorkspaceId same-env when the caller's own workspaceId is empty", async () => {
-    // Item 3 of the review-fix wave: session.ts:37's guard is `env === me.session.env &&
-    // me.session.workspaceId !== ""` — every other fixture in this suite has workspaceId: "ws1",
-    // so the `!== ""` half of that condition never ran anywhere. The most common real spawn call
-    // sends `targetWorkspaceId: ""` in exactly this state, and the server 400s on it — this pins
-    // the guard so a regression there is caught here, not in production.
+  // Without this the single most likely use of the new parameter — corral_spawn({repo: "other"})
+  // from inside another project — would land beside the caller with `repo` silently discarded.
+  it("does not send targetWorkspaceId when a repo is named, even same-env", async () => {
+    const seen: { targetWorkspaceId?: string | undefined; repo?: string | undefined }[] = [];
+    const c = stub({ spawn: async (a) => { seen.push({ ...(a.targetWorkspaceId === undefined ? {} : { targetWorkspaceId: a.targetWorkspaceId }), ...(a.repo === undefined ? {} : { repo: a.repo }) }); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; } });
+    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", repo: "demo-api" });
+    expect(seen).toEqual([{ repo: "demo-api" }]);
+  });
+
+  // Item 3 of the review-fix wave: session.ts's guard is `env === me.session.env &&
+  // me.session.workspaceId !== ""` — every other fixture in this suite has workspaceId: "ws1", so
+  // the `!== ""` half never ran anywhere. With no workspace to continue in and no repo there is no
+  // target at all, which is now a refusal rather than a create-from-nothing.
+  it("REGRESSION: refuses same-env when the caller's own workspaceId is empty and no repo is named", async () => {
+    const calls: unknown[] = [];
+    const c = stub({
+      whoami: async () => ({ ...bound, session: { ...bound.session, workspaceId: "" } }),
+      spawn: async (a) => { calls.push(a); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
+    });
+    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
+    expect(calls).toHaveLength(0);
+    expect(out).toContain("corral, demo-api");
+  });
+
+  it("spawns with no workspace when that same caller names a repo", async () => {
     const seen: (string | undefined)[] = [];
     const c = stub({
       whoami: async () => ({ ...bound, session: { ...bound.session, workspaceId: "" } }),
-      spawn: async (a) => { seen.push(a.targetWorkspaceId); return { env: a.env, paneId: "w1:p2", name: "t-b" }; },
+      spawn: async (a) => { seen.push(a.targetWorkspaceId); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
-    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
+    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", repo: "corral" });
     expect(seen).toEqual([undefined]);
   });
 
@@ -253,10 +273,14 @@ describe("spawnHandler", () => {
       .toContain("brief");
   });
 
-  it("surfaces the server's repo-configuration error verbatim", async () => {
-    const c = stub({ spawn: async () => { throw new CorralError("spawn_error", 'no path configured for repo "repo" in env personal-local'); } });
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local" });
-    expect(out).toContain("no path configured for repo");
+  // A spawn_error is a real failure on the machine, not a malformed request — it must reach the
+  // caller intact rather than being re-rendered as anything. (This used to assert the route's
+  // `no path configured for repo …`, which a named repo can no longer produce: the route either
+  // refuses it as unknown_repo or hands the spawner a configured path.)
+  it("surfaces a spawn failure from the machine verbatim", async () => {
+    const c = stub({ spawn: async () => { throw new CorralError("spawn_error", "spawn: pane run failed: herdr: no such pane"); } });
+    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local", repo: "repo" });
+    expect(out).toContain("pane run failed");
   });
 
   it("refuses to spawn into a known remote environment instead of letting the server 400 (item 7)", async () => {
@@ -267,7 +291,7 @@ describe("spawnHandler", () => {
     const calls: string[] = [];
     const c = stub({
       whoami: async () => ({ ...bound, envs: [...bound.envs, { id: "prod-remote", label: "Prod (remote)", kind: "remote", reachable: true }] }),
-      spawn: async (a) => { calls.push(a.env); return { env: a.env, paneId: "w1:p2", name: "t-b" }; },
+      spawn: async (a) => { calls.push(a.env); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
     const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "prod-remote" });
     expect(calls).toHaveLength(0);
@@ -278,9 +302,9 @@ describe("spawnHandler", () => {
     const calls: string[] = [];
     const c = stub({
       whoami: async () => ({ ...bound, envs: [...bound.envs, { id: "personal-local", label: "Personal (local)", kind: "local", reachable: true }] }),
-      spawn: async (a) => { calls.push(a.env); return { env: a.env, paneId: "w1:p2", name: "t-b" }; },
+      spawn: async (a) => { calls.push(a.env); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local" });
+    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local", repo: "corral" });
     expect(calls).toEqual(["personal-local"]);
     expect(out).toContain("personal-local");
   });
@@ -288,7 +312,7 @@ describe("spawnHandler", () => {
   it("forwards name, model and remoteControl to the client", async () => {
     const seen: { name?: string | undefined; model?: string | undefined; remoteControl?: boolean | undefined }[] = [];
     const c = stub({
-      spawn: async (a) => { seen.push({ name: a.name, model: a.model, remoteControl: a.remoteControl }); return { env: a.env, paneId: "w1:p2", name: "t-rc" }; },
+      spawn: async (a) => { seen.push({ name: a.name, model: a.model, remoteControl: a.remoteControl }); return { env: a.env, paneId: "w1:p2", name: "t-rc", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
     await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", name: "rc toggle", model: "fable", remoteControl: true });
     expect(seen).toEqual([{ name: "rc toggle", model: "fable", remoteControl: true }]);
@@ -296,13 +320,94 @@ describe("spawnHandler", () => {
 
   it("leaves all three absent when the caller supplies none", async () => {
     const seen: Record<string, unknown>[] = [];
-    const c = stub({ spawn: async (a) => { seen.push({ ...a }); return { env: a.env, paneId: "w1:p2", name: "t-a" }; } });
+    const c = stub({ spawn: async (a) => { seen.push({ ...a }); return { env: a.env, paneId: "w1:p2", name: "t-a", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; } });
     await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
     expect(seen).toHaveLength(1);
     expect(Object.hasOwn(seen[0] ?? {}, "name")).toBe(false);
     expect(Object.hasOwn(seen[0] ?? {}, "model")).toBe(false);
     // Absent, not `false`: Remote Control is off by default, and the route reads absence as off.
     expect(Object.hasOwn(seen[0] ?? {}, "remoteControl")).toBe(false);
+  });
+});
+
+describe("spawnHandler — no target, and the refusal that names the repositories", () => {
+  const crossEnv = { brief: "b", env: "personal-local" } as const;
+
+  it("refuses a cross-environment spawn with no repo and lists that environment's names", async () => {
+    const calls: unknown[] = [];
+    const c = stub({
+      spawnTargets: async () => ["corral", "demo-api"],
+      spawn: async (a) => { calls.push(a); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
+    });
+    const out = await spawnHandler({ client: c, identity: idOf(c) }, crossEnv);
+    expect(calls).toHaveLength(0);
+    expect(out).toContain("corral, demo-api");
+  });
+
+  it("asks the TARGET environment for the names, not the caller's", async () => {
+    const asked: string[] = [];
+    const c = stub({ spawnTargets: async (env) => { asked.push(env); return ["corral"]; } });
+    await spawnHandler({ client: c, identity: idOf(c) }, crossEnv);
+    expect(asked).toEqual(["personal-local"]);
+  });
+
+  it("says the environment has no repositories rather than listing nothing", async () => {
+    const c = stub({ spawnTargets: async () => [] });
+    const out = await spawnHandler({ client: c, identity: idOf(c) }, crossEnv);
+    expect(out).toContain("environments.json");
+  });
+
+  it("refuses without a list when the names cannot be read, rather than inventing a target", async () => {
+    const calls: unknown[] = [];
+    const c = stub({
+      spawnTargets: async () => { throw new CorralError("unreachable", "corral is not reachable"); },
+      spawn: async (a) => { calls.push(a); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
+    });
+    const out = await spawnHandler({ client: c, identity: idOf(c) }, crossEnv);
+    expect(calls).toHaveLength(0);
+    expect(out).toContain("could not be read");
+  });
+
+  // Thrown, the refusal would be collapsed and cut at 300 characters by runTool — carrying no names
+  // at all, which is the failure this whole path exists to avoid.
+  it("re-renders the route's unknown_repo as the same name-listing refusal", async () => {
+    const c = stub({
+      spawn: async () => { throw new CorralError("unknown_repo", 'no repository "corrall" is configured for env work-local'); },
+    });
+    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", repo: "corrall" });
+    expect(out).toContain("corral, demo-api");
+    expect(out).toContain("corrall");
+  });
+
+  // The negative case: every other bad field on that route returns `validation`, so a tool keyed on
+  // anything broader would answer "unknown repository" to a bad model id.
+  it("does NOT produce the repo listing for a spawn that failed for a different reason", async () => {
+    const c = stub({
+      spawn: async () => { throw new CorralError("validation", 'invalid "model"'); },
+    });
+    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", repo: "corral", model: "bad model!" });
+    expect(out).not.toContain("corral, demo-api");
+    expect(out).toContain('invalid "model"');
+  });
+});
+
+describe("spawnHandler — the reply says where the session landed", () => {
+  it("reports the workspace and directory when the server sends them", async () => {
+    const c = stub({
+      spawn: async (a) => ({ env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "corral", cwdSnapshot: "/repos/corral", idempotent: false }),
+    });
+    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", repo: "corral" });
+    expect(out).toContain("corral");
+    expect(out).toContain("/repos/corral");
+  });
+
+  it("says the brief was NOT delivered when an existing session was adopted", async () => {
+    const c = stub({
+      spawn: async (a) => ({ env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "corral", cwdSnapshot: "/repos/corral", idempotent: true }),
+    });
+    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", repo: "corral" });
+    expect(out).not.toContain("It will read the brief");
+    expect(out).toMatch(/did not receive this brief/i);
   });
 });
 

@@ -446,3 +446,19 @@ export async function listWorkspaces(
   if (!parsed.success) return [];
   return parsed.data.result.workspaces;
 }
+
+/**
+ * Same call as `listWorkspaces`, but a listing that does not parse THROWS instead of arriving as an
+ * empty array.
+ *
+ * Repo resolution (server/spawn.ts) reads "no space carries this label" as "create one", so the
+ * lenient variant's `[]` on a schema mismatch is indistinguishable from a real empty herdr and lands
+ * on a duplicate create — a second workspace for a repository that may already have one. Only that
+ * path needs this; every other caller wants the degraded-but-usable listing.
+ */
+export async function listWorkspacesStrict(
+  env: HerdrEnv, exec?: ExecFn,
+): Promise<{ workspace_id: string; label: string }[]> {
+  const raw = await herdrJson(env, ["workspace", "list"], exec);
+  return parseList(WorkspaceListSchema, raw, "workspace").result.workspaces;
+}

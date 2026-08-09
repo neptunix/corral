@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import type { CorralClient } from "../client.ts";
+import { CorralError, type CorralClient } from "../client.ts";
+import { formatRepoRefusal, formatSpawnReply } from "../digest.ts";
 import type { Identity } from "../identity.ts";
 import { runTool, toolText } from "./reply.ts";
 
@@ -17,10 +18,22 @@ export interface SpawnArgs {
   readonly name?: string | undefined;
   readonly model?: string | undefined;
   readonly remoteControl?: boolean | undefined;
+  readonly repo?: string | undefined;
 }
 
 export interface CloseArgs {
   readonly target?: string | undefined;
+}
+
+/** The target environment's configured repository names, or null when they could not be read —
+ *  a refusal that says so is better than one that invents a target. Called only on a refusal path,
+ *  so the happy path pays nothing for it. */
+async function configuredRepos(client: CorralClient, env: string): Promise<string[] | null> {
+  try {
+    return await client.spawnTargets(env);
+  } catch {
+    return null;
+  }
 }
 
 export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string> {
@@ -42,23 +55,48 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
     if (targetEnv !== undefined && targetEnv.kind !== "local") {
       return `corral_spawn only supports local environments in this phase — "${env}" is remote, and a brief cannot be delivered there (the server would refuse it). Omit env to spawn in this session's own environment, or pick a local one from corral_whoami's environment list.`;
     }
-    // Same-env continuation JOINS the caller's workspace: the new tab lands beside the caller (same
-    // cwd family — a worktree checkout stays visible), repo-less cards work, and the idempotent
-    // rejoin applies. Cross-env keeps the create-new path — the caller's workspace does not exist
-    // over there, so it is rooted at the card repo's configured path.
+    // Two modes, and `repo` picks between them. Omitted: continue where the caller is — the new tab
+    // joins the caller's own workspace, so a worktree checkout stays visible and the idempotent
+    // rejoin applies. Given: work in that project, which is the route's resolve-by-repo shape.
+    //
+    // When `repo` is present targetWorkspaceId is NOT sent — without that, the single most likely
+    // use of the parameter (corral_spawn({repo: "other-project"}) from inside another project)
+    // would land beside the caller with `repo` discarded.
+    const repo = args.repo !== undefined && args.repo.trim() !== "" ? args.repo : null;
     const sameEnv = env === me.session.env && me.session.workspaceId !== "";
-    const result = await deps.client.spawn({
-      boardId: card.boardId,
-      taskId: card.taskId,
-      env,
-      brief: args.brief,
-      ...(args.name === undefined ? {} : { name: args.name }),
-      ...(args.model === undefined ? {} : { model: args.model }),
-      ...(args.remoteControl === undefined ? {} : { remoteControl: args.remoteControl }),
-      ...(sameEnv ? { targetWorkspaceId: me.session.workspaceId } : {}),
+    // No workspace to continue in and no repo named: there is no target at all, and corral does not
+    // infer one. Decided here rather than server-side because only this session knows whether it has
+    // a workspace of its own — and because a value RETURNED is not truncated the way a thrown
+    // CorralError is (mcp/tools/reply.ts), which is what would eat the list of names.
+    if (repo === null && !sameEnv) {
+      return formatRepoRefusal({ env, repo: null, repos: await configuredRepos(deps.client, env) });
+    }
+    let result: Awaited<ReturnType<CorralClient["spawn"]>>;
+    try {
+      result = await deps.client.spawn({
+        boardId: card.boardId,
+        taskId: card.taskId,
+        env,
+        brief: args.brief,
+        ...(args.name === undefined ? {} : { name: args.name }),
+        ...(args.model === undefined ? {} : { model: args.model }),
+        ...(args.remoteControl === undefined ? {} : { remoteControl: args.remoteControl }),
+        ...(repo !== null ? { repo } : { targetWorkspaceId: me.session.workspaceId }),
+      });
+    } catch (err) {
+      // Matched on THAT code alone. Every other bad field on this route returns `validation`, so a
+      // broader match would answer "unknown repository" to a bad model id or an unknown env.
+      if (err instanceof CorralError && err.code === "unknown_repo") {
+        return formatRepoRefusal({ env, repo, repos: await configuredRepos(deps.client, env) });
+      }
+      throw err;
+    }
+    return formatSpawnReply({
+      name: result.name, boardId: card.boardId, taskId: card.taskId,
+      env: result.env, paneId: result.paneId,
+      workspaceLabel: result.workspaceLabel, cwdSnapshot: result.cwdSnapshot,
+      idempotent: result.idempotent,
     });
-    const key = `${result.env}:${result.paneId}`;
-    return `spawned ${result.name} on ${card.boardId}/${card.taskId} in ${result.env} — target key ${key}. It will read the brief and call corral_whoami on start.`;
   });
 }
 
@@ -135,10 +173,12 @@ export function registerSessionTools(server: McpServer, deps: SessionDeps): void
     {
       title: "Spawn a session on this card",
       description:
-        "Start a NEW Claude session attached to THIS session's card — for a context handoff or a parallel strand. The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment, where the new session joins THIS session's workspace. LOCAL ENVIRONMENTS ONLY in this phase: `env` may only name a local environment (kind=local in corral_whoami's environment list) — a brief cannot be delivered to a remote environment, so a remote `env` is refused here rather than left to 400 on the server. Supply `name`: two to four words for what the new session is for. corral composes the final session name as `<card-slug>-<name>` and uses it as the Claude session name, the herdr tab label and the card's label, so a card holding several sessions stays readable. Destructive: this starts a real session that consumes tokens.",
+        "Start a NEW Claude session attached to THIS session's card — for a context handoff or a parallel strand. The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment; omit `repo` and the new session joins THIS session's workspace, pass `repo` and it lands in that project's own workspace instead. LOCAL ENVIRONMENTS ONLY in this phase: `env` may only name a local environment (kind=local in corral_whoami's environment list) — a brief cannot be delivered to a remote environment, so a remote `env` is refused here rather than left to 400 on the server. Supply `name`: two to four words for what the new session is for. corral composes the final session name as `<card-slug>-<name>` and uses it as the Claude session name, the herdr tab label and the card's label, so a card holding several sessions stays readable. Destructive: this starts a real session that consumes tokens.",
       inputSchema: {
         brief: z.string().describe("handoff text the new session starts from; required"),
         env: z.string().optional().describe("LOCAL environment id from corral_whoami; defaults to this session's. A remote environment is refused."),
+        repo: z.string().optional().describe(
+          "omit to continue where you are — the new session lands beside this one, in this session's own workspace. Pass it to work in a DIFFERENT project: the session lands in that project's workspace, at its repository root. The value must be a repository name configured for the target environment; a name that is not configured is refused with the list of the ones that are."),
         name: z.string().max(64).optional().describe(
           'short slug for what THIS session will do, e.g. "rc-toggle-ui" — corral prefixes it with the card\'s slug to make the session name. Omit only if you genuinely cannot say.'),
         model: z.string().optional().describe(

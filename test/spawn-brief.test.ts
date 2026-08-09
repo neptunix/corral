@@ -29,7 +29,7 @@ describe("spawn with a brief", () => {
     const { ran, stubs } = harness();
     await spawnSession({
       env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
-      spawnCommand: "claude", repoPath: "/repo", ...stubs,
+      targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", ...stubs,
     });
     expect(ran).toEqual(["claude --name task-a"]);
   });
@@ -38,7 +38,7 @@ describe("spawn with a brief", () => {
     const { ran, stubs } = harness();
     await spawnSession({
       env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
-      spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
+      targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
     });
     expect(ran).toEqual([
       `claude --name task-a "$(cat /data/briefs/abc123.md || printf '%s' '${BRIEF_FALLBACK}'; rm -f /data/briefs/abc123.md)"`,
@@ -54,7 +54,7 @@ describe("spawn with a brief", () => {
     const { ran, stubs } = harness();
     await spawnSession({
       env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
-      spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
+      targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
     });
     const cmd = ran[0] ?? "";
     // Both tokens inside the one substitution, so the rm cannot run before the cat.
@@ -69,7 +69,7 @@ describe("spawn with a brief", () => {
     const { ran, stubs } = harness();
     await spawnSession({
       env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
-      spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
+      targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
     });
     const cmd = ran[0] ?? "";
     expect(cmd).toContain("||");
@@ -89,7 +89,7 @@ describe("spawn with a brief", () => {
     const { ran, stubs } = harness();
     await spawnSession({
       env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
-      spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
+      targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
     });
     expect(ran[0]).not.toContain("\n");
   });
@@ -98,7 +98,7 @@ describe("spawn with a brief", () => {
     const { ran, stubs } = harness();
     await spawnSession({
       env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
-      spawnCommand: "claude", repoPath: "/repo", briefPath: "/data dir/briefs/abc.md", ...stubs,
+      targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: "/data dir/briefs/abc.md", ...stubs,
     });
     expect(ran[0]).toContain("'/data dir/briefs/abc.md'");
     expect(ran[0]).not.toContain("cat /data dir/");
@@ -109,7 +109,7 @@ describe("spawn with a brief", () => {
     const hostile = "/data/briefs/a;b$(c)`d`e'f.md";
     await spawnSession({
       env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
-      spawnCommand: "claude", repoPath: "/repo", briefPath: hostile, ...stubs,
+      targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: hostile, ...stubs,
     });
     // shell-quote wraps the path in double quotes and backslash-escapes `$` and `` ` `` so the
     // command substitution and backticks cannot be interpreted by the shell that runs `cat`.

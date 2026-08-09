@@ -9,7 +9,7 @@ import { createApi } from "./api.ts";
 import { createAttentionStore } from "./attention-store.ts";
 import { sweepBriefRoot } from "./brief.ts";
 import { createGit } from "./git.ts";
-import { closePane, listAllPanes, listWorkspaces, readPane, workspaceClose } from "./herdr.ts";
+import { closePane, listAllPanes, listWorkspaces, listWorkspacesStrict, readPane, workspaceClose } from "./herdr.ts";
 import { assertLoopback } from "./host-guard.ts";
 import { createPoller } from "./poller.ts";
 import { formatReport, resolveReapGrace, runPreflight } from "./preflight.ts";
@@ -65,6 +65,7 @@ void (async () => {
     spawn: (opts) => spawnSession({
       ...opts,
       workspaceListFn: listWorkspaces,
+      workspaceListStrictFn: listWorkspacesStrict,
       workspaceCloseFn: workspaceClose,
     }),
   });

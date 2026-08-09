@@ -54,7 +54,7 @@ async function seedLink(storage: ReturnType<typeof makeStorage>["storage"], sess
     board: {
       id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
       tasks: [{
-        id: "t_seeded", title: "T", description: "", status: "todo", priority: null, repo: null,
+        id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
         sessions: [{ env: "work-local", paneId: "p1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "n", cwdSnapshot: "", sessionId }],
         createdAt: now, updatedAt: now,
       }],

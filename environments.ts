@@ -21,7 +21,9 @@ const RawLocalEnvSchema = z.object({
   socket: SafeToken.optional(),
   claudeConfigDirs: z.array(z.string()).optional(),
   spawnCommand: SafeToken.optional(),
-  repos: z.record(z.string(), z.string()).optional(),
+  // `.min(1)` is load-bearing: an empty path is not null, so it survives every `?? null` fallback and
+  // reaches herdr as `workspace create --cwd ""`.
+  repos: z.record(z.string(), z.string().min(1, "a repo path must not be empty")).optional(),
 });
 const RawRemoteEnvSchema = z.object({
   id: EnvIdToken, label: z.string(), kind: z.literal("remote"),

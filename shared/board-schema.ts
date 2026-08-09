@@ -41,7 +41,9 @@ export const TaskSchema = z.object({
   description: z.string().default(""),
   status: z.string(),
   priority: PrioritySchema.default(null),
-  repo: z.string().nullable().default(null),
+  // No `repo`. A card cuts across workspaces — its sessions can sit in several repositories — so the
+  // spawn target comes from the request, never from the card. A board written before this still
+  // parses (z.object strips the unknown key) and loses the value on its next write.
   sessions: z.array(SessionLinkSchema).default([]),
   createdAt: z.number(),
   updatedAt: z.number(),

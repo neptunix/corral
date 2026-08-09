@@ -340,3 +340,123 @@ describe("spawnSession — launch flags", () => {
     expect(r.tabLabel).toBe("my-task-rc-toggle-ui");
   });
 });
+
+// targetWorkspaceId ABSENT (not null) + a repo: the caller named a repository rather than a space,
+// so the workspace is looked up by that repository's name. An explicit null still creates and an id
+// still joins — both covered above.
+describe("spawnSession — resolve the workspace from the repo", () => {
+  function resolveFns(spaces: { workspace_id: string; label: string }[]) {
+    const fns = baseFns();
+    return { ...fns, workspaceListStrictFn: vi.fn().mockResolvedValue(spaces) };
+  }
+
+  it("joins the space whose label matches the repo, compared case-insensitively", async () => {
+    const fns = resolveFns([{ workspace_id: "w7", label: "Corral" }]);
+    const r = await spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
+    });
+    expect(fns.workspaceCreateFn).not.toHaveBeenCalled();
+    expect(r.workspaceLabel).toBe("Corral");
+    expect(fns.tabCreateFn).toHaveBeenCalledWith(localEnv, "w7", "/repos/corral", "my-task-a");
+  });
+
+  // The name selects the WORKSPACE; the config selects the DIRECTORY. A space someone created at
+  // another path can group the session oddly — it cannot land the new tab outside the repo root.
+  it("roots the new tab at the configured path even when the matched space's panes sit elsewhere", async () => {
+    const fns = resolveFns([{ workspace_id: "w7", label: "corral" }]);
+    fns.listPanesFn = vi.fn().mockResolvedValue([{ paneId: "w7:p1", cwd: "/somewhere/unrelated" }]);
+    await spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
+    });
+    expect(fns.tabCreateFn).toHaveBeenCalledWith(localEnv, "w7", "/repos/corral", "my-task-a");
+  });
+
+  it("creates the space at the configured path when no label matches", async () => {
+    const fns = resolveFns([{ workspace_id: "w7", label: "other-project" }]);
+    const r = await spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
+    });
+    expect(fns.workspaceCreateFn).toHaveBeenCalledWith(localEnv, "/repos/corral", "corral");
+    expect(r.workspaceLabel).toBe("corral");
+  });
+
+  // Deterministic so a retry lands on the SAME duplicate and rejoins it, instead of starting a
+  // second live session on the card.
+  it("takes the lexicographically smallest workspace id when several spaces share the label", async () => {
+    const fns = resolveFns([
+      { workspace_id: "w9", label: "corral" },
+      { workspace_id: "w2", label: "corral" },
+    ]);
+    await spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
+    });
+    expect(fns.tabCreateFn).toHaveBeenCalledWith(localEnv, "w2", "/repos/corral", "my-task-a");
+  });
+
+  // A colon is an ordinary map key character in environments.json "repos" — no parsing anywhere.
+  it("matches a repo key containing a colon", async () => {
+    const fns = resolveFns([{ workspace_id: "w7", label: "owner:project" }]);
+    await spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "owner:project",
+      assignedPaneIds: new Set(), repoPath: "/repos/project", ...fns,
+    });
+    expect(fns.workspaceCreateFn).not.toHaveBeenCalled();
+    expect(fns.tabCreateFn).toHaveBeenCalledWith(localEnv, "w7", "/repos/project", "my-task-a");
+  });
+
+  // "Could not read the listing" must never be read as "no space carries this label" — that lands on
+  // a duplicate create for a repository that may already have a workspace.
+  it("refuses when the workspace listing fails instead of creating a second space", async () => {
+    const fns = resolveFns([]);
+    fns.workspaceListStrictFn = vi.fn().mockRejectedValue(new Error("herdr workspace list: unexpected shape"));
+    await expect(spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
+    })).rejects.toThrow(/unexpected shape/);
+    expect(fns.workspaceCreateFn).not.toHaveBeenCalled();
+  });
+
+  // Same reason: an un-wired listing is a listing that failed, not an empty herdr.
+  it("refuses when no strict listing function is wired at all", async () => {
+    const fns = baseFns();
+    await expect(spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
+    })).rejects.toThrow(/workspaceListStrictFn/);
+    expect(fns.workspaceCreateFn).not.toHaveBeenCalled();
+  });
+
+  it("rejoins a live tab of the same name inside the resolved space", async () => {
+    const fns = resolveFns([{ workspace_id: "w7", label: "corral" }]);
+    fns.listPanesFn = vi.fn().mockResolvedValue([{ paneId: "w7:p1", cwd: "/repos/corral" }]);
+    fns.listFn = vi.fn().mockResolvedValue([makeRow("w7:p1", "my-task-a", "corral")]);
+    fns.paneGetFn = vi.fn().mockResolvedValue({ paneId: "w7:p1", tabId: "w7:t1", workspaceId: "w7", cwd: "/repos/corral" });
+    const r = await spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
+    });
+    expect(r.idempotent).toBe(true);
+    expect(fns.tabCreateFn).not.toHaveBeenCalled();
+  });
+});
+
+// The browser's "＋ <repo>" pick, at the layer that decides it. An explicit null is a CREATE even
+// when a space with that label already exists — that is the case resolve-by-repo would have joined,
+// and the route-level test cannot see the difference because it mocks the spawner.
+describe("spawnSession — an explicit null target still creates", () => {
+  it("creates a new space even when one already carries the repo's label", async () => {
+    const fns = baseFns();
+    const strict = vi.fn().mockResolvedValue([{ workspace_id: "w7", label: "corral" }]);
+    await spawnSession({
+      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      assignedPaneIds: new Set(), targetWorkspaceId: null, repoPath: "/repos/corral",
+      workspaceListStrictFn: strict, ...fns,
+    });
+    expect(fns.workspaceCreateFn).toHaveBeenCalledWith(localEnv, "/repos/corral", "corral");
+    expect(strict).not.toHaveBeenCalled(); // the resolve path is not even consulted
+  });
+});

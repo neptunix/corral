@@ -8,7 +8,7 @@ interface Props {
   readonly task: EnrichedTask;
   readonly board: Board;
   readonly envIds: readonly string[];
-  readonly onSave: (patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority" | "repo">>) => void;
+  readonly onSave: (patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority">>) => void;
   readonly onDelete: () => void;
   readonly onSpawn: (args: { env: string; targetWorkspaceId: string | null; repo: string | null; model: string | null; remoteControl: boolean }) => Promise<SessionLink>;
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
@@ -20,10 +20,6 @@ interface Props {
 export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, onOpenSession, boards, onMove, onClose }: Props): JSX.Element {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
-  // The free-text Repo input was removed (redundant now the "Into" picker sources repos).
-  // `task.repo` still seeds the spawn-picker's default selection below, so keep it as a derived value;
-  // it's no longer edited here and no longer written on Save (so an empty field can't clobber it).
-  const repo = task.repo ?? "";
   const [priority, setPriority] = useState<Priority>(task.priority);
   const [status, setStatus] = useState(task.status);
   const [spawning, setSpawning] = useState(false);
@@ -56,17 +52,12 @@ export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, 
   const spaceLabels = new Set(targets.spaces.map((s) => s.label.toLowerCase()));
   const newRepoOptions = targets.repos.filter((r) => !spaceLabels.has(r.name.toLowerCase()));
 
-  // Default the picker from the Repo field: matching existing space → join it; else matching configured
-  // repo → "new from" it; else the first available target (existing space, then a new-from-repo).
+  // Default the picker to the first available target — an existing space, else a new-from-repo. The
+  // card no longer carries a repository to seed it from.
   useEffect(() => {
-    const r = repo.trim().toLowerCase();
-    const matchSpace = r !== "" ? targets.spaces.find((s) => s.label.toLowerCase() === r) : undefined;
-    if (matchSpace !== undefined) { setSelectedTarget(matchSpace.workspaceId); return; }
-    const matchRepo = r !== "" ? targets.repos.find((x) => x.name.toLowerCase() === r) : undefined;
-    if (matchRepo !== undefined) { setSelectedTarget(`new:${matchRepo.name}`); return; }
     const firstRepo = targets.repos[0];
     setSelectedTarget(targets.spaces[0]?.workspaceId ?? (firstRepo !== undefined ? `new:${firstRepo.name}` : ""));
-  }, [targets, repo]);
+  }, [targets]);
 
   function handleSave(): void {
     onSave({ title: title.trim(), description, status, priority });

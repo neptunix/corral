@@ -52,6 +52,10 @@ const IDENTITY_FIELD_MAX = 200;
 // so the cap here is a fixed module constant.
 const WHOAMI_SESSIONS_MAX = 20;
 const WHOAMI_COLUMNS_MAX = 20;
+// Same cap for the repo names formatRepoRefusal lists. They come from environments.json, which is
+// trusted startup config rather than a caller-writable board — but the list is still unbounded, and
+// the refusal exists to be READ, so a hundred names help nobody.
+const REPO_NAMES_MAX = 20;
 // Whole-line ceiling applied by `emit` to EVERY rendered line — the length counterpart to the
 // line-terminator sweep, and structural for the same reason (see `emit`). The per-field budgets
 // above cover the fields someone thought to classify; this covers the ones nobody did. Several are
@@ -369,6 +373,72 @@ export function formatStatusRefusal(status: string, columns: readonly string[]):
     `"${truncate(oneLine(status), TASK_TITLE_MAX)}" is not a column on this board. Valid status values: ${
       shown.map((c) => truncate(oneLine(c), TASK_TITLE_MAX)).join(", ")
     }${dropped > 0 ? `, … ${String(dropped)} more (limit=${String(WHOAMI_COLUMNS_MAX)})` : ""}`,
+  ]);
+}
+
+/**
+ * corral_spawn's "there is no target for this spawn" refusal, in both of its cases: no repo was
+ * given and there is no workspace to continue in, or the repo that was given is not a configured
+ * name. Both end the same way — here are the names of that environment, retry with one.
+ *
+ * Same reasoning as formatStatusRefusal: it renders a list whose length comes from a config file
+ * this module does not control, so the cap belongs where the bound is enforced by construction
+ * rather than in the tool that happens to call it. `repos: null` means the names could not be read
+ * at all — say so instead of inventing a target.
+ */
+export function formatRepoRefusal(a: {
+  readonly env: string;
+  readonly repo: string | null;
+  readonly repos: readonly string[] | null;
+}): string {
+  const env = truncate(oneLine(a.env), TASK_TITLE_MAX);
+  const head = a.repo === null
+    ? `corral_spawn needs a repo for env "${env}": there is no workspace here to continue in, and corral does not guess one.`
+    : `no repository "${truncate(oneLine(a.repo), TASK_TITLE_MAX)}" is configured for env "${env}".`;
+  let tail: string;
+  if (a.repos === null) {
+    tail = `The configured repository names could not be read from corral — retry once it responds, or name one from that environment's "repos" in environments.json.`;
+  } else if (a.repos.length === 0) {
+    tail = `Environment "${env}" has no repositories configured — add them to its "repos" entry in environments.json.`;
+  } else {
+    const shown = a.repos.slice(0, REPO_NAMES_MAX);
+    const dropped = a.repos.length - shown.length;
+    tail = `Retry with one of: ${
+      shown.map((r) => truncate(oneLine(r), TASK_TITLE_MAX)).join(", ")
+    }${dropped > 0 ? `, … ${String(dropped)} more (limit=${String(REPO_NAMES_MAX)})` : ""}`;
+  }
+  return emit([head, tail]);
+}
+
+/**
+ * corral_spawn's success reply.
+ *
+ * A formatter rather than a template literal in the tool because `workspaceLabel` and `cwdSnapshot`
+ * come from herdr — anything with socket access on that machine can rename a workspace — so they
+ * need the same line-collapse and length bound as every other untrusted value here.
+ */
+export function formatSpawnReply(a: {
+  readonly name: string;
+  readonly boardId: string;
+  readonly taskId: string;
+  readonly env: string;
+  readonly paneId: string;
+  readonly workspaceLabel: string;
+  readonly cwdSnapshot: string;
+  readonly idempotent: boolean;
+}): string {
+  const key = `${a.env}:${a.paneId}`;
+  const where = ` in workspace "${truncate(oneLine(a.workspaceLabel), TASK_TITLE_MAX)}" at ${
+    truncate(oneLine(a.cwdSnapshot), IDENTITY_FIELD_MAX)
+  }`;
+  const adopted = a.idempotent;
+  return emit([
+    `${adopted ? "adopted the existing session" : "spawned"} ${truncate(oneLine(a.name), TASK_TITLE_MAX)} on ${a.boardId}/${a.taskId}${where} — target key ${key}.`,
+    adopted
+      // The rejoin returns before the launch command is sent (server/spawn.ts), so the brief file is
+      // never read. Saying otherwise would leave the operator believing a handoff was delivered.
+      ? "That session was already running, so it did not receive this brief — send the handoff to it yourself, or close it and spawn again."
+      : "It will read the brief and call corral_whoami on start.",
   ]);
 }
 

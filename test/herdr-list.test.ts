@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import { getEnv } from "../environments.ts";
-import { listSessions, type ExecFn } from "../server/herdr.ts";
+import { listSessions, listWorkspaces, listWorkspacesStrict, type ExecFn } from "../server/herdr.ts";
 
 const VALID_UUID = "a13ad559-8e59-4b98-b420-2746ef0b94d8";
 
@@ -76,6 +76,23 @@ describe("listSessions — non-claude agent entries", () => {
     expect(rows).toHaveLength(2);
     expect(rows[1]!.agent).toBe("");
     expect(rows[1]!.status).toBe("unknown");
+  });
+});
+
+describe("listWorkspacesStrict", () => {
+  const badShape: ExecFn = () =>
+    Promise.resolve({ stdout: JSON.stringify({ result: { workspaces: [{ id: "w1" }] } }), stderr: "" });
+
+  it("returns the spaces on a well-formed listing", async () => {
+    const rows = await listWorkspacesStrict(getEnv("work-local"), baseExec);
+    expect(rows).toEqual([{ workspace_id: "w1", label: "demo-api" }]);
+  });
+
+  // The whole point of the strict variant: repo resolution reads an empty array as "no space for
+  // this repository → create one", so a listing it could not parse must never arrive as [].
+  it("throws on a schema mismatch where the lenient variant returns []", async () => {
+    await expect(listWorkspacesStrict(getEnv("work-local"), badShape)).rejects.toThrow(/workspace list/);
+    expect(await listWorkspaces(getEnv("work-local"), badShape)).toEqual([]);
   });
 });
 

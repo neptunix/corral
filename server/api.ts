@@ -157,7 +157,6 @@ const CreateTaskBodySchema = z.object({
   status: z.string(),
   priority: z.enum(["p0", "p1", "p2", "p3"]).nullable().optional(),
   description: z.string().optional(),
-  repo: z.string().nullable().optional(),
 });
 
 const PatchTaskBodySchema = z.object({
@@ -165,7 +164,6 @@ const PatchTaskBodySchema = z.object({
   status: z.string().optional(),
   priority: z.enum(["p0", "p1", "p2", "p3"]).nullable().optional(),
   description: z.string().optional(),
-  repo: z.string().nullable().optional(),
 });
 
 const AttachBodySchema = z.object({
@@ -192,7 +190,6 @@ const FromSessionBodySchema = z.object({
   status: z.string().default("todo"),
   priority: z.enum(["p0", "p1", "p2", "p3"]).nullable().optional(),
   description: z.string().optional(),
-  repo: z.string().nullable().optional(),
   env: z.string(),
   paneId: z.string(),
   tabId: z.string().default(""),
@@ -600,7 +597,6 @@ export function createApi(opts: {
         description: parsed.data.description ?? "",
         status: parsed.data.status,
         priority: parsed.data.priority ?? null,
-        repo: parsed.data.repo ?? null,
         sessions: [],
         createdAt: now,
         updatedAt: now,
@@ -634,7 +630,6 @@ export function createApi(opts: {
         ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
         ...(parsed.data.priority !== undefined ? { priority: parsed.data.priority } : {}),
         ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
-        ...(parsed.data.repo !== undefined ? { repo: parsed.data.repo } : {}),
         updatedAt: nowSecs(),
       };
       const tasks = [...existing.tasks];
@@ -864,7 +859,6 @@ export function createApi(opts: {
     if (!UUID_RE.test(link.sessionId)) {
       return c.json({ error: { code: "validation", message: "bad sessionId" } }, 400);
     }
-    const repoPath = task.repo !== null && Object.hasOwn(env.repos, task.repo) ? (env.repos[task.repo] ?? null) : null;
     // `claude --resume` is cwd-scoped: launch where the session actually ran, read from its own
     // transcript. cwdSnapshot (the herdr pane cwd captured at bind time) is only a fallback — it can
     // diverge from the session's real dir (e.g. an adopted session whose pane shell sat at $HOME),
@@ -876,10 +870,14 @@ export function createApi(opts: {
     let result: SpawnResult;
     try {
       result = await opts.spawn({
-        env, taskSlug: sanitizeSlug(task.title), cwd: resumeCwd, repo: task.repo,
+        // Both null now that a card carries no repository. `repoPath` was already dead here (resume
+        // takes the join branch and reads `cwd`); `repo` was the LABEL fallback for a resumed
+        // session whose workspace no longer exists (server/spawn.ts) — such a re-created space is
+        // now labelled from the task slug instead. A rename in a rare recovery path.
+        env, taskSlug: sanitizeSlug(task.title), cwd: resumeCwd, repo: null,
         assignedPaneIds: new Set(),
         spawnCommand: env.spawnCommand,
-        targetWorkspaceId: link.workspaceId, repoPath,
+        targetWorkspaceId: link.workspaceId, repoPath: null,
         resumeSessionId: link.sessionId,
         // Recreate the tab under the name the card already stores, not the `<slug>-a` default: without
         // this every resumed tab is mislabelled. NOT sent as `--name` — spawn.ts omits both launch
@@ -936,8 +934,15 @@ export function createApi(opts: {
     try { body = await c.req.json(); } catch { return c.json({ error: { code: "validation", message: "invalid JSON" } }, 400); }
     const parsed = z.object({
       env: z.string(),
+      // THREE-state, and absent is NOT null. A workspace id joins it; an explicit `null` creates a
+      // new space at the repo's configured path; an ABSENT key with a `repo` resolves that repo to
+      // its own workspace (join if one exists, else create). The browser always sends the key, the
+      // MCP tool omits it — a client refactor that starts always sending it silently turns
+      // resolve-by-repo into create.
       targetWorkspaceId: z.string().nullable().optional(),
-      repo: z.string().nullable().optional(), // repo to root a NEW space at (config key); ignored when joining
+      // Bounded like every other field on this body: the value is echoed back in the unknown_repo
+      // 400, and a configured key is never anywhere near this long.
+      repo: z.string().max(200).nullable().optional(), // config key: roots a NEW space, or names the one to resolve
       brief: z.string().min(1).optional(),    // initial prompt, delivered via file indirection
       // Short slug for what THIS session does; composed with the card slug into the one string used
       // as the herdr tab label, the card's link name and `claude --name`.
@@ -986,22 +991,37 @@ export function createApi(opts: {
     const assignedPaneIds = new Set<string>();
     for (const b of allBoards) {
       for (const t of b.tasks) {
-        for (const s of t.sessions) assignedPaneIds.add(s.paneId);
+        // Scoped to the TARGET environment. spawnSession compares this set against sessions listed
+        // from that environment alone, and two local environments are two independent herdr servers
+        // that both number panes from scratch — an unscoped set lets `w1:p1` over there mark `w1:p1`
+        // here as taken, so a retry after a timeout starts a second session instead of rejoining.
+        for (const s of t.sessions) if (s.env === targetEnv.id) assignedPaneIds.add(s.paneId);
       }
     }
 
-    // Grouping: resolve the repo's configured path (for creating a new space) and the chosen target
-    // space (null = create new). spawnCommand comes from the trusted env config, never the client.
-    // `Object.hasOwn` so a repo named "__proto__"/"constructor" can't resolve an inherited value
-    // (a plain-object index would return Object.prototype, not undefined) and reach herdr as a non-string.
-    const targetWorkspaceId = parsed.data.targetWorkspaceId ?? null;
-    // The repo whose configured path roots a NEW space (ignored when joining an existing one): the
-    // spawn request's explicit pick, else the task's stored repo. Used only to look up a trusted config
-    // path — never sent to herdr as-is; `Object.hasOwn` blocks inherited/prototype keys.
-    const newSpaceRepo = parsed.data.repo ?? task.repo;
-    const repoPath = newSpaceRepo !== null && Object.hasOwn(targetEnv.repos, newSpaceRepo)
-      ? (targetEnv.repos[newSpaceRepo] ?? null)
-      : null;
+    // Config lookup FIRST, on every branch: an unresolvable name refuses before any workspace is
+    // listed, so a client string can never select a workspace on its own and never reaches herdr as
+    // a path — only the trusted value behind the key does. `Object.hasOwn` so a repo named
+    // "__proto__"/"constructor" can't resolve an inherited value (a plain-object index would return
+    // Object.prototype, not undefined). spawnCommand likewise comes from the env config.
+    const newSpaceRepo = parsed.data.repo ?? null;
+    if (newSpaceRepo !== null && !Object.hasOwn(targetEnv.repos, newSpaceRepo)) {
+      // Its OWN code, deliberately not the blanket `validation` this route returns for every other
+      // bad field: corral_spawn re-renders exactly this case as "repository not configured — retry
+      // with one of…", and a tool keyed on `validation` would answer that to a bad model id.
+      return c.json({ error: { code: "unknown_repo", message: `no repository "${newSpaceRepo}" is configured for env ${targetEnv.id}` } }, 400);
+    }
+    const repoPath = newSpaceRepo !== null ? (targetEnv.repos[newSpaceRepo] ?? null) : null;
+    // The three-state read (see the schema comment). Absent is passed on ABSENT, never collapsed —
+    // that is the whole signal spawn.ts resolves a repo from.
+    const hasTarget = parsed.data.targetWorkspaceId !== undefined;
+    // Two of the four shapes carry no target at all: no key and no repo, and an explicit `null` with
+    // no repo — §1's table makes `repo` REQUIRED on the explicit-null row, because a new space has to
+    // be rooted somewhere. Refused here rather than left to fail inside the spawner, which reported a
+    // caller's malformed request as a 500 server fault.
+    if (newSpaceRepo === null && (!hasTarget || parsed.data.targetWorkspaceId === null)) {
+      return c.json({ error: { code: "validation", message: 'no spawn target: send "targetWorkspaceId" (a workspace id, or null together with a "repo" to create a new space) or "repo" on its own' } }, 400);
+    }
 
     const slug = sanitizeSlug(task.title);
     const usedNames = new Set(task.sessions.map((s) => s.name));
@@ -1047,7 +1067,8 @@ export function createApi(opts: {
       cwd: task.sessions[0]?.cwdSnapshot ?? process.cwd(),
       repo: newSpaceRepo, assignedPaneIds,
       spawnCommand: targetEnv.spawnCommand,
-      targetWorkspaceId, repoPath,
+      ...(hasTarget ? { targetWorkspaceId: parsed.data.targetWorkspaceId ?? null } : {}),
+      repoPath,
       ...(parsed.data.model === undefined ? {} : { model: parsed.data.model }),
       // Absent === off. Never `remoteControl: parsed.data.remoteControl ?? false` — under
       // exactOptionalPropertyTypes an explicit `false` and an absent key are different types, and
@@ -1208,7 +1229,6 @@ export function createApi(opts: {
         description: parsed.data.description ?? "",
         status: parsed.data.status,
         priority: parsed.data.priority ?? null,
-        repo: parsed.data.repo ?? null,
         sessions: [link],
         createdAt: now,
         updatedAt: now,

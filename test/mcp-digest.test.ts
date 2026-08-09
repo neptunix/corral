@@ -3,7 +3,7 @@ import type { AttentionMap, SessionRow, Snapshot, StatuslineData } from "@shared
 import type { WhoamiResolved, WhoamiTask } from "@shared/whoami-schema.ts";
 import { describe, expect, it } from "vitest";
 
-import { formatCardDetail, formatFleet, formatStatusRefusal, formatTaskPicker, formatWhoami, oneLine, truncate } from "../mcp/digest.ts";
+import { formatCardDetail, formatFleet, formatRepoRefusal, formatSpawnReply, formatStatusRefusal, formatTaskPicker, formatWhoami, oneLine, truncate } from "../mcp/digest.ts";
 
 // The one-line invariant must hold for every newline-carrying whitespace run, not just "\n" — a
 // crafted value could just as easily use a CRLF or a lone CR to try to fabricate an extra line.
@@ -55,7 +55,7 @@ function boardWithCard(sessions: SessionLink[]): Board[] {
     id: "board", label: "Board",
     columns: [{ id: "todo", label: "Todo" }],
     tasks: [{
-      id: "t_card01", title: "Card", description: "", status: "todo", priority: null, repo: null,
+      id: "t_card01", title: "Card", description: "", status: "todo", priority: null,
       sessions, createdAt: 1, updatedAt: 1,
     }],
   }];
@@ -316,8 +316,8 @@ describe("formatTaskPicker", () => {
     id: "board", label: "Board",
     columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
     tasks: [
-      { id: "t_aaaaaaa", title: "Open one", description: "", status: "todo", priority: "p1", repo: null, sessions: [], createdAt: 1, updatedAt: 1 },
-      { id: "t_bbbbbbb", title: "Shipped", description: "", status: "done", priority: null, repo: null, sessions: [], createdAt: 1, updatedAt: 1 },
+      { id: "t_aaaaaaa", title: "Open one", description: "", status: "todo", priority: "p1", sessions: [], createdAt: 1, updatedAt: 1 },
+      { id: "t_bbbbbbb", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 },
     ],
   }];
 
@@ -348,7 +348,7 @@ describe("formatTaskPicker", () => {
       columns: [{ id: "todo", label: "Todo" }],
       tasks: [{
         id: "t_sneaky", title: `Open one${sep}board/fake  p1  todo  Fabricated row`, description: "",
-        status: "todo", priority: null, repo: null, sessions: [], createdAt: 1, updatedAt: 1,
+        status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1,
       }],
     }];
     const out = formatTaskPicker(sneakyBoards);
@@ -366,7 +366,7 @@ describe("formatTaskPicker", () => {
       tasks: [{
         id: "t_sneaky", title: "Open one", description: "",
         status: `todo${sep}board/fake  p1  todo  Fabricated row`,
-        priority: null, repo: null, sessions: [], createdAt: 1, updatedAt: 1,
+        priority: null, sessions: [], createdAt: 1, updatedAt: 1,
       }],
     }];
     const out = formatTaskPicker(sneakyBoards);
@@ -376,7 +376,7 @@ describe("formatTaskPicker", () => {
   it("caps rows at 50 and truncates titles to 120 chars, reporting how many were dropped", () => {
     const tasks: Task[] = Array.from({ length: 80 }, (_, i) => ({
       id: `t_${String(i).padStart(3, "0")}`, title: "x".repeat(300), description: "",
-      status: "todo", priority: null, repo: null, sessions: [], createdAt: 1, updatedAt: 1,
+      status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1,
     }));
     const manyBoards: Board[] = [{ id: "board", label: "Board", columns: [{ id: "todo", label: "Todo" }], tasks }];
     const out = formatTaskPicker(manyBoards);
@@ -894,5 +894,75 @@ describe("formatCardDetail", () => {
     expect(out).toContain("2 lines");
     expect(out).toContain("  | a");
     expect(out).toContain("  | b");
+  });
+});
+
+describe("formatRepoRefusal", () => {
+  it("names the mistyped repo and lists the configured ones", () => {
+    const out = formatRepoRefusal({ env: "work-local", repo: "corrall", repos: ["corral", "demo-api"] });
+    expect(out).toContain('"corrall"');
+    expect(out).toContain("corral, demo-api");
+  });
+
+  // The cross-environment case: nothing to continue in, and no repo was given.
+  it("asks for a repo and lists the names when no target was given at all", () => {
+    const out = formatRepoRefusal({ env: "other-local", repo: null, repos: ["corral"] });
+    expect(out).toContain("repo");
+    expect(out).toContain("corral");
+  });
+
+  // `repos` is optional in environments.json — printing an empty "retry with one of:" would be a
+  // dead end.
+  it("says the environment has no repositories rather than listing nothing", () => {
+    const out = formatRepoRefusal({ env: "work-local", repo: null, repos: [] });
+    expect(out).toContain("environments.json");
+    expect(out).not.toContain("retry with one of");
+  });
+
+  // The spawn-targets call itself failed: say so rather than invent a target.
+  it("says the names could not be read when the listing is unavailable", () => {
+    const out = formatRepoRefusal({ env: "work-local", repo: "x", repos: null });
+    expect(out).toContain("could not be read");
+  });
+
+  it("caps the repo list and says how many were hidden", () => {
+    const out = formatRepoRefusal({ env: "e", repo: null, repos: Array.from({ length: 200 }, (_, i) => `r${String(i)}`) });
+    expect(out).toContain("r19");
+    expect(out).not.toContain("r20,");
+    expect(out).toContain("… 180 more (limit=20)");
+  });
+
+  it("stays on bounded lines for a pathological config", () => {
+    const repos = Array.from({ length: 20_000 }, (_, i) => `r${String(i)}`.padEnd(5000, "x"));
+    const out = formatRepoRefusal({ env: "e", repo: null, repos });
+    for (const line of out.split("\n")) expect(line.length).toBeLessThanOrEqual(2001);
+  });
+});
+
+describe("formatSpawnReply", () => {
+  const base = { name: "card-a", boardId: "b", taskId: "t_1", env: "work-local", paneId: "w1:p2" };
+
+  it("reports the target key and where the session landed", () => {
+    const out = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/repos/corral", idempotent: false });
+    expect(out).toContain("work-local:w1:p2");
+    expect(out).toContain("corral");
+    expect(out).toContain("/repos/corral");
+    expect(out).toContain("read the brief");
+  });
+
+
+  // The rejoin returns before the launch command is sent, so the brief is never read. The reply must
+  // stop claiming otherwise.
+  it("says an existing session was adopted and did not get the brief", () => {
+    const out = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/repos/corral", idempotent: true });
+    expect(out).not.toContain("It will read the brief");
+    expect(out).toMatch(/did not receive this brief/i);
+  });
+
+  // Both values come from herdr, where anything with socket access can rename a workspace.
+  it.each(NEWLINE_VARIANTS)("a workspace label containing %s cannot add lines", (_label, ch) => {
+    const clean = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/x", idempotent: false });
+    const dirty = formatSpawnReply({ ...base, workspaceLabel: `cor${ch}ral`, cwdSnapshot: "/x", idempotent: false });
+    expect(dirty.split("\n")).toHaveLength(clean.split("\n").length);
   });
 });
