@@ -115,6 +115,14 @@ export async function readRegistryDir(
     // liveness, and dead-session files are never cleaned up — so a filename-ordered cap on a machine
     // past the limit could read 200 dead sessions and none of the live ones. A stat per candidate is
     // cheap (no open, no read) and only happens on the path that is already over the cap.
+    //
+    // RESIDUAL, stated rather than paid for: this ordering guards the FILE cap only. Under the file cap
+    // but over the BYTE cap, the loop below stops at whatever readdir happened to return first, so a
+    // live session can lose its slot to a dead one. Reaching that needs ≤MAX_FILES files totalling
+    // >MAX_BYTES — mean >1.3 KB against a measured 421 B — and it degrades honestly (the session reads
+    // "not-found" → "state unavailable", plus the truncation warning), never as idle. Sorting
+    // unconditionally would put MAX_FILES stat calls on every tick of a 3 s interval to serve a path
+    // nothing has been observed on; a retry-once-sorted on truncatedByBytes is the fix if it ever is.
     const stamped = await Promise.all(candidates.map(async (f) => {
       try { return { f, mtime: (await stat(path.join(root, f))).mtimeMs }; } catch { return { f, mtime: 0 }; }
     }));
@@ -199,6 +207,10 @@ async function readRemoteDir(sshHost: string, configDir: string, exec: ExecFn): 
   // unparseable "record", which reports `bad-schema`: the drift detector for "Claude changed this file
   // format", fired on a completely healthy read.
   const clean = stdout.replace(SSH_NOISE, "");
+  // NOTE: UTF-16 code units, not bytes — the local path caps on real byte sizes from fd.stat(), so a
+  // registry holding non-ASCII session names lets this read up to ~3x the configured budget. The
+  // direction is permissive (nothing truncates early), which is why it is recorded rather than fixed:
+  // Buffer.byteLength here would also force the slice below onto a Buffer to stay consistent.
   const truncated = clean.length > CLAUDE_REGISTRY_MAX_BYTES;
   const lines = (truncated ? clean.slice(0, CLAUDE_REGISTRY_MAX_BYTES) : clean).split("\n");
   // Dropping the last line when truncated is what keeps `bad-schema` meaningful. The byte cap cuts the

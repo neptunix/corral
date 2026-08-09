@@ -1,11 +1,12 @@
 import type { AttentionMap, SessionRow, Snapshot, StatuslineData } from "@shared/schema";
+import { readFileSync } from "node:fs";
 import { describe, it, expect, vi } from "vitest";
 
 import { CLAUDE_REGISTRY_POLL_MS } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import type { AttentionStore } from "../server/attention-store.ts";
 import { createPoller, type ListFn, type RecapFn, type StatuslineFn } from "../server/poller.ts";
-import type { RegistryRead } from "../server/session-registry.ts";
+import { RegistryRecordSchema, type RegistryRead } from "../server/session-registry.ts";
 
 const A: HerdrEnv = { id: "a", label: "A", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
 const B: HerdrEnv = { id: "b", label: "B", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
@@ -894,6 +895,53 @@ describe("createPoller — the local registry interval", () => {
     expect(seen).toHaveLength(1);
     p.stop();
     vi.useRealTimers();
+  });
+
+  // waitingFor ALONE. It is rendered — it is the "· input needed" half of the label — and it changes
+  // without `status` changing whenever a session that is already waiting starts waiting on something
+  // else. Dropping it from recordsEqual freezes that half of the label with no other test failing.
+  it("broadcasts when only waitingFor changed, with status unchanged", async () => {
+    vi.useFakeTimers();
+    let waitingFor = "input needed";
+    const p = createPoller({
+      envs: [A],
+      list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
+      readRegistry: () => Promise.resolve(ok([{ sessionId: VALID_UUID, status: "waiting", waitingFor }])),
+      recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
+    });
+    await p.pollOnce();
+    p.start();
+    await settleStart();
+    await tick();
+    const seen: Snapshot[] = [];
+    p.onSnapshot((s) => seen.push(s));
+    waitingFor = "permission needed";
+    await tick();
+    expect(seen).toHaveLength(1);
+    // And the frame carries the NEW reason — a broadcast of the stale value would be no better.
+    expect(seen[0]?.sessions[0]?.waitingFor).toBe("permission needed");
+    expect(seen[0]?.sessions[0]?.claudeStatus).toBe("waiting");
+    p.stop();
+    vi.useRealTimers();
+  });
+
+  // recordsEqual lists the compared fields BY HAND, so a field added to RegistryRecordSchema and not
+  // added there silently stops broadcasting that field's changes. Pin the two lists against each other.
+  // Source-level because recordsEqual is a closure inside createPoller and cannot be imported — the
+  // same instrument test/ui-safety.test.ts uses for the render sites.
+  it("recordsEqual compares every field RegistryRecordSchema declares", () => {
+    const src = readFileSync(new URL("../server/poller.ts", import.meta.url).pathname, "utf8");
+    const keys = Object.keys(RegistryRecordSchema.shape);
+    expect(keys).toContain("sessionId");
+    for (const key of keys) {
+      // sessionId is required, so it is compared directly rather than through `?? null`.
+      const expected = key === "sessionId"
+        ? "a.sessionId === b.sessionId"
+        : `(a.${key} ?? null) === (b.${key} ?? null)`;
+      expect(src, key).toContain(expected);
+    }
   });
 
   it("keeps the previous record and reports the failure when a read degrades", async () => {

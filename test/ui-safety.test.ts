@@ -78,7 +78,10 @@ describe("UI wiring — every surface renders session state through sessionState
 
   it("TaskCard renders the label, not the raw herdr status", () => {
     const src = read("components/TaskCard.tsx");
-    expect(src).toContain("sessionStateLabel(s.live)");
+    // The WHOLE span, not a bare `sessionStateLabel(s.live)`: that weaker form only pins "the function
+    // is called somewhere in this file", so moving the call into a `title=` attribute and rendering
+    // `s.live?.status` as the visible text keeps it green. Verified by mutation.
+    expect(src).toContain('<span className="text-muted-foreground">{sessionStateLabel(s.live)}</span>');
     // The exact span it replaced must be gone. Scoped to that span, not to `s.live?.status` at large:
     // the status dot, the pending checks and a child modal's prop all read it legitimately.
     expect(src).not.toContain('<span className="text-muted-foreground">{s.live?.status ?? "unknown"}</span>');
@@ -94,10 +97,26 @@ describe("UI wiring — every surface renders session state through sessionState
       .toContain("sessionStateLabel({ status, claudeStatus, waitingFor, registryStatus })");
   });
 
-  it("App passes all five state fields into SessionModal", () => {
+  // Each prop must be fed the field OF THE SAME NAME. `claudeStatus` and `waitingFor` are both
+  // `string | null`, so swapping them typechecks — and the label then renders the reason where the
+  // status belongs. Asserting only the prop prefix and `liveByKey.get(…)?.` leaves that swap invisible:
+  // verified by mutation, three cross-wirings survived the whole suite.
+  const STATE_FIELDS = ["status", "claudeStatus", "waitingFor", "remoteControl", "registryStatus"];
+
+  it("App passes each state field into SessionModal from the field of the same name", () => {
     const src = read("App.tsx");
-    for (const prop of ["status=", "claudeStatus=", "waitingFor=", "remoteControl=", "registryStatus="]) {
-      expect(src, prop).toContain(`${prop}{liveByKey.get(\`\${session.env}:\${session.paneId}\`)?.`);
+    for (const f of STATE_FIELDS) {
+      expect(src, f).toContain(`${f}={liveByKey.get(\`\${session.env}:\${session.paneId}\`)?.${f} ??`);
+    }
+  });
+
+  // ...and the map those props read from must not cross-wire them either. Two builders fill it — the
+  // unassigned SessionRows and the enriched board links — and both are as swappable as the call site.
+  it("builds liveByKey from the matching field on both sources", () => {
+    const src = read("App.tsx");
+    for (const f of STATE_FIELDS) {
+      expect(src, `unassigned ${f}`).toContain(`${f}: s.${f}`);
+      expect(src, `link ${f}`).toContain(`${f}: link.live.${f}`);
     }
   });
 });
