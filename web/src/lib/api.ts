@@ -62,7 +62,8 @@ export const api = {
       bid: string,
       data: {
         title: string;
-        status: string;
+        // Omitted → the server resolves the board's landing column (mirrors fromSession below).
+        status?: string;
         priority?: string | null;
         description?: string;
       },

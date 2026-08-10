@@ -152,6 +152,19 @@ describe("POST + GET /api/boards/:bid/tasks", () => {
     expect(task.title).toBe("My Task");
     expect(task.id).toMatch(/^t_/);
   });
+
+  it("lands a task created with no status in the board's landing column", async () => {
+    const app = makeApi(tmpDir);
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test2" }) });
+    const res = await app.request("/api/boards/test2/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "No status" }),
+    });
+    expect(res.status).toBe(201);
+    const task = await res.json() as { status: string };
+    expect(task.status).toBe("todo");
+  });
 });
 
 describe("PATCH /api/boards/:bid/tasks/:tid", () => {
@@ -2004,6 +2017,30 @@ describe("landing column when position 0 is closed", () => {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Explicit", status: "done", env: "work-local", paneId: "w1:p2" }),
     });
+    const task = await res.json() as { status: string };
+    expect(task.status).toBe("done");
+  });
+
+  it("lands a plain task created with no status in the first non-closed column", async () => {
+    const app = makeApi(tmpDir);
+    await boardWithClosedFirst(app, "b4");
+    const res = await app.request("/api/boards/b4/tasks", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "No status, plain create" }),
+    });
+    expect(res.status).toBe(201);
+    const task = await res.json() as { status: string };
+    expect(task.status).toBe("backlog");
+  });
+
+  it("plain task create still honors an explicit status", async () => {
+    const app = makeApi(tmpDir);
+    await boardWithClosedFirst(app, "b5");
+    const res = await app.request("/api/boards/b5/tasks", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Explicit plain create", status: "done" }),
+    });
+    expect(res.status).toBe(201);
     const task = await res.json() as { status: string };
     expect(task.status).toBe("done");
   });

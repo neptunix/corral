@@ -169,7 +169,10 @@ const PatchBoardBodySchema = z.object({
 
 const CreateTaskBodySchema = z.object({
   title: z.string().min(1),
-  status: z.string(),
+  // No literal default: a task created with no status must land in THIS board's landing column,
+  // which the route resolves inside withBoard (mirrors FromSessionBodySchema) since only the loaded
+  // board knows it.
+  status: z.string().optional(),
   priority: z.enum(["p0", "p1", "p2", "p3"]).nullable().optional(),
   description: z.string().optional(),
 });
@@ -634,22 +637,26 @@ export function createApi(opts: {
     const bid = c.req.param("bid");
     if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
     const now = nowSecs();
-    const task = await opts.storage.withBoard(bid, (existing) => {
-      if (existing === null) return { board: null, result: null };
+    type CreateResult = "board_not_found" | "no_columns" | { ok: true; task: Task };
+    const result = await opts.storage.withBoard<CreateResult>(bid, (existing) => {
+      if (existing === null) return { board: null, result: "board_not_found" };
+      const status = parsed.data.status ?? defaultColumnId(existing.columns);
+      if (status === undefined) return { board: existing, result: "no_columns" };
       const newTask = {
         id: generateTaskId(),
         title: parsed.data.title,
         description: parsed.data.description ?? "",
-        status: parsed.data.status,
+        status,
         priority: parsed.data.priority ?? null,
         sessions: [],
         createdAt: now,
         updatedAt: now,
       };
-      return { board: { ...existing, tasks: [...existing.tasks, newTask] }, result: newTask };
+      return { board: { ...existing, tasks: [...existing.tasks, newTask] }, result: { ok: true, task: newTask } };
     });
-    if (task === null) return c.json({ error: { code: "not_found" } }, 404);
-    return c.json(task, 201);
+    if (result === "board_not_found") return c.json({ error: { code: "not_found" } }, 404);
+    if (result === "no_columns") return c.json({ error: { code: "validation", message: "board has no columns" } }, 400);
+    return c.json(result.task, 201);
   });
 
   app.patch("/api/boards/:bid/tasks/:tid", async (c) => {
