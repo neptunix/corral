@@ -48,10 +48,10 @@ function SortableColumnRow({ col, isLanding, skipsClosedAbove, canRemove, onRena
           className="cursor-grab select-none px-1 text-muted-foreground hover:text-foreground"
           title="Drag to reorder"
         >⠿</span>
-        <input className="flex-1 bg-background border border-border rounded px-2 py-1 text-foreground text-sm"
+        <input className="flex-1 bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
           value={col.label} onChange={(e) => { onRename(col.id, e.target.value); }} />
         <select
-          className="bg-background border border-border rounded px-2 py-1 text-foreground text-sm"
+          className="bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
           value={col.type ?? ""}
           onChange={(e) => { onRetype(col.id, e.target.value); }}
           title="Column type"
@@ -214,7 +214,7 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
               <div className="flex gap-2 items-center">
                 <input type="radio" name="defaultSpawnPreset" className="accent-primary" title="Default for new sessions"
                   checked={defaultPresetId === p.id} onChange={() => { setDefaultPresetId(p.id); }} />
-                <input className="flex-1 bg-background border border-border rounded px-2 py-1 text-foreground text-sm placeholder:text-muted-foreground/70"
+                <input className="flex-1 bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm placeholder:text-muted-foreground/70"
                   placeholder="/plan" value={p.text} onChange={(e) => { setPresetText(p.id, e.target.value); }} />
                 <button onClick={() => { removePreset(p.id); }}
                   className="px-2 text-destructive hover:text-destructive/80 text-sm">×</button>
