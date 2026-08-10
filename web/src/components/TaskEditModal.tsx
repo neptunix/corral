@@ -10,8 +10,11 @@ interface Props {
   readonly task: EnrichedTask;
   readonly board: Board;
   readonly envs: readonly SpawnEnvOption[];
-  readonly onSave: (patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority">>) => void;
-  readonly onDelete: () => void;
+  // Rejects on a server refusal so handleSave can keep the modal open and show the message, instead
+  // of closing on a failure it never saw (mirrors BoardSettingsModal's onSave contract).
+  readonly onSave: (patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority">>) => Promise<void>;
+  // Same reject-on-refusal contract as onSave.
+  readonly onDelete: () => Promise<void>;
   readonly onSpawn: (body: SpawnRequestBody) => Promise<SessionLink>;
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly boards: readonly Board[];
@@ -28,18 +31,44 @@ export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, on
   const [targetBoardId, setTargetBoardId] = useState(board.id);
   const [moving, setMoving] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [taskError, setTaskError] = useState<string | null>(null);
 
   useEffect(() => {
+    // A save or delete in flight must not let a dismissal race its refusal — the same reason the
+    // overlay click and Cancel button below are guarded.
     function onKey(e: KeyboardEvent): void {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !saving && !deleting) onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("keydown", onKey); };
-  }, [onClose]);
+  }, [onClose, saving, deleting]);
 
-  function handleSave(): void {
-    onSave({ title: title.trim(), description, status, priority });
-    onClose();
+  async function handleSave(): Promise<void> {
+    setTaskError(null);
+    setSaving(true);
+    try {
+      await onSave({ title: title.trim(), description, status, priority });
+      onClose();
+    } catch (err) {
+      setTaskError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(): Promise<void> {
+    setTaskError(null);
+    setDeleting(true);
+    try {
+      await onDelete();
+      onClose();
+    } catch (err) {
+      setTaskError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeleting(false);
+    }
   }
 
   async function handleMove(): Promise<void> {
@@ -57,7 +86,8 @@ export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, on
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" role="dialog" aria-modal="true" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" role="dialog" aria-modal="true"
+      onClick={() => { if (!saving && !deleting) onClose(); }}>
       <div className="bg-card border border-border rounded-lg w-[min(900px,92vw)] max-h-[80vh] flex flex-col" onClick={(e) => { e.stopPropagation(); }}>
         <h2 className="text-foreground font-semibold px-6 pt-6 pb-4">Edit task</h2>
         <div className="px-6 overflow-y-auto flex-1">
@@ -116,18 +146,29 @@ export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, on
         />
         </div>
 
-        <div className="flex justify-between px-6 py-4 border-t border-border bg-card">
-          {confirmDelete
-            ? <div className="flex gap-2">
-                <span className="text-xs text-destructive self-center">Delete this task?</span>
-                <button onClick={onDelete} className="px-3 py-1.5 bg-destructive text-destructive-foreground text-xs rounded">Confirm</button>
-                <button onClick={() => { setConfirmDelete(false); }} className="px-3 py-1.5 text-xs text-muted-foreground">Cancel</button>
-              </div>
-            : <button onClick={() => { setConfirmDelete(true); }} className="text-xs text-destructive hover:text-destructive/80">Delete task</button>
-          }
-          <div className="flex gap-2">
-            <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
-            <button onClick={handleSave} className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90">Save</button>
+        <div className="flex flex-col gap-2 px-6 py-4 border-t border-border bg-card">
+          {taskError !== null && <p className="text-xs text-destructive">{taskError}</p>}
+          <div className="flex justify-between">
+            {confirmDelete
+              ? <div className="flex gap-2">
+                  <span className="text-xs text-destructive self-center">Delete this task?</span>
+                  <button onClick={() => { void handleDelete(); }} disabled={deleting || saving}
+                    className="px-3 py-1.5 bg-destructive text-destructive-foreground text-xs rounded disabled:opacity-50">
+                    {deleting ? "Deleting…" : "Confirm"}
+                  </button>
+                  <button onClick={() => { setConfirmDelete(false); }} disabled={deleting}
+                    className="px-3 py-1.5 text-xs text-muted-foreground disabled:opacity-50">Cancel</button>
+                </div>
+              : <button onClick={() => { setConfirmDelete(true); }} className="text-xs text-destructive hover:text-destructive/80">Delete task</button>
+            }
+            <div className="flex gap-2">
+              <button onClick={onClose} disabled={saving || deleting}
+                className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50">Cancel</button>
+              <button onClick={() => { void handleSave(); }} disabled={saving || deleting}
+                className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90 disabled:opacity-50">
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </div>
           </div>
         </div>
       </div>
