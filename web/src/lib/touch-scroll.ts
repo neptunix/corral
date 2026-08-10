@@ -32,6 +32,40 @@ export function touchWheelDeltaY(fromY: number, toY: number): number | null {
   return Math.abs(delta) < TOUCH_SCROLL_THRESHOLD_PX ? null : delta;
 }
 
+// `wheelDeltaX`/`wheelDeltaY` are legacy WheelEvent members that WebKit and Blink still accept in
+// WheelEventInit — and default to 0 when omitted. That default is not harmless: the vendored vscode
+// StandardWheelEvent that drives xterm's scrollbar reads them FIRST and only falls back to the modern
+// deltaY when they are absent (vs/base/browser/mouseEvent.ts:155). An init without them therefore
+// scrolls by exactly zero, while xterm's mouse-reporting path — which reads deltaY directly — still
+// works, so the pane appears to scroll under a TUI and sit dead everywhere else.
+declare global {
+  interface WheelEventInit {
+    wheelDeltaX?: number;
+    wheelDeltaY?: number;
+  }
+}
+
+/**
+ * WheelEventInit for a pixel scroll of `deltaY`, with the legacy fields kept consistent.
+ *
+ * The factor is fixed by making both readers agree: StandardWheelEvent computes `wheelDeltaY / 120` on
+ * the legacy branch and `-deltaY / 40` on the modern one, so `wheelDeltaY = -3 * deltaY` — which is also
+ * the conventional legacy mapping for pixel deltas.
+ */
+export function wheelInit(deltaY: number, clientX: number, clientY: number): WheelEventInit {
+  return {
+    deltaX: 0,
+    deltaY,
+    deltaMode: 0, // DOM_DELTA_PIXEL — xterm's cell-height accumulator and StandardWheelEvent both expect pixels
+    wheelDeltaX: 0,
+    wheelDeltaY: -3 * deltaY,
+    clientX,
+    clientY,
+    bubbles: true,
+    cancelable: true,
+  };
+}
+
 /**
  * Binds the shim to a terminal container (anything containing the `.xterm` element — touch events from
  * the screen bubble up to it). Returns the detach function; call it from the effect teardown.
@@ -57,17 +91,7 @@ export function attachTouchScroll(el: HTMLElement): () => void {
     e.preventDefault();
     // `touch.target` is where the finger went DOWN, which is the element a real wheel would target.
     const target = touch.target instanceof Element ? touch.target : el;
-    target.dispatchEvent(
-      new WheelEvent("wheel", {
-        deltaX: 0,
-        deltaY,
-        deltaMode: 0, // DOM_DELTA_PIXEL — xterm's cell-height accumulator and vscode's StandardWheelEvent both expect pixels
-        clientX: touch.clientX,
-        clientY: touch.clientY,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    target.dispatchEvent(new WheelEvent("wheel", wheelInit(deltaY, touch.clientX, touch.clientY)));
   }
 
   function onTouchEnd(): void {
