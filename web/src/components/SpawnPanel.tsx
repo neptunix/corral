@@ -21,7 +21,7 @@ type TargetsState =
   | { readonly phase: "error"; readonly message: string }
   | { readonly phase: "ready"; readonly spaces: readonly { workspaceId: string; label: string }[]; readonly repos: readonly { name: string }[] };
 
-export interface SpawnPanelProps {
+interface Props {
   readonly envs: readonly SpawnEnvOption[];
   readonly presets: readonly SpawnPreset[];
   readonly defaultPresetId: string | null;
@@ -30,7 +30,7 @@ export interface SpawnPanelProps {
   readonly onSpawned: (link: SessionLink) => void; // the modal closes + auto-attaches
 }
 
-export function SpawnPanel({ envs, presets, defaultPresetId, hasSessions, onSpawn, onSpawned }: SpawnPanelProps): JSX.Element {
+export function SpawnPanel({ envs, presets, defaultPresetId, hasSessions, onSpawn, onSpawned }: Props): JSX.Element {
   const [spawning, setSpawning] = useState(false);
   const [spawnEnv, setSpawnEnv] = useState(envs[0]?.id ?? "");
   // "" is the picker's "default" — no model field is sent, so the session inherits the last-used one.
