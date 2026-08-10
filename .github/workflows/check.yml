@@ -1,0 +1,34 @@
+name: check
+
+# GitHub-hosted runners only, deliberately. This repository is public and takes pull requests from
+# forks, so a self-hosted runner would let any fork execute arbitrary code on that machine.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A fork's pull request gets a read-only token and no secrets.
+permissions:
+  contents: read
+
+# A new push to the same branch supersedes the run still in flight.
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` builds node-pty, which needs a compiler when no prebuild matches the platform.
+      - run: npm ci
+
+      # typecheck + lint + test — the same gate CLAUDE.md requires locally.
+      - run: npm run check
