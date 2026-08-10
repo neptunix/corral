@@ -28,7 +28,7 @@ import { isLoopbackHost } from "./host-guard.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
 import { isSessionBound, resolveLinkIndex } from "./session-binding.ts";
-import { composeSessionName, NAME_MAX, sanitizeSlug, slugify } from "./spawn.ts";
+import { composeSessionName, fallbackNamePrefix, NAME_MAX, sanitizeSlug, slugify } from "./spawn.ts";
 import type { SpawnOpts, SpawnResult } from "./spawn.ts";
 import { aggregateAccounts } from "./statusline.ts";
 import type { Storage } from "./storage.ts";
@@ -925,9 +925,19 @@ export function createApi(opts: {
     // diverge from the session's real dir (e.g. an adopted session whose pane shell sat at $HOME),
     // and resuming from the wrong dir both lands Claude there AND fails to find the transcript.
     const resumeCwd = (await sessionCwd(env, link.sessionId)) ?? link.cwdSnapshot;
-    // ≤ NAME_MAX and matching the charset composeSessionName emits, so the resumed tab label obeys the
-    // same rule as a spawned one. "" means nothing usable survived → spawn.ts's `<slug>-a` fallback.
-    const resumeName = slugify(link.name, NAME_MAX);
+    // ONLY a herdr tab label: resume launches `claude --resume <id>` with no flags, so Claude restores
+    // its own name, and spawn.ts's tab-name rejoin is skipped on this path. Nothing to disambiguate
+    // against, hence the bare `-a` rather than composeSessionName's collision search.
+    //
+    // Deriving it here is what lets spawn.ts's `<taskSlug>-a` go: that was a second name source the
+    // route's fallback chain could not reach, so a card titled without Latin characters resumed as
+    // `task-a` however the chain improved. No repo: resume carries no request, and a card owns none,
+    // so the chain here is title then task id. It cannot return "" — `task.id` passed TID_RE above,
+    // so its last step always yields at least "t".
+    const storedName = slugify(link.name, NAME_MAX);
+    const resumeName = storedName !== ""
+      ? storedName
+      : `${fallbackNamePrefix(task.title, null, task.id)}-a`;
     let result: SpawnResult;
     try {
       result = await opts.spawn({
@@ -940,18 +950,17 @@ export function createApi(opts: {
         spawnCommand: env.spawnCommand,
         targetWorkspaceId: link.workspaceId, repoPath: null,
         resumeSessionId: link.sessionId,
-        // Recreate the tab under the name the card already stores, not the `<slug>-a` default: without
-        // this every resumed tab is mislabelled. NOT sent as `--name` — spawn.ts omits both launch
-        // flags when resuming (the name lives in the transcript, the model with the session).
+        // Recreate the tab under the name the card already stores: without this every resumed tab is
+        // mislabelled. NOT sent as `--name` — spawn.ts omits both launch flags when resuming (the name
+        // lives in the transcript, the model with the session).
         //
         // SANITIZED, not trusted, and not dropped either. `link.name` is NOT a string this route
         // composed: the attach and from-session routes take it as `z.string().default("")` straight
         // from the client, and the MCP bind path puts the session's own Claude name there — so after
         // a `/rename Fix the auth bug` the card holds exactly that, spaces and capitals included.
         // `slugify` turns it into `fix-the-auth-bug`: the operator's intent survives, and a leading `-`
-        // cannot reach `herdr tab create` as a flag. Only a name with nothing usable left falls back
-        // to `<slug>-a`.
-        ...(resumeName === "" ? {} : { sessionName: resumeName }),
+        // cannot reach `herdr tab create` as a flag.
+        sessionName: resumeName,
       });
     } catch (err) {
       return c.json({ error: { code: "resume_failed", message: err instanceof Error ? err.message : String(err) } }, 502);
@@ -1015,9 +1024,11 @@ export function createApi(opts: {
       // route reports every bad field as a bare `invalid "<field>"`, and a preset that reaches here has
       // already been through the readable refusal at PATCH.
       startCommand: z.string().trim().min(1).max(2000).regex(START_COMMAND_FIRST_CHAR).optional(),
-      // Short slug for what THIS session does; composed with the card slug into the one string used
-      // as the herdr tab label, the card's link name and `claude --name`.
-      name: z.string().max(64).optional(),
+      // The WHOLE session name, used verbatim as the herdr tab label, the card's link name and
+      // `claude --name`. No card slug is prefixed — see composeSessionName.
+      // Bound on the RAW input; `slugify` caps the result at NAME_MAX regardless. 64 used to refuse
+      // names the cap is now wide enough to carry.
+      name: z.string().max(128).optional(),
       // Shape-validated only. corral keeps NO list of valid models: Claude Code accepts any string
       // and fails visibly at the API, the operator corrects it, and an allowlist would need a corral
       // release per new alias. The class is therefore wide enough for every id shape Claude Code
@@ -1062,11 +1073,13 @@ export function createApi(opts: {
     const assignedPaneIds = new Set<string>();
     for (const b of allBoards) {
       for (const t of b.tasks) {
-        // Scoped to the TARGET environment. spawnSession compares this set against sessions listed
-        // from that environment alone, and two local environments are two independent herdr servers
-        // that both number panes from scratch — an unscoped set lets `w1:p1` over there mark `w1:p1`
-        // here as taken, so a retry after a timeout starts a second session instead of rejoining.
-        for (const s of t.sessions) if (s.env === targetEnv.id) assignedPaneIds.add(s.paneId);
+        for (const s of t.sessions) {
+          // Scoped to the TARGET environment. spawnSession compares this set against sessions listed
+          // from that environment alone, and two local environments are two independent herdr servers
+          // that both number panes from scratch — an unscoped set lets `w1:p1` over there mark `w1:p1`
+          // here as taken, so a retry after a timeout starts a second session instead of rejoining.
+          if (s.env === targetEnv.id) assignedPaneIds.add(s.paneId);
+        }
       }
     }
 
@@ -1095,15 +1108,31 @@ export function createApi(opts: {
     }
 
     const slug = sanitizeSlug(task.title);
-    const usedNames = new Set(task.sessions.map((s) => s.name));
     if (task.sessions.length >= SPAWN_CAP) {
       return c.json({ error: { code: "session_cap", message: `task already has ${String(SPAWN_CAP)} sessions — remove or unlink one first` } }, 409);
     }
-    // One string for tab label, link name and `claude --name`. The uniqueness test happens inside
-    // composeSessionName against the string it will actually return — see the invariant there.
-    const sessionName = composeSessionName(slug, parsed.data.name ?? "", (n) => !usedNames.has(n));
+    // One string for tab label, link name and `claude --name`. The requested name IS the name — corral
+    // no longer prefixes it with the card slug. The prefix below is consulted ONLY when nothing usable
+    // was supplied (the UI sends no name at all, and a name in a non-Latin script reduces to nothing).
+    //
+    // Uniqueness is CARD-scoped on purpose. Two cards holding the same name is not a fault: Claude
+    // runs sessions with identical names, and corral addresses a session by (env, paneId) with the
+    // card for context. Widening it board-wide bought nothing and cost a walk over every board.
+    //
+    // SLUGIFIED, because a stored link name is not always a string this route composed: attach and
+    // from-session take it as `z.string().default("")` from the client, so a card can hold
+    // "Fix the auth bug". Candidates are always slugified, so comparing against the raw form never
+    // matches and the `-a` suffix silently fails to fire. Only reachable since the requested name
+    // stopped being prefixed with the card slug — before that no candidate could equal a bare
+    // stored name's slug.
+    const usedNames = new Set(task.sessions.map((s) => slugify(s.name, NAME_MAX)));
+    const namePrefix = fallbackNamePrefix(task.title, newSpaceRepo, task.id);
+    const sessionName = composeSessionName(namePrefix, parsed.data.name ?? "", (n) => !usedNames.has(n));
     if (sessionName === null) {
-      return c.json({ error: { code: "session_cap", message: "no free session name left on this task — attach or remove one first" } }, 409);
+      // Unreachable: SPAWN_CAP above caps the card at 25 existing sessions, so at most 25 of the 27
+      // candidates can be taken. Kept because composeSessionName's type admits null, not as a path
+      // the route expects to serve.
+      return c.json({ error: { code: "name_unavailable", message: "no free session name left — choose a different name" } }, 409);
     }
     // Brief/start-command delivery is local-only: the file is written on the corral host, and the
     // `$(cat …)` substitution runs in the pane's shell — on a remote box that path would not exist.

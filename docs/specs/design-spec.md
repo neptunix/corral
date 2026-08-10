@@ -351,8 +351,9 @@ Drag a pooled session onto a task (or API) → stored by `(env,paneId)`. Detach 
 
 ### Spawn (rules-based)
 1. **Local vs remote:** prompt, defaulting to **local**.
-2. **Idempotency pre-check:** look in `agent list` for a session named `<task-slug>-<a|b|c>`; if
-   present, attach it and stop (handles retry after a timed-out spawn).
+2. **Idempotency pre-check:** look for a live tab named exactly the name chosen in §5, inside the
+   target workspace and not already carded; if present, attach it and stop (handles retry after a
+   timed-out spawn).
 3. **Target from the REQUEST, never from the card.** A card cuts across workspaces — its sessions may
    sit in several repositories — so it carries no `repo`. The request states one of three things: a
    workspace id joins that workspace; an explicit `null` creates a new one at the named repo's
@@ -361,8 +362,12 @@ Drag a pooled session onto a task (or API) → stored by `(env,paneId)`. Detach 
    either way. No target and no repo is refused, with the environment's configured names — corral
    does not infer one.
 4. **Spawn:** `herdr agent start <name> --workspace <id> -- claude`.
-5. **Auto-name:** `herdr pane run <paneId> "/rename <slug>-<a|b|c>"`. **`slug` is sanitized** (§13):
-   `title.toLowerCase().replace(/[^a-z0-9]/g,'-').slice(0,32)`, must match `^[a-z0-9][a-z0-9\-]{0,31}$`.
+5. **Name:** the spawning agent supplies the WHOLE name via `corral_spawn`'s `name`, as
+   `{slug}-{name}`; corral passes it as `claude --name` and as the tab label, adding no prefix. It is
+   reduced to `[a-z0-9-]` and capped at `NAME_MAX` (96), and a letter `-a … -z` is appended only to
+   break a collision **on the same card**. Two cards may hold the same name: a session is addressed by
+   `(env,paneId)`, with the card for context. corral derives a name only when none was supplied (the
+   UI sends none): card title → target repo → task id, every step slugified.
 6. **Auto-attach** `(env,paneId)` + capture `cwdSnapshot` via `pane get`.
 
 ### Send command

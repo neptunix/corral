@@ -10,14 +10,20 @@ import {
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
-// The ONE string used as the herdr tab label, the card's link name and `claude --name`. 56 is a
-// readability bound for a tab label and the /resume picker — NOT a size chosen so that any slug plus
-// any name fits. A 32-char slug with a 30-char name IS truncated, which is precisely why truncation
-// happens before the freeness test in composeSessionName.
-export const NAME_MAX = 56;
-const NAME_RE = /^[a-z0-9][a-z0-9-]{0,55}$/;
+// The ONE string used as the herdr tab label, the card's link name, `claude --name` and
+// `--remote-control <name>`. Nothing downstream imposes this bound: Claude Code stored a 148-char
+// name verbatim and herdr a 239-char tab label. 96 is corral's own HARD cap, chosen so a name the
+// AGENT wrote is not silently cut. The agent-facing contracts ask for ~56 instead — a tidier target
+// with headroom above it, not a second bound; only this one truncates.
+export const NAME_MAX = 96;
+// DERIVED, never hand-written. This regex is the final gate on every candidate (see the find() in
+// composeSessionName), and it used to spell out `{0,55}` — NAME_MAX - 1 for the old 56. Raising
+// NAME_MAX alone therefore rejected every longer name, composeSessionName returned null, and the
+// route answered 409 "no free session name left on this task" for a card with no sessions at all.
+const NAME_RE = new RegExp(`^[a-z0-9][a-z0-9-]{0,${String(NAME_MAX - 1)}}$`);
 
-// The a-z candidate letters a card's sessions are distinguished by: `${slug}-<letter>`.
+// The a-z candidate letters a colliding name is disambiguated by, appended to whichever base
+// composeSessionName is working from: `${name}-<letter>` or `${fallbackPrefix}-<letter>`.
 const SESSION_LETTERS: readonly string[] =
   Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i));
 
@@ -48,32 +54,65 @@ export function sanitizeSlug(title: string): string {
 }
 
 /**
- * Compose the session name from the card slug and the caller's requested name, returning the first
- * candidate `isFree` accepts, or null when none is both free and valid (the route then 409s).
+ * The prefix a session name falls back to when nothing usable was supplied — the agent omitted
+ * `name`, wrote it in a script the charset cannot carry, or the spawn came from the UI, which sends
+ * no name at all. Ordered most-meaningful first, and EVERY step is slugified.
+ *
+ * The title is tested via `slugify`, not via `sanitizeSlug`'s "task" sentinel: a card genuinely
+ * titled "Task" would otherwise be misread as the degenerate case. `sanitizeSlug` is left alone — it
+ * is the idempotent-rejoin key and must not change.
+ */
+export function fallbackNamePrefix(title: string, repo: string | null, taskId: string): string {
+  const titleSlug = slugify(title, 32);
+  if (titleSlug !== "") return titleSlug;
+  const repoSlug = repo === null ? "" : slugify(repo, 32);
+  if (repoSlug !== "") return repoSlug;
+  return slugify(taskId, 32);
+}
+
+/**
+ * The requested name IS the session name — corral no longer prefixes it with the card's slug.
+ * Returns the first candidate `isFree` accepts, or null when none is both free and valid (the route
+ * then 409s).
+ *
+ * The agent that spawns holds what the old mechanical prefix was approximating: the card's meaning,
+ * and its own session's slug. It supplies the whole `{slug}-{name}`, so corral's job here is only to
+ * reduce to the launch-flag charset, cap, and disambiguate. A prefix derived from the card title
+ * spent the caller's length budget first (truncation eats the tail, i.e. the informative half) and
+ * degenerated to "task" for any title without Latin characters.
+ *
+ * `fallbackPrefix` is used ONLY when nothing usable survives in `requested` — the agent omitted the
+ * name, or wrote it in a script the charset cannot carry. It is slugified HERE rather than trusted
+ * from the caller, so the charset guarantee holds however the route derived it: the chain's last
+ * resort is `task.id`, and a raw `t_${nanoid(7)}` fails NAME_RE every single time ("_" is not in the
+ * charset — measured 2000/2000).
  *
  * INVARIANT: the string handed to `isFree` is byte-identical to the string returned. Every candidate
  * is truncated to NAME_MAX and re-trimmed BEFORE the test, never after — two design revisions had
- * this backwards and could hand back a truncated name that collided with one already on the card.
- * `isFree` is a callback rather than a Set so that rule lives in exactly one place and is
- * unit-testable without the route.
+ * this backwards and could hand back a truncated name that collided with one already taken. `isFree`
+ * is a callback rather than a Set so that rule lives in exactly one place and is unit-testable
+ * without the route.
  */
 export function composeSessionName(
-  taskSlug: string,
+  fallbackPrefix: string,
   requested: string,
   isFree: (name: string) => boolean,
 ): string | null {
-  const nameSlug = slugify(requested, 32);
   const candidates: string[] = [];
+  const nameSlug = slugify(requested, NAME_MAX);
+  // EITHER/OR. Appending both families let an exhausted requested name fall through to a card-derived
+  // one, so the route answered 200 with a name the agent never asked for instead of 409.
   if (nameSlug !== "") {
-    const joined = `${taskSlug}-${nameSlug}`;
-    candidates.push(joined.slice(0, NAME_MAX).replace(/-+$/, ""));
+    candidates.push(nameSlug);
     // Pre-trimmed by 2 so the disambiguating letter can never be the part truncation eats.
-    const base = joined.slice(0, NAME_MAX - 2).replace(/-+$/, "");
+    const base = slugify(requested, NAME_MAX - 2);
     for (const letter of SESSION_LETTERS) candidates.push(`${base}-${letter}`);
+  } else {
+    const prefix = slugify(fallbackPrefix, NAME_MAX - 2);
+    if (prefix !== "") {
+      for (const letter of SESSION_LETTERS) candidates.push(`${prefix}-${letter}`);
+    }
   }
-  // Always ≤34 chars (taskSlug is ≤32), so the NAME_MAX slice above is a no-op here. This is today's
-  // `${slug}-${suffix}`.
-  for (const letter of SESSION_LETTERS) candidates.push(`${taskSlug}-${letter}`);
   return candidates.find((c) => NAME_RE.test(c) && isFree(c)) ?? null;
 }
 
@@ -108,8 +147,14 @@ export interface SpawnOpts {
   readonly targetWorkspaceId?: string | null;
   readonly repoPath?: string | null;              // resolved env.repos[repo]; required to create
   /** The one string used as the herdr tab label, `--name`, and `--remote-control`'s name. Composed by
-   *  the route (composeSessionName); when absent the tab falls back to `<taskSlug>-<suffix>`. */
-  readonly sessionName?: string;
+   *  the route (composeSessionName), which owns the whole fallback chain.
+   *
+   *  REQUIRED, deliberately. It used to be optional with `?? `${taskSlug}-a`` filling in here — a
+   *  SECOND, independent fallback that the route's chain could not reach. The resume path relied on
+   *  it (it omitted the name when the stored one had nothing usable left), so a card whose title
+   *  carries no Latin characters resumed as `task-a` no matter what the route decided. One name
+   *  source, in the route. */
+  readonly sessionName: string;
   /** Shape-validated in the spawn route's body schema (A.5). corral keeps no allowlist. */
   readonly model?: string;
   /** Start with Remote Control connected. Default OFF — this connects the session to claude.ai, so it
@@ -154,10 +199,9 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
   const { env, taskSlug, cwd, repo, assignedPaneIds } = opts;
   const spawnCommand = opts.spawnCommand ?? "claude";
 
-  // The tab herdr label must agree with the idempotency key, else re-spawn can't rejoin. `sessionName`
-  // is the composed one-string when the route supplied it; `<taskSlug>-a` is the fallback for the
-  // resume path, which supplies no name.
-  const tabName = opts.sessionName ?? `${taskSlug}-a`;
+  // The tab label must agree with the idempotency key below, else re-spawn can't rejoin. Taken
+  // verbatim: the route is the only place a name is derived.
+  const tabName = opts.sessionName;
 
   // Flags, in a fixed order so tests can assert exact strings. --remote-control ALWAYS carries the
   // name: its argument is optional, so a bare flag would consume the positional brief that follows and

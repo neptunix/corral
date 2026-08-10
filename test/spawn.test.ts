@@ -36,7 +36,7 @@ describe("spawnSession — create new workspace", () => {
     const fns = baseFns();
     fns.paneGetFn = vi.fn().mockResolvedValue({ paneId: "w1:p1", tabId: "w1:t1", workspaceId: "w1", cwd: "/repos/corral" });
     const result = await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/fallback", repo: "corral",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/fallback", repo: "corral",
       assignedPaneIds: new Set(), spawnCommand: "claude-personal",
       targetWorkspaceId: null, repoPath: "/repos/corral", ...fns,
     });
@@ -55,7 +55,7 @@ describe("spawnSession — create new workspace", () => {
     const fns = baseFns();
     fns.workspaceCreateFn = vi.fn().mockResolvedValue({ workspaceId: "w1", rootTabId: undefined, rootPaneId: undefined });
     const result = await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/fallback", repo: "corral",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/fallback", repo: "corral",
       assignedPaneIds: new Set(), targetWorkspaceId: null, repoPath: "/repos/corral", ...fns,
     });
     expect(result.paneId).toBe("w1:p2");
@@ -66,7 +66,7 @@ describe("spawnSession — create new workspace", () => {
   it("throws when creating a new space with no repoPath", async () => {
     const fns = baseFns();
     await expect(spawnSession({
-      env: localEnv, taskSlug: "t", cwd: "/x", repo: "corral",
+      env: localEnv, taskSlug: "t", sessionName: "t-a", cwd: "/x", repo: "corral",
       assignedPaneIds: new Set(), targetWorkspaceId: null, repoPath: null, ...fns,
     })).rejects.toThrow(/no path configured for repo "corral"/);
     expect(fns.workspaceCreateFn).not.toHaveBeenCalled();
@@ -78,7 +78,7 @@ describe("spawnSession — join existing workspace", () => {
     const fns = baseFns();
     fns.listPanesFn = vi.fn().mockResolvedValue([{ paneId: "w1:p1", cwd: "/existing/corral" }]);
     const result = await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/x", repo: "corral",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/x", repo: "corral",
       assignedPaneIds: new Set(), targetWorkspaceId: "w1", repoPath: "/ignored", ...fns,
     });
     expect(fns.workspaceCreateFn).not.toHaveBeenCalled();
@@ -95,7 +95,7 @@ describe("spawnSession — idempotency (scoped to the joined workspace by pane m
     fns.listFn = vi.fn().mockResolvedValue([makeRow("w1:p9", "my-task-a", "corral")]);
     fns.paneGetFn = vi.fn().mockResolvedValue({ paneId: "w1:p9", tabId: "w1:t9", workspaceId: "w1", cwd: "/proj" });
     const result = await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/x", repo: "corral",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/x", repo: "corral",
       assignedPaneIds: new Set(), targetWorkspaceId: "w1", repoPath: null, ...fns,
     });
     expect(result.idempotent).toBe(true);
@@ -110,7 +110,7 @@ describe("spawnSession — idempotency (scoped to the joined workspace by pane m
     fns.listPanesFn = vi.fn().mockResolvedValue([{ paneId: "w1:p1", cwd: "/proj" }]);
     fns.listFn = vi.fn().mockResolvedValue([makeRow("wOTHER:p9", "my-task-a", "corral")]);
     const result = await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/x", repo: "corral",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/x", repo: "corral",
       assignedPaneIds: new Set(), targetWorkspaceId: "w1", repoPath: null, ...fns,
     });
     expect(result.idempotent).toBe(false);
@@ -123,7 +123,7 @@ describe("spawnSession — resume mode", () => {
     const runCalls: { paneId: string; text: string }[] = [];
     const tabCalls: { cwd: string; label: string }[] = [];
     const result = await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/orig/cwd", repo: null,
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/orig/cwd", repo: null,
       assignedPaneIds: new Set(),
       spawnCommand: "claude",
       targetWorkspaceId: "w7",
@@ -157,7 +157,7 @@ describe("spawnSession — resume mode", () => {
     const renameCalls: { tabId: string; label: string }[] = [];
     const tabCreateFn = vi.fn();
     const result = await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/orig/cwd", repo: null,
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/orig/cwd", repo: null,
       assignedPaneIds: new Set(),
       spawnCommand: "claude",
       targetWorkspaceId: "wJ",       // closed since the link was stored
@@ -208,7 +208,7 @@ describe("spawnSession — cleanup on failure", () => {
     const fns = baseFns();
     fns.tabRenameFn = vi.fn().mockRejectedValue(new Error("boom"));
     await expect(spawnSession({
-      env: localEnv, taskSlug: "t", cwd: "/x", repo: "corral",
+      env: localEnv, taskSlug: "t", sessionName: "t-a", cwd: "/x", repo: "corral",
       assignedPaneIds: new Set(), targetWorkspaceId: null, repoPath: "/repos/corral", ...fns,
     })).rejects.toThrow(/tab (create|rename)/);
     expect(fns.workspaceCloseFn).toHaveBeenCalledWith(localEnv, "w1");
@@ -218,7 +218,7 @@ describe("spawnSession — cleanup on failure", () => {
     const fns = baseFns();
     fns.paneRunFn = vi.fn().mockRejectedValue(new Error("nope"));
     await expect(spawnSession({
-      env: localEnv, taskSlug: "t", cwd: "/x", repo: "corral",
+      env: localEnv, taskSlug: "t", sessionName: "t-a", cwd: "/x", repo: "corral",
       assignedPaneIds: new Set(), targetWorkspaceId: null, repoPath: "/repos/corral", ...fns,
     })).rejects.toThrow(/pane run/);
     // We reused the root tab, so closing the workspace is the cleanup — no separate tab close.
@@ -231,7 +231,7 @@ describe("spawnSession — cleanup on failure", () => {
     fns.listPanesFn = vi.fn().mockResolvedValue([{ paneId: "w1:p1", cwd: "/proj" }]);
     fns.paneRunFn = vi.fn().mockRejectedValue(new Error("nope"));
     await expect(spawnSession({
-      env: localEnv, taskSlug: "t", cwd: "/x", repo: "corral",
+      env: localEnv, taskSlug: "t", sessionName: "t-a", cwd: "/x", repo: "corral",
       assignedPaneIds: new Set(), targetWorkspaceId: "w1", repoPath: null, ...fns,
     })).rejects.toThrow(/pane run/);
     expect(fns.tabCloseFn).toHaveBeenCalledWith(localEnv, "w1:t2"); // the tab we created in the existing ws
@@ -313,14 +313,20 @@ describe("spawnSession — launch flags", () => {
     expect(fns.paneRunFn).toHaveBeenCalledWith(localEnv, "w1:p1", "claude --resume u-1", undefined);
   });
 
-  it("falls back to <slug>-a for the tab when no sessionName is given", async () => {
+  // Replaces "falls back to <slug>-a for the tab when no sessionName is given". That fallback was a
+  // SECOND name source living here, which the route's fallback chain could not reach: the resume path
+  // omitted the name when the stored one had nothing usable left, so a card titled without Latin
+  // characters resumed as `task-a` whatever the route had decided. sessionName is now required and
+  // spawn.ts derives nothing — this pins that the label is the route's string, untouched.
+  it("labels the tab with the route's sessionName verbatim, deriving nothing from taskSlug", async () => {
     const fns = baseFns();
     const r = await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/proj", repo: "corral", assignedPaneIds: new Set(),
+      env: localEnv, taskSlug: "my-task", sessionName: "wm-stake-anchor-repro",
+      cwd: "/proj", repo: "corral", assignedPaneIds: new Set(),
       targetWorkspaceId: null, repoPath: "/repos/corral",
       ...fns,
     });
-    expect(r.tabLabel).toBe("my-task-a");
+    expect(r.tabLabel).toBe("wm-stake-anchor-repro");
   });
 
   // The join path (targetWorkspaceId set) is what every named spawn from corral_spawn actually takes
@@ -353,7 +359,7 @@ describe("spawnSession — resolve the workspace from the repo", () => {
   it("joins the space whose label matches the repo, compared case-insensitively", async () => {
     const fns = resolveFns([{ workspace_id: "w7", label: "Corral" }]);
     const r = await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/elsewhere", repo: "corral",
       assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
     });
     expect(fns.workspaceCreateFn).not.toHaveBeenCalled();
@@ -367,7 +373,7 @@ describe("spawnSession — resolve the workspace from the repo", () => {
     const fns = resolveFns([{ workspace_id: "w7", label: "corral" }]);
     fns.listPanesFn = vi.fn().mockResolvedValue([{ paneId: "w7:p1", cwd: "/somewhere/unrelated" }]);
     await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/elsewhere", repo: "corral",
       assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
     });
     expect(fns.tabCreateFn).toHaveBeenCalledWith(localEnv, "w7", "/repos/corral", "my-task-a");
@@ -376,7 +382,7 @@ describe("spawnSession — resolve the workspace from the repo", () => {
   it("creates the space at the configured path when no label matches", async () => {
     const fns = resolveFns([{ workspace_id: "w7", label: "other-project" }]);
     const r = await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/elsewhere", repo: "corral",
       assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
     });
     expect(fns.workspaceCreateFn).toHaveBeenCalledWith(localEnv, "/repos/corral", "corral");
@@ -391,7 +397,7 @@ describe("spawnSession — resolve the workspace from the repo", () => {
       { workspace_id: "w2", label: "corral" },
     ]);
     await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/elsewhere", repo: "corral",
       assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
     });
     expect(fns.tabCreateFn).toHaveBeenCalledWith(localEnv, "w2", "/repos/corral", "my-task-a");
@@ -401,7 +407,7 @@ describe("spawnSession — resolve the workspace from the repo", () => {
   it("matches a repo key containing a colon", async () => {
     const fns = resolveFns([{ workspace_id: "w7", label: "owner:project" }]);
     await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "owner:project",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/elsewhere", repo: "owner:project",
       assignedPaneIds: new Set(), repoPath: "/repos/project", ...fns,
     });
     expect(fns.workspaceCreateFn).not.toHaveBeenCalled();
@@ -414,7 +420,7 @@ describe("spawnSession — resolve the workspace from the repo", () => {
     const fns = resolveFns([]);
     fns.workspaceListStrictFn = vi.fn().mockRejectedValue(new Error("herdr workspace list: unexpected shape"));
     await expect(spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/elsewhere", repo: "corral",
       assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
     })).rejects.toThrow(/unexpected shape/);
     expect(fns.workspaceCreateFn).not.toHaveBeenCalled();
@@ -424,7 +430,7 @@ describe("spawnSession — resolve the workspace from the repo", () => {
   it("refuses when no strict listing function is wired at all", async () => {
     const fns = baseFns();
     await expect(spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/elsewhere", repo: "corral",
       assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
     })).rejects.toThrow(/workspaceListStrictFn/);
     expect(fns.workspaceCreateFn).not.toHaveBeenCalled();
@@ -436,7 +442,7 @@ describe("spawnSession — resolve the workspace from the repo", () => {
     fns.listFn = vi.fn().mockResolvedValue([makeRow("w7:p1", "my-task-a", "corral")]);
     fns.paneGetFn = vi.fn().mockResolvedValue({ paneId: "w7:p1", tabId: "w7:t1", workspaceId: "w7", cwd: "/repos/corral" });
     const r = await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/elsewhere", repo: "corral",
       assignedPaneIds: new Set(), repoPath: "/repos/corral", ...fns,
     });
     expect(r.idempotent).toBe(true);
@@ -452,7 +458,7 @@ describe("spawnSession — an explicit null target still creates", () => {
     const fns = baseFns();
     const strict = vi.fn().mockResolvedValue([{ workspace_id: "w7", label: "corral" }]);
     await spawnSession({
-      env: localEnv, taskSlug: "my-task", cwd: "/elsewhere", repo: "corral",
+      env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/elsewhere", repo: "corral",
       assignedPaneIds: new Set(), targetWorkspaceId: null, repoPath: "/repos/corral",
       workspaceListStrictFn: strict, ...fns,
     });

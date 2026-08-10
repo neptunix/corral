@@ -28,7 +28,7 @@ describe("spawn with a brief", () => {
   it("launches the bare command when no brief is supplied", async () => {
     const { ran, stubs } = harness();
     await spawnSession({
-      env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
+      env, taskSlug: "task", sessionName: "task-a", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
       targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", ...stubs,
     });
     expect(ran).toEqual(["claude --name task-a"]);
@@ -37,7 +37,7 @@ describe("spawn with a brief", () => {
   it("reads the brief through the pane's shell rather than inlining it", async () => {
     const { ran, stubs } = harness();
     await spawnSession({
-      env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
+      env, taskSlug: "task", sessionName: "task-a", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
       targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
     });
     expect(ran).toEqual([
@@ -53,7 +53,7 @@ describe("spawn with a brief", () => {
   it("deletes the brief in the same substitution that reads it", async () => {
     const { ran, stubs } = harness();
     await spawnSession({
-      env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
+      env, taskSlug: "task", sessionName: "task-a", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
       targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
     });
     const cmd = ran[0] ?? "";
@@ -68,7 +68,7 @@ describe("spawn with a brief", () => {
   it("substitutes a self-describing message if the brief cannot be read", async () => {
     const { ran, stubs } = harness();
     await spawnSession({
-      env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
+      env, taskSlug: "task", sessionName: "task-a", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
       targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
     });
     const cmd = ran[0] ?? "";
@@ -88,7 +88,7 @@ describe("spawn with a brief", () => {
   it("produces a single-line command for an ordinary brief path", async () => {
     const { ran, stubs } = harness();
     await spawnSession({
-      env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
+      env, taskSlug: "task", sessionName: "task-a", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
       targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md", ...stubs,
     });
     expect(ran[0]).not.toContain("\n");
@@ -97,7 +97,7 @@ describe("spawn with a brief", () => {
   it("shell-quotes a path containing a space", async () => {
     const { ran, stubs } = harness();
     await spawnSession({
-      env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
+      env, taskSlug: "task", sessionName: "task-a", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
       targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: "/data dir/briefs/abc.md", ...stubs,
     });
     expect(ran[0]).toContain("'/data dir/briefs/abc.md'");
@@ -108,7 +108,7 @@ describe("spawn with a brief", () => {
     const { ran, stubs } = harness();
     const hostile = "/data/briefs/a;b$(c)`d`e'f.md";
     await spawnSession({
-      env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
+      env, taskSlug: "task", sessionName: "task-a", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
       targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: hostile, ...stubs,
     });
     // shell-quote wraps the path in double quotes and backslash-escapes `$` and `` ` `` so the
@@ -124,7 +124,7 @@ describe("spawn with a brief", () => {
   it("uses the caller's fallback text when one is supplied", async () => {
     const { ran, stubs } = harness();
     await spawnSession({
-      env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
+      env, taskSlug: "task", sessionName: "task-a", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
       targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md",
       briefFallback: "corral could not deliver your start command.", ...stubs,
     });
@@ -135,7 +135,7 @@ describe("spawn with a brief", () => {
   it("prefers resume over a brief when both are somehow supplied", async () => {
     const { ran, stubs } = harness();
     await spawnSession({
-      env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
+      env, taskSlug: "task", sessionName: "task-a", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
       spawnCommand: "claude", repoPath: "/repo",
       resumeSessionId: "11111111-2222-3333-4444-555555555555",
       briefPath: "/data/briefs/abc123.md", ...stubs,
