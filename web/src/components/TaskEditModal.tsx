@@ -1,6 +1,6 @@
 import type { EnrichedTask, Board, Priority, SessionLink } from "@shared/board-schema";
 import type { JSX } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { SpawnEnvOption } from "./SpawnPanel";
 import { SpawnPanel } from "./SpawnPanel";
@@ -29,6 +29,14 @@ export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, on
   const [moving, setMoving] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("keydown", onKey); };
+  }, [onClose]);
+
   function handleSave(): void {
     onSave({ title: title.trim(), description, status, priority });
     onClose();
@@ -49,7 +57,7 @@ export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, on
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="bg-card border border-border rounded-lg w-[min(900px,92vw)] max-h-[80vh] flex flex-col" onClick={(e) => { e.stopPropagation(); }}>
         <h2 className="text-foreground font-semibold px-6 pt-6 pb-4">Edit task</h2>
         <div className="px-6 overflow-y-auto flex-1">

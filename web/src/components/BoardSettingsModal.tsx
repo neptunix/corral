@@ -4,7 +4,7 @@ import { CSS } from "@dnd-kit/utilities";
 import type { Board, Column, SpawnPreset } from "@shared/board-schema";
 import { ColumnTypeSchema, defaultColumnId, generateColumnId, generateSpawnPresetId } from "@shared/board-schema";
 import type { CSSProperties, JSX } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface Props {
   readonly board: Board;
@@ -85,6 +85,14 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
   const [presets, setPresets] = useState<SpawnPreset[]>([...board.spawnPresets]);
   const [defaultPresetId, setDefaultPresetId] = useState<string | null>(board.defaultSpawnPresetId);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("keydown", onKey); };
+  }, [onClose]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   // Recomputed from live modal state, so the tag follows both a drag AND a type change. Never pinned
@@ -175,7 +183,7 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="bg-card border border-border rounded-lg w-[min(560px,92vw)] max-h-[80vh] flex flex-col" onClick={(e) => { e.stopPropagation(); }}>
         <h2 className="text-foreground font-semibold px-6 pt-6 pb-4">Board settings</h2>
         <div className="px-6 overflow-y-auto flex-1">
