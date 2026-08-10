@@ -84,7 +84,7 @@ export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, on
         <input className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-3"
           value={title} onChange={(e) => { setTitle(e.target.value); }} />
 
-        <label className="block text-xs text-muted-foreground mb-1">Description (markdown)</label>
+        <label className="block text-xs text-muted-foreground mb-1">Description</label>
         <textarea rows={11} className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-3 resize-y"
           value={description} onChange={(e) => { setDescription(e.target.value); }} />
 

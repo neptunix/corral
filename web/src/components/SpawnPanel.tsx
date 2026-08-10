@@ -110,6 +110,20 @@ export function SpawnPanel({ envs, presets, defaultPresetId, hasSessions, onSpaw
     }
   }
 
+  // Only the selected-preset branch can be long (up to 2000 chars, newlines and all) — the other
+  // three are fixed single-line strings, so only this one needs clamping + a hover title.
+  const startCommandHint: JSX.Element = !commandAllowed
+    ? <p className="text-xs text-muted-foreground mt-1">Start commands are available for local environments only — your pick is kept.</p>
+    : presets.length === 0
+      ? <p className="text-xs text-muted-foreground mt-1">No start commands on this board — add them in Board settings → Start commands.</p>
+      : selectedPreset === null
+        ? <p className="text-xs text-muted-foreground mt-1">Edited in Board settings → Start commands.</p>
+        : (
+          <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap line-clamp-3" title={selectedPreset.text}>
+            {selectedPreset.text} — edited in Board settings → Start commands.
+          </p>
+        );
+
   return (
     <div className="mb-4 p-3 bg-muted rounded">
       <p className="text-xs text-muted-foreground mb-2">
@@ -193,15 +207,7 @@ export function SpawnPanel({ envs, presets, defaultPresetId, hasSessions, onSpaw
             <option key={p.id} value={p.id} title={p.text}>{p.text.split("\n")[0] ?? ""}</option>
           ))}
         </select>
-        <p className="text-xs text-muted-foreground mt-1">
-          {!commandAllowed
-            ? "Start commands are available for local environments only — your pick is kept."
-            : presets.length === 0
-              ? "No start commands on this board — add them in Board settings → Start commands."
-              : selectedPreset === null
-                ? "Edited in Board settings → Start commands."
-                : `${selectedPreset.text} — edited in Board settings → Start commands.`}
-        </p>
+        {startCommandHint}
       </div>
 
       <div className="border-t border-border my-3" />

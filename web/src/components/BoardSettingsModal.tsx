@@ -233,12 +233,14 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
           </label>
         </div>
         <button onClick={addPreset} className="px-3 py-1 mb-4 bg-muted text-foreground text-sm rounded hover:bg-muted/80">Add start command</button>
-        {saveError !== null && <p className="text-xs text-destructive mb-3">{saveError}</p>}
         </div>
-        <div className="flex justify-end gap-2 px-6 py-4 border-t border-border bg-card">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
-          <button onClick={handleSave}
-            className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90">Save</button>
+        <div className="flex items-center gap-2 px-6 py-4 border-t border-border bg-card">
+          {saveError !== null && <p className="text-xs text-destructive min-w-0 flex-1">{saveError}</p>}
+          <div className="flex gap-2 shrink-0 ml-auto">
+            <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
+            <button onClick={handleSave}
+              className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90">Save</button>
+          </div>
         </div>
       </div>
     </div>
