@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ENVIRONMENTS } from "../environments.ts";
 import { createApi } from "../server/api.ts";
 import type { Poller } from "../server/poller.ts";
-import type { SpawnResult } from "../server/spawn.ts";
+import { NAME_MAX, type SpawnResult } from "../server/spawn.ts";
 import { createStorage } from "../server/storage.ts";
 
 let tmpDir: string;
@@ -675,17 +675,50 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     expect(spawn).not.toHaveBeenCalled();
   });
 
-  it("composes the session name from the card slug and the requested name", async () => {
+  // The card slug is NOT prefixed any more. It used to take the length budget first, so truncation
+  // ate the requested name — the informative half — and it degenerated to "task" for any title
+  // without Latin characters. The agent supplies the whole {slug}-{name}.
+  it("uses the requested name as the session name, with no card prefix", async () => {
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "RC toggle UI" }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "WM stake RC toggle" }),
     });
     expect(res.status).toBe(200);
     const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
-    expect(call.sessionName).toBe("my-task-rc-toggle-ui");
+    expect(call.sessionName).toBe("wm-stake-rc-toggle");
     const body = await res.json() as { name: string };
-    expect(body.name).toBe("my-task-rc-toggle-ui"); // the STORED link name is the same string
+    expect(body.name).toBe("wm-stake-rc-toggle"); // the STORED link name is the same string
+  });
+
+  // A stored link name is not always a string this route composed — attach and from-session take it
+  // from the client — so the taken-set must be compared in slugified form. Raw, the candidate
+  // `fix-the-auth-bug` does not match the stored "Fix the auth bug" and a SECOND session gets the
+  // identical `--name` and tab label. Only reachable since the requested name stopped being prefixed
+  // with the card slug.
+  it("suffixes against a stored name that only matches once slugified", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["Fix the auth bug"]);
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "Fix the auth bug" }),
+    });
+    expect(res.status).toBe(200);
+    const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
+    expect(call.sessionName).toBe("fix-the-auth-bug-a");
+  });
+
+  // A name past the OLD 56-character bound must survive. NAME_RE hardcoded that bound as {0,55}
+  // while gating every candidate, so raising NAME_MAX alone turned every longer name into a 409.
+  it("accepts a name longer than the old 56-character bound", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
+    const long = "b".repeat(70);
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: long }),
+    });
+    expect(res.status).toBe(200);
+    const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
+    expect(call.sessionName).toBe(long);
   });
 
   it("falls back to <slug>-<letter> when no name is supplied", async () => {
@@ -698,24 +731,61 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     expect(call.sessionName).toBe("my-task-b");
   });
 
-  it("appends a letter when the composed name is already on the card", async () => {
-    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["my-task-rc-toggle-ui"]);
+  it("appends a letter when the requested name is already taken", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["rc-toggle-ui"]);
     await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "RC toggle UI" }),
     });
     const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
-    expect(call.sessionName).toBe("my-task-rc-toggle-ui-a");
+    expect(call.sessionName).toBe("rc-toggle-ui-a");
   });
 
-  it("rejects a name longer than 64 characters", async () => {
+  // The case the design exists for. `sanitizeSlug` keeps only [a-z0-9], so a title in any non-Latin
+  // script used to reduce to the sentinel "task" and every session on every such card was named
+  // task-a, task-b — indistinguishable wherever the name is actually read.
+  it("derives a name from the task id when the card title has no Latin characters", async () => {
+    const { app, spawn } = makeApiWithSpawn(tmpDir);
+    await app.request("/api/boards", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "Test" }),
+    });
+    const { id } = await (await app.request("/api/boards/test/tasks", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Починить зомби-ридер в поллере", status: "todo" }),
+    })).json() as { id: string };
+    const res = await app.request(`/api/boards/test/tasks/${id}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: "w1" }),
+    });
+    expect(res.status).toBe(200);
+    const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
+    expect(call.sessionName).not.toBe("task-a");          // the old degenerate name
+    expect(call.sessionName).toMatch(/^t-/);              // derived from the task id
+    expect(call.sessionName).toMatch(/^[a-z0-9][a-z0-9-]*$/); // and inside the launch-flag charset
+  });
+
+  it("rejects a name longer than 128 characters", async () => {
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "x".repeat(65) }),
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "x".repeat(129) }),
     });
     expect(res.status).toBe(400);
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  // The bound is on the RAW input; slugify caps the result at NAME_MAX regardless. 65 characters used
+  // to be rejected outright, which refused names the new cap is wide enough to carry.
+  it("accepts a 100-character name and caps the result at NAME_MAX", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, []);
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "x".repeat(100) }),
+    });
+    expect(res.status).toBe(200);
+    const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
+    expect(call.sessionName).toBe("x".repeat(NAME_MAX));
   });
 
   it("forwards a valid model to the spawner", async () => {
@@ -1221,9 +1291,12 @@ describe("POST resume", () => {
     expect((seen as { sessionName?: string }).sessionName).toBe(expected);
   });
 
-  // Nothing usable left → omit entirely, so spawn.ts falls back to `<slug>-a` rather than labelling the
-  // tab with an empty string.
-  it.each(["", "***", "Отладка"])("omits a stored link name with nothing usable left (%j)", async (name) => {
+  // Nothing usable left → the route derives the name from the card and PASSES it. It used to omit the
+  // field so spawn.ts could fill in `<taskSlug>-a` — a second name source the route's fallback chain
+  // could not reach, which is why a card titled without Latin characters ("Отладка" here stands for
+  // the stored name, but the same held for the title) always resumed as `task-a`. One name source now,
+  // in the route. seedTaskWithLink's card is titled "x", so the derived name is `x-a`.
+  it.each(["", "***", "Отладка"])("derives the name when the stored one has nothing usable left (%j)", async (name) => {
     let seen: unknown;
     const storage = createStorage(tmpDir);
     const app = createApi({
@@ -1244,8 +1317,9 @@ describe("POST resume", () => {
     const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/resume", { method: "POST" });
     expect(res.status).toBe(200);
     expect(seen).toBeDefined();
-    expect(Object.hasOwn(seen ?? {}, "sessionName")).toBe(false);
+    expect((seen as { sessionName?: string }).sessionName).toBe("x-a");
   });
+
 });
 
 describe("POST resume — rebinds one link by ?sid and keeps the live sibling intact", () => {

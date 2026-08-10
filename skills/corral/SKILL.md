@@ -58,10 +58,15 @@ compose the text and let this procedure carry it. Once they agree:
    worktree checkout stays visible. Pass `repo` only to send it to a *different* project: it then
    lands in that repository's workspace, at its root, and a name that is not configured for the
    target environment comes back refused with the list of ones that are.
-   Pass `name` — two to four words for what the new session will do (`rc-toggle-ui`,
-   `registry-watcher`). corral prefixes it with the card's slug and uses the result as the Claude
-   session name, the tab label and the card's label. Without it the session is named
-   `<card-slug>-<letter>`, which tells a reader nothing once a card holds several.
+   Pass `name`, and pass the WHOLE name — corral uses your string verbatim as the Claude session
+   name, the tab label and the card's label, and adds no prefix of its own. Write it as
+   `{slug}-{name}`: `{slug}` a very short label for the card, `{name}` two to four words for what the
+   new session does (`wm-stake-rc-toggle-ui`, `confluence-registry-watcher`). **Reuse the slug of your
+   own session name** when you have one, so a card's sessions cluster. Lowercase ASCII letters,
+   digits and dashes only — this becomes a command-line flag and a terminal tab label, so anything
+   else is stripped and a name in a non-Latin script reduces to nothing and counts as omitted. Keep
+   it under about 56 characters. Without a name corral derives one from the card, which tells a
+   reader far less than yours would.
 3. **Verify it arrived** — `corral_whoami` again; the new session appears in the card's session list.
    If the brief failed to deliver, the new session says so on its first turn.
 4. **`corral_session_close` last, and only if asked.** Leaving both sessions running is a valid
