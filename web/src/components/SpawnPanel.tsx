@@ -10,6 +10,7 @@ export interface SpawnEnvOption {
   readonly id: string;
   readonly label: string;
   readonly kind: "local" | "remote" | null; // null = unknown → treated as NOT local
+  readonly reachable: boolean;
 }
 
 // A three-state fetch, not a boolean: "ready" with zero spaces/repos is a settled, genuinely empty
@@ -44,11 +45,14 @@ export function SpawnPanel({ envs, presets, defaultPresetId, hasSessions, onSpaw
   const [presetId, setPresetId] = useState<string | null>(defaultPresetId);
   const selectedPreset = presets.find((p) => p.id === presetId) ?? null;
   const envKind = envs.find((e) => e.id === spawnEnv)?.kind ?? null;
+  const envReachable = envs.find((e) => e.id === spawnEnv)?.reachable ?? true;
   const commandAllowed = envKind === "local";
 
-  // Fetch spawn targets for the chosen env (unreachable env → error phase; configured repos still show
-  // once reachable). Cleared to "loading" IMMEDIATELY on env change, so a space belonging to the
-  // previous env is never briefly selectable and the misconfiguration text cannot render over an
+  // Fetch spawn targets for the chosen env. The targets request itself CATCHES an unreachable env
+  // (server/api.ts) and still returns 200 with the configured repos, so "error" phase here means the
+  // request itself failed (network/parse), not that the env is down — reachability is a separate
+  // signal read from `envs` below. Cleared to "loading" IMMEDIATELY on env change, so a space belonging
+  // to the previous env is never briefly selectable and the misconfiguration text cannot render over an
   // in-flight fetch.
   useEffect(() => {
     let cancelled = false;
@@ -145,9 +149,12 @@ export function SpawnPanel({ envs, presets, defaultPresetId, hasSessions, onSpaw
             <p className="text-xs text-muted-foreground mt-1">Loading targets…</p>
           )}
           {targets.phase === "error" && (
-            <p className="text-xs text-destructive mt-1">Could not reach this environment — {targets.message}</p>
+            <p className="text-xs text-destructive mt-1">Could not load spawn targets — {targets.message}</p>
           )}
-          {noTargets && (
+          {!envReachable && (
+            <p className="text-xs text-destructive mt-1">corral cannot reach this environment right now, so its spaces are not listed.</p>
+          )}
+          {noTargets && envReachable && (
             <p className="text-xs text-muted-foreground mt-1">No spaces or configured repos for this env — add repos to its <span className="font-mono">environments.json</span> entry, or create a space in herdr.</p>
           )}
         </div>

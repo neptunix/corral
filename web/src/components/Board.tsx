@@ -255,7 +255,7 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
         <TaskEditModal
           task={editingTask}
           board={board}
-          envs={Object.entries(envs).map(([id, e]) => ({ id, label: e.label ?? id, kind: e.kind ?? null }))}
+          envs={Object.entries(envs).map(([id, e]) => ({ id, label: e.label ?? id, kind: e.kind ?? null, reachable: e.reachable }))}
           onSave={handleSave}
           onDelete={handleDelete}
           onSpawn={async (body) => {
