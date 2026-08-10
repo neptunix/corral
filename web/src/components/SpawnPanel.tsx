@@ -195,7 +195,11 @@ export function SpawnPanel({ envs, presets, defaultPresetId, hasSessions, onSpaw
         <label className="block text-xs text-muted-foreground mb-1">Start command</label>
         <select
           className="w-full bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
-          value={presetId ?? ""}
+          // Bound to the RESOLVED preset, not the raw presetId: if the board's presets change under an
+          // open modal and presetId now points at nothing, selectedPreset is null and this falls back
+          // to "" ("no command") — a value that always has a matching <option> — instead of a stale id
+          // matching none, which renders the control blank while the hint and handleSpawn disagree.
+          value={selectedPreset?.id ?? ""}
           disabled={!commandAllowed}
           onChange={(e) => { setPresetId(e.target.value === "" ? null : e.target.value); }}
         >
