@@ -63,6 +63,8 @@ describe("POST spawn with a startCommand", () => {
       body: JSON.stringify({ env: "work-local", repo: "repo", brief: "hi", startCommand: "/plan" }),
     });
     expect(res.status).toBe(400);
+    const err = await res.json() as { error: { message: string } };
+    expect(err.error.message).toContain("not both");
     expect(seen).toHaveLength(0);
   });
 
@@ -109,6 +111,8 @@ describe("POST spawn with a startCommand", () => {
       body: JSON.stringify({ env: "work-remote", repo: "repo", startCommand: "/plan" }),
     });
     expect(res.status).toBe(400);
+    const err = await res.json() as { error: { code: string } };
+    expect(err.error.code).toBe("remote_brief_unsupported");
     expect(seen).toHaveLength(0);
   });
 

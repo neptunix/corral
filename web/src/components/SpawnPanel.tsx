@@ -42,6 +42,8 @@ export function SpawnPanel({ envs, presets, defaultPresetId, hasSessions, onSpaw
   const [targets, setTargets] = useState<TargetsState>({ phase: "loading" });
   const [selectedTarget, setSelectedTarget] = useState<string>(""); // a workspaceId (join) or "new:<repo>" (create)
   const [spawnError, setSpawnError] = useState<string | null>(null);
+  // Deliberately NOT reset when spawnEnv changes — buildSpawnRequest already drops it for a non-local
+  // env, so the operator's pick survives switching away and back rather than being lost.
   const [presetId, setPresetId] = useState<string | null>(defaultPresetId);
   const selectedPreset = presets.find((p) => p.id === presetId) ?? null;
   const envKind = envs.find((e) => e.id === spawnEnv)?.kind ?? null;

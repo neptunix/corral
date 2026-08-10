@@ -2058,4 +2058,17 @@ describe("PATCH /api/boards/:bid — start-command presets", () => {
     expect(board.spawnPresets[0]?.text).toBe("/plan the migration");
     expect(board.defaultSpawnPresetId).toBe("p1");
   });
+
+  it("drops a default left dangling by a later patch that never mentions it", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    await patch(app, {
+      spawnPresets: [{ id: "p1", text: "/plan" }, { id: "p2", text: "/review" }],
+      defaultSpawnPresetId: "p2",
+    });
+    // No defaultSpawnPresetId key at all — the stored "p2" would otherwise dangle once p2 is dropped.
+    await patch(app, { spawnPresets: [{ id: "p1", text: "/plan" }] });
+    const board = await (await app.request("/api/boards/presets")).json() as { defaultSpawnPresetId: string | null };
+    expect(board.defaultSpawnPresetId).toBeNull();
+  });
 });

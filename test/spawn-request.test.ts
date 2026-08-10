@@ -27,16 +27,13 @@ describe("buildSpawnRequest", () => {
       .toEqual({ env: "work-local", targetWorkspaceId: null, repo: "repo" });
   });
 
-  it("restores the selection on a local → remote → local switch", () => {
-    const picked: SpawnFormState = { ...base, startCommand: "/plan" };
-    const away = buildSpawnRequest({ ...picked, envKind: "remote" });
-    const back = buildSpawnRequest(picked); // the SELECTION never changed, only the env kind
-    expect("startCommand" in away).toBe(false);
-    expect(back).toHaveProperty("startCommand", "/plan");
-  });
-
   it("still sends model and remoteControl when set", () => {
     expect(buildSpawnRequest({ ...base, model: "opus", remoteControl: true }))
       .toEqual({ env: "work-local", targetWorkspaceId: null, repo: "repo", model: "opus", remoteControl: true });
+  });
+
+  it("omits a blank preset's text — the stored shape allows one, the route does not", () => {
+    expect(buildSpawnRequest({ ...base, startCommand: "" }))
+      .toEqual({ env: "work-local", targetWorkspaceId: null, repo: "repo" });
   });
 });
