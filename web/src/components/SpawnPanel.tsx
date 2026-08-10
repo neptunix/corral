@@ -130,7 +130,7 @@ export function SpawnPanel({ envs, presets, defaultPresetId, hasSessions, onSpaw
         {hasSessions ? "Spawn another session" : "Spawn a new session"}
       </p>
 
-      <div className="flex gap-3 mb-1">
+      <div className="flex flex-wrap gap-3 mb-1">
         <div className="shrink-0 w-[200px]">
           <label className="block text-xs text-muted-foreground mb-1">Environment</label>
           <select
@@ -142,7 +142,7 @@ export function SpawnPanel({ envs, presets, defaultPresetId, hasSessions, onSpaw
           </select>
         </div>
 
-        <div className="flex-1 min-w-0">
+        <div className="grow basis-[220px] min-w-0">
           <label className="block text-xs text-muted-foreground mb-1">Where it runs</label>
           <select
             className="w-full bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
