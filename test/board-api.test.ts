@@ -2099,6 +2099,24 @@ describe("PATCH /api/boards/:bid — start-command presets", () => {
     expect((await patch(app, { spawnPresets: [{ id: "p1", text: "--continue" }] })).status).toBe(400);
   });
 
+  // The whitelist is narrower than the flag hazard it is named for, so it refuses plenty of text that
+  // is nothing like a flag. That is the accepted trade, and it is pinned here BECAUSE it surprises:
+  // without this, the next reader meets the refusal as a bug report and widens the rule by accident.
+  it("also refuses openings that are no flag at all — non-Latin, '#', '@' — and says what IS accepted", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    for (const text of ["Продолжи работу", "「開始」", "#tag first", "@docs/spec.md review"]) {
+      expect((await patch(app, { spawnPresets: [{ id: "p1", text }] })).status).toBe(400);
+    }
+    const res = await patch(app, { spawnPresets: [{ id: "p1", text: "Продолжи работу" }] });
+    const body = await res.json() as { error: { message: string } };
+    // The refusal names the accepted format. (PATCH passes Zod's own message through, so the quotes
+    // around "/" arrive JSON-escaped — match the part that carries the meaning.)
+    expect(body.error.message).toContain("or an ASCII letter or digit");
+    // Prefixing with a slash command is the way through — the rule is about the FIRST character only.
+    expect((await patch(app, { spawnPresets: [{ id: "p1", text: "/plan Продолжи работу" }] })).status).toBe(200);
+  });
+
   it("rejects blank, over-long, over-count and duplicate-id preset lists", async () => {
     const app = makeApi(tmpDir);
     await makeBoard(app);

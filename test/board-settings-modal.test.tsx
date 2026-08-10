@@ -83,6 +83,61 @@ describe("BoardSettingsModal — save error channel", () => {
   });
 });
 
+// The prop's own patch shape — not exported by the component, and the mock has to carry it or
+// `onSave.mock.calls` types as an empty tuple and the assertions below have nothing to read.
+type SavePatch = Parameters<React.ComponentProps<typeof BoardSettingsModal>["onSave"]>[0];
+
+describe("BoardSettingsModal — start-command rows", () => {
+  it("drops rows left blank rather than sending them into the server's min(1) refusal", async () => {
+    const onSave = vi.fn((_patch: SavePatch) => Promise.resolve());
+    render(<BoardSettingsModal board={makeBoard()} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+
+    // Two rows the operator abandoned: one untouched, one holding only whitespace. "Add start command"
+    // is the ordinary way to get them — the row appears empty and there is no way to un-add it but ×.
+    fireEvent.click(screen.getByRole("button", { name: "Add start command" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add start command" }));
+    const rows = screen.getAllByPlaceholderText("/plan");
+    expect(rows).toHaveLength(3);
+    fireEvent.change(rows[2]!, { target: { value: "   " } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => { expect(onSave).toHaveBeenCalledTimes(1); });
+    expect(onSave.mock.calls[0]?.[0].spawnPresets).toEqual([{ id: "p1", text: "/plan" }]);
+  });
+
+  // The rule is a narrow whitelist, so most of what it refuses is nothing like a flag. The refusal the
+  // operator reads has to name the accepted format instead of asserting a cause that isn't true of the
+  // text in front of them — that mis-explanation is what sent a reviewer looking for a bug here.
+  it("refuses a non-Latin opening by naming the accepted format, not by calling the text a flag", () => {
+    const onSave = vi.fn((_patch: SavePatch) => Promise.resolve());
+    render(<BoardSettingsModal board={makeBoard()} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByDisplayValue("/plan"), { target: { value: "Продолжи работу" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByText(/must begin with "\/" or an ASCII letter or digit/)).toBeDefined();
+    expect(screen.queryByText(/would reach the CLI as a flag, not as the prompt/)).toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("clears a default that pointed at a row dropped for being blank", async () => {
+    const onSave = vi.fn((_patch: SavePatch) => Promise.resolve());
+    render(<BoardSettingsModal board={makeBoard()} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add start command" }));
+    // Radios in order: the existing "/plan" row, the blank row just added, then "no default command".
+    fireEvent.click(screen.getAllByRole("radio")[1]!);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => { expect(onSave).toHaveBeenCalledTimes(1); });
+    // A default id that survived into the patch would dangle: the server resolves it to null anyway,
+    // so disagreeing here would just make the saved board differ from what the form showed.
+    expect(onSave.mock.calls[0]?.[0].defaultSpawnPresetId).toBeNull();
+  });
+});
+
 describe("BoardSettingsModal — delete board", () => {
   it("disables Delete with a visible reason when the board still has tasks", () => {
     const board = makeBoard({ tasks: [makeTask()] });

@@ -155,9 +155,18 @@ const CreateBoardBodySchema = z.object({
 // argv word for `claude`, and quoting protects that word from the SHELL, not from Claude Code's
 // argument parser. A preset starting with `-` is read as an option, never as the prompt. Same rule,
 // same reason, as the `model` field on the spawn route.
+//
+// The whitelist is deliberately NARROWER than that hazard: only `/` and ASCII alphanumerics pass, so a
+// command opening with a non-Latin letter, `#` or `@` is refused too. That is a decision, not an
+// oversight — do not widen it to a `-` blacklist without re-taking it. The message says what IS
+// accepted, because a refusal that only names the flag hazard reads as a bug for every input that is
+// not a flag.
+const START_COMMAND_FIRST_CHAR = /^[/A-Za-z0-9]/;
+const START_COMMAND_FIRST_CHAR_MESSAGE =
+  'must begin with "/" or an ASCII letter or digit — the first character is restricted so a leading "-" cannot reach the CLI as a flag';
 const SpawnPresetPatchSchema = z.object({
   id: z.string().min(1),
-  text: z.string().trim().min(1).max(2000).regex(/^[/A-Za-z0-9]/),
+  text: z.string().trim().min(1).max(2000).regex(START_COMMAND_FIRST_CHAR, START_COMMAND_FIRST_CHAR_MESSAGE),
 });
 
 const PatchBoardBodySchema = z.object({
@@ -1001,8 +1010,11 @@ export function createApi(opts: {
       // Mutually exclusive with `brief`: MCP and the UI share this route, and this is what tells them
       // apart, so an MCP caller cannot accidentally drop the preamble. The leading-character rule is
       // the same flag hazard the `model` field guards against — this text becomes one positional argv
-      // word for `claude`, and quoting protects it from the shell, not from the argument parser.
-      startCommand: z.string().trim().min(1).max(2000).regex(/^[/A-Za-z0-9]/).optional(),
+      // word for `claude`, and quoting protects it from the shell, not from the argument parser. Same
+      // constant as the preset boundary, deliberately narrower than the hazard (see it for why); this
+      // route reports every bad field as a bare `invalid "<field>"`, and a preset that reaches here has
+      // already been through the readable refusal at PATCH.
+      startCommand: z.string().trim().min(1).max(2000).regex(START_COMMAND_FIRST_CHAR).optional(),
       // Short slug for what THIS session does; composed with the card slug into the one string used
       // as the herdr tab label, the card's link name and `claude --name`.
       name: z.string().max(64).optional(),

@@ -195,10 +195,12 @@ export function SpawnPanel({ envs, presets, defaultPresetId, hasSessions, onSpaw
         <label className="block text-xs text-muted-foreground mb-1">Start command</label>
         <select
           className="w-full bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
-          // Bound to the RESOLVED preset, not the raw presetId: if the board's presets change under an
-          // open modal and presetId now points at nothing, selectedPreset is null and this falls back
-          // to "" ("no command") — a value that always has a matching <option> — instead of a stale id
-          // matching none, which renders the control blank while the hint and handleSpawn disagree.
+          // Bound to the RESOLVED preset, not the raw presetId, so the bound value is always one of the
+          // options below. Belt-and-braces, NOT a rendering fix: react-dom selects the first
+          // non-disabled option when a controlled value matches none, so a stale id would display as
+          // "no command" either way, and both the hint and handleSpawn already read `selectedPreset`.
+          // What keeps the three surfaces honest is that single source — and that "no command" stays
+          // the FIRST option, since react-dom's fallback is positional (test/spawn-panel.test.tsx).
           value={selectedPreset?.id ?? ""}
           disabled={!commandAllowed}
           onChange={(e) => { setPresetId(e.target.value === "" ? null : e.target.value); }}

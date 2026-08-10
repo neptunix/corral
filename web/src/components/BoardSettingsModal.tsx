@@ -170,9 +170,12 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
     if (label.trim() === "") { setSaveError("A board needs a name."); return; }
     // Blank rows are dropped rather than rejected: an empty row is "I changed my mind", not an error.
     const kept = presets.filter((p) => p.text.trim() !== "").map((p) => ({ ...p, text: p.text.trim() }));
+    // Says what the accepted format IS, and does not claim the offending text is a flag: the rule is a
+    // narrow whitelist (`/` + ASCII alphanumerics), so it also refuses non-Latin, "#" and "@" openings
+    // that are nothing like a flag. Mirrors the server's wording (server/api.ts).
     const bad = kept.find((p) => !/^[/A-Za-z0-9]/.test(p.text));
     if (bad !== undefined) {
-      setSaveError(`A start command must begin with "/" or a letter or digit — "${bad.text.slice(0, 24)}" would reach the CLI as a flag, not as the prompt.`);
+      setSaveError(`A start command must begin with "/" or an ASCII letter or digit — "${bad.text.slice(0, 24)}" does not. The first character is restricted so a leading "-" cannot reach the CLI as a flag.`);
       return;
     }
     const tooLong = kept.find((p) => p.text.length > 2000);

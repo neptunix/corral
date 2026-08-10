@@ -24,7 +24,13 @@ function getStartCommandSelect(): HTMLSelectElement {
 }
 
 describe("SpawnPanel — start-command preset select", () => {
-  it("does not render a value absent from its options when the board's presets change under it", () => {
+  // What this pins is NOT the `value={selectedPreset?.id ?? ""}` binding: react-dom selects the first
+  // non-disabled option whenever a controlled value matches none, so the raw-presetId binding renders
+  // identically and no assertion here can tell the two apart. The load-bearing fact is that react-dom's
+  // fallback is POSITIONAL — it lands on whatever option comes first. "no command" must therefore stay
+  // first, and must mean "send nothing": promote a preset above it (or drop it) and a vanished default
+  // silently becomes a real command the operator never picked, on a control that looks correctly filled.
+  it("falls back to a first option that means 'no command' when the board's presets change under it", () => {
     const { rerender } = render(
       <SpawnPanel envs={envs} presets={[{ id: "p1", text: "/plan" }]} defaultPresetId="p1" hasSessions={false} onSpawn={vi.fn()} onSpawned={vi.fn()} />,
     );
@@ -36,8 +42,7 @@ describe("SpawnPanel — start-command preset select", () => {
     );
 
     const select = getStartCommandSelect();
-    // A stale value with no matching <option> leaves nothing selected — the visible bug. The fixed
-    // control must fall back to an option that actually exists ("no command"), not render blank.
+    expect(select.options[0]?.value).toBe(""); // the fallback react-dom will land on
     expect(select.selectedOptions).toHaveLength(1);
     expect(select.selectedOptions[0]?.textContent).toBe("no command");
     expect(select.value).toBe("");
