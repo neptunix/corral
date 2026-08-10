@@ -54,18 +54,22 @@ describe("BoardSettingsModal — save error channel", () => {
     expect(screen.getByDisplayValue("/replan")).toBeDefined();
   });
 
-  it("a successful save closes the modal only after the caller's onSave promise (board refresh) resolves", async () => {
+  it("waits for the onSave promise it was given to resolve before closing — never closes eagerly", async () => {
     const order: string[] = [];
-    const onSave = vi.fn(() => Promise.resolve().then(() => { order.push("refresh"); }));
+    const onSave = vi.fn(() => Promise.resolve().then(() => { order.push("resolved"); }));
     const onClose = vi.fn(() => { order.push("close"); });
     render(<BoardSettingsModal board={makeBoard()} onSave={onSave} onDelete={vi.fn()} onClose={onClose} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => { expect(onClose).toHaveBeenCalledTimes(1); });
-    // Not a bare "both were called" check: closing before the refresh promise settles is exactly the
-    // bug (App.tsx's old fire-and-forget onSave), so the ORDER is the thing under test.
-    expect(order).toEqual(["refresh", "close"]);
+    // Not a bare "both were called" check: closing before the onSave promise settles is exactly the
+    // historical bug (App.tsx's old fire-and-forget onSave, pre-f423d54), so the ORDER is the thing
+    // under test. This guards the MODAL's own contract only — App.tsx's current onSave chains a
+    // refreshBoards() call that is itself fire-and-forget for the list()/state() refetch, so a real
+    // save still closes the modal before that refetch completes. Do not read this test as proof the
+    // board list is fully refreshed by the time the modal closes.
+    expect(order).toEqual(["resolved", "close"]);
   });
 
   it("disables the Save button while the save is in flight", () => {
@@ -175,13 +179,15 @@ describe("BoardSettingsModal — dismissal guarded while in flight", () => {
 
 describe("BoardSettingsModal — footer layout under a long disabled-reason plus a saveError", () => {
   // jsdom does not compute real geometry, so this cannot see the actual zero-width collapse or the
-  // painted overlap. It instead guards the DOM-level mechanism that produced it: a saveError sharing
-  // a flex row with a `shrink-0` sibling (which is what let the sibling starve saveError's `flex-1`
-  // box to zero width), and saveError being nested inside the Cancel/Save button group.
-  it("keeps the saveError text out of the Cancel/Save button group and off a flex row with a shrink-0 sibling", async () => {
+  // painted overlap. It guards the two DOM preconditions that produced it instead: the footer renders
+  // as a COLUMN (so saveError's row never shares space with the actions row), and saveError is not
+  // nested anywhere inside that actions row — not just its innermost Cancel/Save group. The footer
+  // handle is found structurally (the card's last child), independent of where saveError or the
+  // actions row end up, so relocating either one cannot make the handle follow the bug.
+  it("keeps the footer column-stacked and saveError out of the actions row", async () => {
     const board = makeBoard({ tasks: [makeTask(), makeTask({ id: "t2" })] });
     const onSave = vi.fn(() => Promise.reject(new Error("Boards service unavailable")));
-    render(<BoardSettingsModal board={board} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+    const { container } = render(<BoardSettingsModal board={board} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
 
     // The long disabled-reason is present (board has tasks).
     expect(screen.getByText(/available only for an empty board \(2 tasks\)/i)).toBeDefined();
@@ -189,20 +195,24 @@ describe("BoardSettingsModal — footer layout under a long disabled-reason plus
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     const errorEl = await waitFor(() => screen.getByText("Boards service unavailable"));
 
-    const saveButton = screen.getByRole("button", { name: "Save" });
-    const actionsGroup = saveButton.parentElement;
-    expect(actionsGroup).not.toBeNull();
-    if (actionsGroup !== null) {
-      expect(actionsGroup.contains(errorEl)).toBe(false);
-    }
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    if (dialog === null) return;
+    const card = dialog.firstElementChild;
+    expect(card).not.toBeNull();
+    if (card === null) return;
+    const footer = card.lastElementChild;
+    expect(footer).not.toBeNull();
+    if (footer === null) return;
 
-    const errorParent = errorEl.parentElement;
-    expect(errorParent).not.toBeNull();
-    if (errorParent !== null) {
-      const shrinkSiblings = Array.from(errorParent.children).filter(
-        (el) => el !== errorEl && el.className.includes("shrink-0"),
-      );
-      expect(shrinkSiblings).toHaveLength(0);
-    }
+    expect(footer.contains(errorEl)).toBe(true);
+    expect(footer.className).toMatch(/\bflex-col\b/);
+
+    // Walk up from Save to whichever of the footer's direct children carries it — the actions row.
+    const saveButton = screen.getByRole("button", { name: "Save" });
+    let node: Element | null = saveButton;
+    while (node !== null && node.parentElement !== footer) node = node.parentElement;
+    expect(node).not.toBeNull();
+    if (node !== null) expect(node.contains(errorEl)).toBe(false);
   });
 });
