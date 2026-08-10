@@ -99,12 +99,14 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
   const taskCount = board.tasks.length;
 
   useEffect(() => {
+    // A save or delete in flight must not let a dismissal race its refusal — landing on an unmounted
+    // modal would drop the server's message and the user's edits with no sign the save failed.
     function onKey(e: KeyboardEvent): void {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !saving && !deleting) onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("keydown", onKey); };
-  }, [onClose]);
+  }, [onClose, saving, deleting]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   // Recomputed from live modal state, so the tag follows both a drag AND a type change. Never pinned
@@ -215,7 +217,8 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" role="dialog" aria-modal="true" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" role="dialog" aria-modal="true"
+      onClick={() => { if (!saving && !deleting) onClose(); }}>
       <div className="bg-card border border-border rounded-lg w-[min(560px,92vw)] max-h-[80vh] flex flex-col" onClick={(e) => { e.stopPropagation(); }}>
         <h2 className="text-foreground font-semibold px-6 pt-6 pb-4">Board settings</h2>
         <div className="px-6 overflow-y-auto flex-1">
@@ -307,7 +310,8 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
               </div>
             )}
             <div className="flex gap-2 ml-auto">
-              <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
+              <button onClick={onClose} disabled={saving || deleting}
+                className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50">Cancel</button>
               <button onClick={() => { void handleSave(); }} disabled={saving || deleting}
                 className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90 disabled:opacity-50">Save</button>
             </div>

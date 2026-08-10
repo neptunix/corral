@@ -126,6 +126,53 @@ describe("BoardSettingsModal — delete board", () => {
   });
 });
 
+describe("BoardSettingsModal — dismissal guarded while in flight", () => {
+  it("Escape does not close the modal while a save is in flight", () => {
+    const onSave = vi.fn(() => new Promise<void>(() => { /* never settles for this assertion */ }));
+    const onClose = vi.fn();
+    render(<BoardSettingsModal board={makeBoard()} onSave={onSave} onDelete={vi.fn()} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("Escape does not close the modal while a delete is in flight", () => {
+    const onDelete = vi.fn(() => new Promise<void>(() => { /* never settles for this assertion */ }));
+    const onClose = vi.fn();
+    render(<BoardSettingsModal board={makeBoard()} onSave={vi.fn()} onDelete={onDelete} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete board" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("clicking the overlay does not close the modal while a save is in flight", () => {
+    const onSave = vi.fn(() => new Promise<void>(() => { /* never settles for this assertion */ }));
+    const onClose = vi.fn();
+    const { container } = render(<BoardSettingsModal board={makeBoard()} onSave={onSave} onDelete={vi.fn()} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const overlay = container.querySelector('[role="dialog"]');
+    expect(overlay).not.toBeNull();
+    if (overlay !== null) fireEvent.click(overlay);
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("disables the Cancel button while a save is in flight", () => {
+    const onSave = vi.fn(() => new Promise<void>(() => { /* never settles for this assertion */ }));
+    render(<BoardSettingsModal board={makeBoard()} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
+  });
+});
+
 describe("BoardSettingsModal — footer layout under a long disabled-reason plus a saveError", () => {
   // jsdom does not compute real geometry, so this cannot see the actual zero-width collapse or the
   // painted overlap. It instead guards the DOM-level mechanism that produced it: a saveError sharing
