@@ -83,6 +83,24 @@ describe("createPoller", () => {
     expect(snap.sessions.some((s) => s.paneId === "b-1")).toBe(true);
   });
 
+  it("orders snapshot envs by config, not by which env answered first", async () => {
+    const list: ListFn = (e) => Promise.resolve([row(e.id, `${e.id}-1`)]);
+    // Config order is [B, A] — deliberately NOT alphabetical, and polled in the opposite order, so
+    // this fails both for insertion order (what concurrent polls give) and for a sorted key list.
+    // Config order is the load-bearing one: the UI reads Object.keys(envs) and defaults to [0].
+    const p = createPoller({ envs: [B, A], list });
+    await p.refreshEnv("a");
+    await p.refreshEnv("b");
+    expect(Object.keys(p.getSnapshot().envs)).toEqual(["b", "a"]);
+  });
+
+  it("omits envs that have not been polled yet", async () => {
+    const list: ListFn = (e) => Promise.resolve([row(e.id, `${e.id}-1`)]);
+    const p = createPoller({ envs: [A, B], list });
+    await p.refreshEnv("b");
+    expect(Object.keys(p.getSnapshot().envs)).toEqual(["b"]);
+  });
+
   it("notifies subscribers on each poll", async () => {
     const list: ListFn = (e) => Promise.resolve([row(e.id, `${e.id}-1`)]);
     const p = createPoller({ envs: [A], list });
