@@ -176,6 +176,16 @@ export function App(): JSX.Element {
     setShowUnassigned(false);
   }
 
+  // Rejects on a server refusal (e.g. board_not_empty) so BoardSettingsModal's own catch keeps the
+  // modal open and shows it — this function only runs on a CONFIRMED delete. Moves the user off the
+  // deleted board onto whatever remains, or the empty state if it was the last one.
+  async function handleDeleteBoard(boardId: string): Promise<void> {
+    await api.boards.delete(boardId);
+    const remaining = boards.filter((b) => b.id !== boardId);
+    setBoards(remaining);
+    if (activeBoardId === boardId) setActiveBoardId(remaining[0]?.id ?? null);
+  }
+
   async function handleCreateTask(boardId: string, title: string, session: SessionRow, sessionName: string | null): Promise<void> {
     try {
       await api.tasks.fromSession(boardId, {
@@ -318,6 +328,7 @@ export function App(): JSX.Element {
         <BoardSettingsModal
           board={activeBoardState.board}
           onSave={(patch) => api.boards.update(activeBoardId, patch).then(() => { refreshBoards(); })}
+          onDelete={() => handleDeleteBoard(activeBoardId)}
           onClose={() => { setShowSettings(false); }}
         />
       )}

@@ -11,6 +11,9 @@ interface Props {
   // Returns a promise that REJECTS on a refused save, so handleSave can keep the modal open and
   // show the server's message instead of closing on a failure it never saw.
   readonly onSave: (patch: { label?: string; columns?: Column[]; spawnPresets?: SpawnPreset[]; defaultSpawnPresetId?: string | null }) => Promise<void>;
+  // Same reject-on-refusal contract as onSave — a board_not_empty refusal (e.g. a task landed on the
+  // board from another tab after this modal opened) surfaces through the same saveError channel.
+  readonly onDelete: () => Promise<void>;
   readonly onClose: () => void;
 }
 
@@ -80,7 +83,7 @@ function SortableColumnRow({ col, isLanding, skipsClosedAbove, canRemove, onRena
   );
 }
 
-export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Element {
+export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props): JSX.Element {
   const [label, setLabel] = useState(board.label);
   const [columns, setColumns] = useState<Column[]>([...board.columns]);
   const [newColLabel, setNewColLabel] = useState("");
@@ -88,6 +91,12 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
   const [defaultPresetId, setDefaultPresetId] = useState<string | null>(board.defaultSpawnPresetId);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  // Delete is a hard safety rule (empty board only), read from the board AS PASSED IN — not refetched —
+  // so this can go stale if a task lands on the board from another tab; the server is the real guard,
+  // this disables the happy path only.
+  const taskCount = board.tasks.length;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
@@ -192,6 +201,19 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
     }
   }
 
+  async function handleDelete(): Promise<void> {
+    setSaveError(null);
+    setDeleting(true);
+    try {
+      await onDelete();
+      onClose();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" role="dialog" aria-modal="true" onClick={onClose}>
       <div className="bg-card border border-border rounded-lg w-[min(560px,92vw)] max-h-[80vh] flex flex-col" onClick={(e) => { e.stopPropagation(); }}>
@@ -253,10 +275,33 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
         <button onClick={addPreset} className="px-3 py-1 mb-4 bg-muted text-foreground text-sm rounded hover:bg-muted/80">Add start command</button>
         </div>
         <div className="flex items-center gap-2 px-6 py-4 border-t border-border bg-card">
+          {confirmDelete ? (
+            <div className="flex gap-2 items-center shrink-0">
+              <span className="text-xs text-destructive">Delete this board?</span>
+              <button onClick={() => { void handleDelete(); }} disabled={deleting}
+                className="px-3 py-1.5 bg-destructive text-destructive-foreground text-xs rounded disabled:opacity-50">Confirm</button>
+              <button onClick={() => { setConfirmDelete(false); }} disabled={deleting}
+                className="px-3 py-1.5 text-xs text-muted-foreground">Cancel</button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 shrink-0 min-w-0">
+              {/* Disabled-with-a-reason, not hidden — a board with tasks teaches the operator nothing
+                  if the control just isn't there. The count is the server's own not-empty rule. */}
+              <button onClick={() => { setConfirmDelete(true); }} disabled={taskCount > 0 || deleting}
+                className="text-xs text-destructive hover:text-destructive/80 disabled:opacity-50 disabled:hover:text-destructive">
+                Delete board
+              </button>
+              {taskCount > 0 && (
+                <span className="text-[11px] text-muted-foreground">
+                  Delete is available only for an empty board ({String(taskCount)} task{taskCount === 1 ? "" : "s"})
+                </span>
+              )}
+            </div>
+          )}
           {saveError !== null && <p className="text-xs text-destructive min-w-0 flex-1">{saveError}</p>}
           <div className="flex gap-2 shrink-0 ml-auto">
             <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
-            <button onClick={() => { void handleSave(); }} disabled={saving}
+            <button onClick={() => { void handleSave(); }} disabled={saving || deleting}
               className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90 disabled:opacity-50">Save</button>
           </div>
         </div>

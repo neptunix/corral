@@ -102,6 +102,42 @@ describe("PATCH /api/boards/:bid — column type", () => {
   });
 });
 
+describe("DELETE /api/boards/:bid", () => {
+  it("refuses to delete a board that still holds tasks, and the board survives", async () => {
+    const app = makeApi(tmpDir);
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
+    await app.request("/api/boards/test/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "T1", status: "todo" }) });
+    const res = await app.request("/api/boards/test", { method: "DELETE" });
+    expect(res.status).toBe(409);
+    const body = await res.json() as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("board_not_empty");
+    // Asserts the MESSAGE, not just the code — mirrors the session_cap precedent above: the count is
+    // the part a bare status/code can't prove, and it's what tells the operator what to do next.
+    expect(body.error.message).toContain("1 task");
+    const stillThere = await app.request("/api/boards/test");
+    expect(stillThere.status).toBe(200);
+  });
+
+  it("deletes an empty board", async () => {
+    const app = makeApi(tmpDir);
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
+    const res = await app.request("/api/boards/test", { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean };
+    expect(body.ok).toBe(true);
+    const gone = await app.request("/api/boards/test");
+    expect(gone.status).toBe(404);
+  });
+
+  it("404s deleting a board that doesn't exist", async () => {
+    const app = makeApi(tmpDir);
+    const res = await app.request("/api/boards/nope", { method: "DELETE" });
+    expect(res.status).toBe(404);
+    const body = await res.json() as { error: { code: string } };
+    expect(body.error.code).toBe("not_found");
+  });
+});
+
 describe("POST + GET /api/boards/:bid/tasks", () => {
   it("creates a task and retrieves it via board state", async () => {
     const app = makeApi(tmpDir);

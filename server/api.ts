@@ -597,15 +597,29 @@ export function createApi(opts: {
     return c.json(result);
   });
 
+  // Deletion is refused while the board still holds tasks — read-and-decide inside the SAME withBoard
+  // callback (not a read-then-delete pair) so a concurrent task create/attach between the check and the
+  // write can't race past the guard.
   app.delete("/api/boards/:bid", async (c) => {
     if (opts.storage === undefined) return c.json({ error: { code: "no_storage" } }, 503);
     const bid = c.req.param("bid");
     if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
-    const existed = await opts.storage.withBoard(bid, (existing) => ({
-      board: null,
-      result: existing !== null,
-    }));
-    if (!existed) return c.json({ error: { code: "not_found" } }, 404);
+    type DeleteResult = "not_found" | "ok" | { readonly taskCount: number };
+    const result = await opts.storage.withBoard<DeleteResult>(bid, (existing) => {
+      if (existing === null) return { board: null, result: "not_found" };
+      if (existing.tasks.length > 0) return { board: existing, result: { taskCount: existing.tasks.length } };
+      return { board: null, result: "ok" };
+    });
+    if (result === "not_found") return c.json({ error: { code: "not_found" } }, 404);
+    if (result !== "ok") {
+      const { taskCount } = result;
+      return c.json({
+        error: {
+          code: "board_not_empty",
+          message: `Board has ${String(taskCount)} task${taskCount === 1 ? "" : "s"} — delete or move them first.`,
+        },
+      }, 409);
+    }
     return c.json({ ok: true });
   });
 
