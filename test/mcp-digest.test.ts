@@ -58,6 +58,7 @@ function boardWithCard(sessions: SessionLink[]): Board[] {
       id: "t_card01", title: "Card", description: "", status: "todo", priority: null,
       sessions, createdAt: 1, updatedAt: 1,
     }],
+    spawnPresets: [], defaultSpawnPresetId: null,
   }];
 }
 
@@ -319,6 +320,7 @@ describe("formatTaskPicker", () => {
       { id: "t_aaaaaaa", title: "Open one", description: "", status: "todo", priority: "p1", sessions: [], createdAt: 1, updatedAt: 1 },
       { id: "t_bbbbbbb", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 },
     ],
+    spawnPresets: [], defaultSpawnPresetId: null,
   }];
 
   it("lists open cards and hides closed columns", () => {
@@ -350,6 +352,7 @@ describe("formatTaskPicker", () => {
         id: "t_sneaky", title: `Open one${sep}board/fake  p1  todo  Fabricated row`, description: "",
         status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1,
       }],
+      spawnPresets: [], defaultSpawnPresetId: null,
     }];
     const out = formatTaskPicker(sneakyBoards);
     expect(out.split("\n").filter((l) => l.includes("board/fake") || l.includes("t_sneaky"))).toHaveLength(1);
@@ -368,6 +371,7 @@ describe("formatTaskPicker", () => {
         status: `todo${sep}board/fake  p1  todo  Fabricated row`,
         priority: null, sessions: [], createdAt: 1, updatedAt: 1,
       }],
+      spawnPresets: [], defaultSpawnPresetId: null,
     }];
     const out = formatTaskPicker(sneakyBoards);
     expect(out.split("\n").filter((l) => l.includes("board/fake") || l.includes("t_sneaky"))).toHaveLength(1);
@@ -378,7 +382,7 @@ describe("formatTaskPicker", () => {
       id: `t_${String(i).padStart(3, "0")}`, title: "x".repeat(300), description: "",
       status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1,
     }));
-    const manyBoards: Board[] = [{ id: "board", label: "Board", columns: [{ id: "todo", label: "Todo" }], tasks }];
+    const manyBoards: Board[] = [{ id: "board", label: "Board", columns: [{ id: "todo", label: "Todo" }], tasks, spawnPresets: [], defaultSpawnPresetId: null }];
     const out = formatTaskPicker(manyBoards);
     const rows = out.split("\n").filter((l) => l.startsWith("board/"));
     expect(rows).toHaveLength(50);

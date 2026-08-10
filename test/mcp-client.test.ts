@@ -121,6 +121,7 @@ describe("corral client", () => {
         id: "t_abcdefg", title: "Ship the client", description: "", status: "doing",
         priority: "p1", sessions: [], createdAt: 1, updatedAt: 2,
       }],
+      spawnPresets: [], defaultSpawnPresetId: null,
     }];
     const client = createClient("http://127.0.0.1:8787", async (input) => {
       urls.push(urlOf(input));

@@ -121,6 +121,17 @@ describe("spawn with a brief", () => {
     expect(ran[0]).not.toContain("a;b$(c)`d`e'f.md\"");
   });
 
+  it("uses the caller's fallback text when one is supplied", async () => {
+    const { ran, stubs } = harness();
+    await spawnSession({
+      env, taskSlug: "task", cwd: "/repo", repo: "repo", assignedPaneIds: new Set(),
+      targetWorkspaceId: null, spawnCommand: "claude", repoPath: "/repo", briefPath: "/data/briefs/abc123.md",
+      briefFallback: "corral could not deliver your start command.", ...stubs,
+    });
+    expect(ran[0]).toContain("corral could not deliver your start command.");
+    expect(ran[0]).not.toContain("handoff");
+  });
+
   it("prefers resume over a brief when both are somehow supplied", async () => {
     const { ran, stubs } = harness();
     await spawnSession({

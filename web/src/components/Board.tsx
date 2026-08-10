@@ -9,6 +9,7 @@ import {
 } from "@dnd-kit/core";
 import { useDroppable } from "@dnd-kit/core";
 import type { Board as BoardType, BoardState, EnrichedTask } from "@shared/board-schema";
+import { defaultColumnId } from "@shared/board-schema";
 import { useCallback, useState } from "react";
 import type { JSX } from "react";
 import { z } from "zod";
@@ -159,20 +160,22 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
   for (const task of tasks) {
     const col = tasksByColumn.get(task.status);
     if (col !== undefined) col.push(task);
-    else (tasksByColumn.get(board.columns[0]?.id ?? "") ?? []).push(task);
+    else (tasksByColumn.get(defaultColumnId(board.columns) ?? "") ?? []).push(task);
   }
 
-  function handleSave(patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority">>): void {
-    if (editingTask === null) return;
-    void api.tasks.update(board.id, editingTask.id, patch).then(() => { onBoardStateChange(); });
+  // Rejects on a server refusal so TaskEditModal's own catch keeps the modal open and shows the
+  // message, instead of closing on a failure it never saw (mirrors BoardSettingsModal's onSave).
+  function handleSave(patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority">>): Promise<void> {
+    if (editingTask === null) return Promise.resolve();
+    return api.tasks.update(board.id, editingTask.id, patch).then(() => { onBoardStateChange(); });
   }
 
-  function handleDelete(): void {
-    if (editingTask === null) return;
-    void api.tasks.delete(board.id, editingTask.id).then(() => {
-      setEditingTask(null); // close the edit modal once the task is gone
-      onBoardStateChange();
-    });
+  // Same reject-on-refusal contract as onSave. Closing is TaskEditModal's job (it calls onClose once
+  // this resolves) — this only runs the delete and refreshes state, so a refusal never gets a chance
+  // to race an unconditional close.
+  function handleDelete(): Promise<void> {
+    if (editingTask === null) return Promise.resolve();
+    return api.tasks.delete(board.id, editingTask.id).then(() => { onBoardStateChange(); });
   }
 
   function handleClose(): void {
@@ -254,11 +257,11 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
         <TaskEditModal
           task={editingTask}
           board={board}
-          envIds={Object.keys(envs)}
+          envs={Object.entries(envs).map(([id, e]) => ({ id, label: e.label ?? id, kind: e.kind ?? null, reachable: e.reachable }))}
           onSave={handleSave}
           onDelete={handleDelete}
-          onSpawn={async ({ env, targetWorkspaceId, repo, model, remoteControl }) => {
-            const link = await api.tasks.spawn(board.id, editingTask.id, env, targetWorkspaceId, repo, model, remoteControl);
+          onSpawn={async (body) => {
+            const link = await api.tasks.spawn(board.id, editingTask.id, body);
             onBoardStateChange();
             return link;
           }}

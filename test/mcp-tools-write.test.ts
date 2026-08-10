@@ -36,6 +36,7 @@ const boards: Board[] = [{
   id: "board", label: "Board",
   columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
   tasks: [{ id: "t_aaaaaaa", title: "Open one", description: "", status: "todo", priority: "p1", sessions: [], createdAt: 1, updatedAt: 1 }],
+  spawnPresets: [], defaultSpawnPresetId: null,
 }];
 
 function stub(over: Partial<CorralClient>): CorralClient {
@@ -110,6 +111,7 @@ describe("bindHandler", () => {
       id: "board", label: "Board",
       columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
       tasks: [{ id: "t_done001", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 }],
+      spawnPresets: [], defaultSpawnPresetId: null,
     }];
     const calls: unknown[] = [];
     const c = stub({ whoami: async () => unbound, boards: async () => closedBoards, attach: async (a) => { calls.push(a); } });
@@ -130,6 +132,7 @@ describe("bindHandler", () => {
       id: "board", label: "Board",
       columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
       tasks: [{ id: "t_done001", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 }],
+      spawnPresets: [], defaultSpawnPresetId: null,
     }];
     const c = stub({ whoami: async () => unbound, boards: async () => closedBoards });
     const closedOut = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "board", taskId: "t_done001" });

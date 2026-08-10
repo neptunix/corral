@@ -49,11 +49,26 @@ export const TaskSchema = z.object({
   updatedAt: z.number(),
 });
 
+// A start command the operator can pick when spawning from the UI. STORED SHAPE — deliberately
+// permissive: readBoardFile uses BoardSchema.parse (server/storage.ts), so a content constraint here
+// would turn a bad value into an unloadable board. Length, count and the leading-character rule live
+// at the PATCH boundary (server/api.ts).
+export const SpawnPresetSchema = z.object({
+  id: z.string().min(1),
+  text: z.string(),
+});
+
 export const BoardSchema = z.object({
   id: z.string(),
   label: z.string(),
   columns: z.array(ColumnSchema),
   tasks: z.array(TaskSchema).default([]),
+  // Defaults, never .optional(): a board written before these existed heals on parse, and every Board
+  // value is uniformly shaped. A dangling defaultSpawnPresetId (matching no preset) is NOT resolved
+  // here — that normalization lives only at the PATCH boundary (server/api.ts), so a board file
+  // carrying a stale id still parses and loads with it.
+  spawnPresets: z.array(SpawnPresetSchema).default([]),
+  defaultSpawnPresetId: z.string().nullable().default(null),
 });
 
 export const LiveSessionDataSchema = z.object({
@@ -106,6 +121,7 @@ export type Priority = z.infer<typeof PrioritySchema>;
 export type SessionLink = z.infer<typeof SessionLinkSchema>;
 export type Task = z.infer<typeof TaskSchema>;
 export type Board = z.infer<typeof BoardSchema>;
+export type SpawnPreset = z.infer<typeof SpawnPresetSchema>;
 export type LiveSessionData = z.infer<typeof LiveSessionDataSchema>;
 export type EnrichedSessionLink = z.infer<typeof EnrichedSessionLinkSchema>;
 export type EnrichedTask = z.infer<typeof EnrichedTaskSchema>;
@@ -145,10 +161,29 @@ export function generateColumnId(): string {
   return nanoid(8);
 }
 
+// A preset's id is what defaultSpawnPresetId points at, so it must survive editing the text — the same
+// reason ColumnSchema carries an id and tasks key on it rather than on the label.
+export function generateSpawnPresetId(): string {
+  return nanoid(8);
+}
+
 // Ids of columns typed "closed". Used to (a) hide closed tasks in the assign-to-task picker and
 // (b) render those columns as collapsed vertical strips on the board.
 export function closedColumnIds(columns: readonly Column[]): Set<string> {
   return new Set(columns.filter((c) => c.type === "closed").map((c) => c.id));
+}
+
+/**
+ * Where a task lands when nothing else decides: the first column that is not `closed`.
+ *
+ * INVARIANT — a task's landing status is always `defaultColumnId` of its board. Position 0 is NOT
+ * the default: a `closed` column renders as a collapsed strip, so a task landing there is invisible,
+ * and one dropdown change in Board settings puts a closed column at position 0. Falls back to
+ * `columns[0]` when every column is closed (a board with nowhere open to land — the operator's
+ * choice, and there is no better answer), and to `undefined` on an empty board.
+ */
+export function defaultColumnId(columns: readonly Column[]): string | undefined {
+  return (columns.find((c) => c.type !== "closed") ?? columns[0])?.id;
 }
 
 export function nowSecs(): number {

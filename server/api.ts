@@ -3,6 +3,7 @@ import {
   type GlobalState, type SessionLink, type Task,
   ColumnSchema,
   DEFAULT_COLUMNS,
+  defaultColumnId,
   generateTaskId,
   nowSecs,
   slugifyBoardId,
@@ -20,7 +21,7 @@ import {
   UPLOAD_ROOT, WS_ALLOWED_ORIGINS,
 } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
-import { briefByteLength, cleanupBrief, composeBrief, writeBrief } from "./brief.ts";
+import { briefByteLength, cleanupBrief, composeBrief, START_COMMAND_FALLBACK, writeBrief } from "./brief.ts";
 import { syncClaudeThemeBase, ThemeModeSchema } from "./claude-theme.ts";
 import { closePane, listWorkspaces, paneIdentity, readPane, type ReadFn } from "./herdr.ts";
 import { isLoopbackHost } from "./host-guard.ts";
@@ -147,14 +148,40 @@ const CreateBoardBodySchema = z.object({
   label: z.string().min(1),
 });
 
+// PATCH-BOUNDARY constraints — deliberately NOT in BoardSchema (server/storage.ts parses stored
+// boards with .parse, so a constraint there would make a bad board unloadable).
+//
+// The leading-character rule is load-bearing, not cosmetic: the command's bytes become one positional
+// argv word for `claude`, and quoting protects that word from the SHELL, not from Claude Code's
+// argument parser. A preset starting with `-` is read as an option, never as the prompt. Same rule,
+// same reason, as the `model` field on the spawn route.
+//
+// The whitelist is deliberately NARROWER than that hazard: only `/` and ASCII alphanumerics pass, so a
+// command opening with a non-Latin letter, `#` or `@` is refused too. That is a decision, not an
+// oversight — do not widen it to a `-` blacklist without re-taking it. The message says what IS
+// accepted, because a refusal that only names the flag hazard reads as a bug for every input that is
+// not a flag.
+const START_COMMAND_FIRST_CHAR = /^[/A-Za-z0-9]/;
+const START_COMMAND_FIRST_CHAR_MESSAGE =
+  'must begin with "/" or an ASCII letter or digit — the first character is restricted so a leading "-" cannot reach the CLI as a flag';
+const SpawnPresetPatchSchema = z.object({
+  id: z.string().min(1),
+  text: z.string().trim().min(1).max(2000).regex(START_COMMAND_FIRST_CHAR, START_COMMAND_FIRST_CHAR_MESSAGE),
+});
+
 const PatchBoardBodySchema = z.object({
   label: z.string().min(1).optional(),
   columns: z.array(ColumnSchema).optional(),
+  spawnPresets: z.array(SpawnPresetPatchSchema).max(20).optional(),
+  defaultSpawnPresetId: z.string().nullable().optional(),
 });
 
 const CreateTaskBodySchema = z.object({
   title: z.string().min(1),
-  status: z.string(),
+  // No literal default: a task created with no status must land in THIS board's landing column,
+  // which the route resolves inside withBoard (mirrors FromSessionBodySchema) since only the loaded
+  // board knows it.
+  status: z.string().optional(),
   priority: z.enum(["p0", "p1", "p2", "p3"]).nullable().optional(),
   description: z.string().optional(),
 });
@@ -187,7 +214,9 @@ const DetachBodySchema = z.object({
 
 const FromSessionBodySchema = z.object({
   title: z.string().min(1),
-  status: z.string().default("todo"),
+  // No literal default: a card created from an unassigned session must land in THIS board's landing
+  // column, which the route resolves inside withBoard (it needs the loaded board to know it).
+  status: z.string().optional(),
   priority: z.enum(["p0", "p1", "p2", "p3"]).nullable().optional(),
   description: z.string().optional(),
   env: z.string(),
@@ -516,7 +545,7 @@ export function createApi(opts: {
       return c.json({ error: { code: "board_id_collision", generatedId: id } }, 409);
     }
     const board = await opts.storage.withBoard(id, () => {
-      const b = { id, label, columns: [...DEFAULT_COLUMNS], tasks: [] };
+      const b = { id, label, columns: [...DEFAULT_COLUMNS], tasks: [], spawnPresets: [], defaultSpawnPresetId: null };
       return { board: b, result: b };
     });
     return c.json(board, 201);
@@ -539,9 +568,12 @@ export function createApi(opts: {
     if (!parsed.success) return c.json({ error: { code: "validation", message: parsed.error.message } }, 400);
     const bid = c.req.param("bid");
     if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
-    const { label, columns } = parsed.data;
+    const { label, columns, spawnPresets, defaultSpawnPresetId } = parsed.data;
     if (columns?.length === 0) {
       return c.json({ error: { code: "validation", message: "columns must not be empty" } }, 400);
+    }
+    if (spawnPresets !== undefined && new Set(spawnPresets.map((p) => p.id)).size !== spawnPresets.length) {
+      return c.json({ error: { code: "validation", message: "duplicate preset id" } }, 400);
     }
     const result = await opts.storage.withBoard(bid, (existing) => {
       if (existing === null) return { board: null, result: null };
@@ -549,16 +581,27 @@ export function createApi(opts: {
       if (label !== undefined) updated = { ...updated, label };
       if (columns !== undefined) {
         const removedIds = new Set(existing.columns.map((col) => col.id).filter((id) => !columns.some((c2) => c2.id === id)));
-        const firstColId = columns[0]?.id;
-        if (removedIds.size > 0 && firstColId !== undefined) {
+        // The landing column, never index 0 — a closed column at 0 would bulk-rewrite these tasks
+        // into a collapsed strip with no undo. See defaultColumnId (shared/board-schema.ts).
+        const landingColId = defaultColumnId(columns);
+        if (removedIds.size > 0 && landingColId !== undefined) {
           updated = {
             ...updated,
             tasks: existing.tasks.map((task) =>
-              removedIds.has(task.status) ? { ...task, status: firstColId } : task,
+              removedIds.has(task.status) ? { ...task, status: landingColId } : task,
             ),
           };
         }
         updated = { ...updated, columns };
+      }
+      if (spawnPresets !== undefined) updated = { ...updated, spawnPresets: [...spawnPresets] };
+      if (defaultSpawnPresetId !== undefined) updated = { ...updated, defaultSpawnPresetId };
+      // A default pointing at no preset is no default — resolve it here rather than leaving a dangling
+      // id for every reader to re-handle. Re-checked after BOTH assignments, so replacing the list in
+      // the same patch that keeps the old default cannot leave a dangle behind.
+      if (updated.defaultSpawnPresetId !== null
+        && !updated.spawnPresets.some((p) => p.id === updated.defaultSpawnPresetId)) {
+        updated = { ...updated, defaultSpawnPresetId: null };
       }
       return { board: updated, result: updated };
     });
@@ -566,15 +609,29 @@ export function createApi(opts: {
     return c.json(result);
   });
 
+  // Deletion is refused while the board still holds tasks — read-and-decide inside the SAME withBoard
+  // callback (not a read-then-delete pair) so a concurrent task create/attach between the check and the
+  // write can't race past the guard.
   app.delete("/api/boards/:bid", async (c) => {
     if (opts.storage === undefined) return c.json({ error: { code: "no_storage" } }, 503);
     const bid = c.req.param("bid");
     if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
-    const existed = await opts.storage.withBoard(bid, (existing) => ({
-      board: null,
-      result: existing !== null,
-    }));
-    if (!existed) return c.json({ error: { code: "not_found" } }, 404);
+    type DeleteResult = "not_found" | "ok" | { readonly taskCount: number };
+    const result = await opts.storage.withBoard<DeleteResult>(bid, (existing) => {
+      if (existing === null) return { board: null, result: "not_found" };
+      if (existing.tasks.length > 0) return { board: existing, result: { taskCount: existing.tasks.length } };
+      return { board: null, result: "ok" };
+    });
+    if (result === "not_found") return c.json({ error: { code: "not_found" } }, 404);
+    if (result !== "ok") {
+      const { taskCount } = result;
+      return c.json({
+        error: {
+          code: "board_not_empty",
+          message: `Board has ${String(taskCount)} task${taskCount === 1 ? "" : "s"} — delete or move them first.`,
+        },
+      }, 409);
+    }
     return c.json({ ok: true });
   });
 
@@ -589,22 +646,26 @@ export function createApi(opts: {
     const bid = c.req.param("bid");
     if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
     const now = nowSecs();
-    const task = await opts.storage.withBoard(bid, (existing) => {
-      if (existing === null) return { board: null, result: null };
+    type CreateResult = "board_not_found" | "no_columns" | { ok: true; task: Task };
+    const result = await opts.storage.withBoard<CreateResult>(bid, (existing) => {
+      if (existing === null) return { board: null, result: "board_not_found" };
+      const status = parsed.data.status ?? defaultColumnId(existing.columns);
+      if (status === undefined) return { board: existing, result: "no_columns" };
       const newTask = {
         id: generateTaskId(),
         title: parsed.data.title,
         description: parsed.data.description ?? "",
-        status: parsed.data.status,
+        status,
         priority: parsed.data.priority ?? null,
         sessions: [],
         createdAt: now,
         updatedAt: now,
       };
-      return { board: { ...existing, tasks: [...existing.tasks, newTask] }, result: newTask };
+      return { board: { ...existing, tasks: [...existing.tasks, newTask] }, result: { ok: true, task: newTask } };
     });
-    if (task === null) return c.json({ error: { code: "not_found" } }, 404);
-    return c.json(task, 201);
+    if (result === "board_not_found") return c.json({ error: { code: "not_found" } }, 404);
+    if (result === "no_columns") return c.json({ error: { code: "validation", message: "board has no columns" } }, 400);
+    return c.json(result.task, 201);
   });
 
   app.patch("/api/boards/:bid/tasks/:tid", async (c) => {
@@ -944,6 +1005,16 @@ export function createApi(opts: {
       // 400, and a configured key is never anywhere near this long.
       repo: z.string().max(200).nullable().optional(), // config key: roots a NEW space, or names the one to resolve
       brief: z.string().min(1).optional(),    // initial prompt, delivered via file indirection
+      // The session's first message, delivered VERBATIM — no preamble — so a leading slash command is
+      // at position 0 of the message, which is the only position Claude Code expands it from (§2.4).
+      // Mutually exclusive with `brief`: MCP and the UI share this route, and this is what tells them
+      // apart, so an MCP caller cannot accidentally drop the preamble. The leading-character rule is
+      // the same flag hazard the `model` field guards against — this text becomes one positional argv
+      // word for `claude`, and quoting protects it from the shell, not from the argument parser. Same
+      // constant as the preset boundary, deliberately narrower than the hazard (see it for why); this
+      // route reports every bad field as a bare `invalid "<field>"`, and a preset that reaches here has
+      // already been through the readable refusal at PATCH.
+      startCommand: z.string().trim().min(1).max(2000).regex(START_COMMAND_FIRST_CHAR).optional(),
       // Short slug for what THIS session does; composed with the card slug into the one string used
       // as the herdr tab label, the card's link name and `claude --name`.
       name: z.string().max(64).optional(),
@@ -1034,27 +1105,33 @@ export function createApi(opts: {
     if (sessionName === null) {
       return c.json({ error: { code: "session_cap", message: "no free session name left on this task — attach or remove one first" } }, 409);
     }
-    // Brief delivery is local-only: the file is written on the corral host, and the `$(cat …)`
-    // substitution runs in the pane's shell — on a remote box that path would not exist. Mirrors the
-    // uploads restriction. Both guards run BEFORE any spawn work so a refusal creates nothing.
+    // Brief/start-command delivery is local-only: the file is written on the corral host, and the
+    // `$(cat …)` substitution runs in the pane's shell — on a remote box that path would not exist.
+    // Mirrors the uploads restriction. Order is schema → mutual exclusion → env kind → byte cap →
+    // write, matching how the route already sequences its guards, so a refusal creates no file.
     const brief = parsed.data.brief;
+    const startCommand = parsed.data.startCommand;
+    if (brief !== undefined && startCommand !== undefined) {
+      return c.json({ error: { code: "validation", message: "send either brief or startCommand, not both" } }, 400);
+    }
+    const firstMessage = brief !== undefined ? composeBrief(brief) : startCommand;
+    const messageKind = brief !== undefined ? "brief" : "startCommand";
     let briefPath: string | undefined;
-    if (brief !== undefined) {
+    if (firstMessage !== undefined) {
       if (targetEnv.kind !== "local") {
         return c.json({ error: { code: "remote_brief_unsupported", message: "a spawn brief is available for local environments only" } }, 400);
       }
-      const composed = composeBrief(brief);
-      if (briefByteLength(composed) > BRIEF_MAX_BYTES) {
+      if (briefByteLength(firstMessage) > BRIEF_MAX_BYTES) {
         return c.json({ error: { code: "too_large", message: `brief exceeds ${String(BRIEF_MAX_BYTES)} bytes` } }, 413);
       }
       try {
-        briefPath = await writeBrief(briefRoot, composed);
+        briefPath = await writeBrief(briefRoot, firstMessage);
       } catch (err) {
         return c.json({ error: { code: "brief_write_failed", message: err instanceof Error ? err.message : String(err) } }, 500);
       }
-      // Audit line, mirroring the upload route (server/api.ts ~408): coordinates and size only —
-      // never contents. A brief is agent-authored text entering a fresh session; leave a trace.
-      console.warn(`[brief] board=${bid} task=${tid} env=${targetEnv.id} bytes=${String(briefByteLength(composed))} path=${briefPath}`);
+      // Audit: coordinates and size only, never contents. `kind` matters — a spawn that hands a session
+      // an AUTO-EXECUTING command must not read the same in the log as a preamble-wrapped brief.
+      console.warn(`[brief] kind=${messageKind} board=${bid} task=${tid} env=${targetEnv.id} bytes=${String(briefByteLength(firstMessage))} path=${briefPath}`);
     }
     const spawnTimerHandle = { id: setTimeout(() => { /* replaced below */ }, 0) };
     clearTimeout(spawnTimerHandle.id);
@@ -1075,6 +1152,7 @@ export function createApi(opts: {
       // spawn.ts branches on `=== true`.
       ...(parsed.data.remoteControl === true ? { remoteControl: true } : {}),
       ...(briefPath === undefined ? {} : { briefPath }),
+      ...(startCommand === undefined ? {} : { briefFallback: START_COMMAND_FALLBACK }),
     });
     // Unlink the brief once THIS spawn attempt is done — a brief's on-disk lifetime is one spawn, not
     // one server run. Chained off `spawnPromise` itself (not the race below): a timed-out spawn keeps
@@ -1149,17 +1227,20 @@ export function createApi(opts: {
     // where the task briefly existed on both). `withBoards` writes boardA (the target, passed first)
     // before boardB (the source) — both synchronous, so the only residual is a process crash between the
     // two writes, which then yields a recoverable duplicate rather than a lost task.
-    type MoveOutcome = "ok" | "src_gone" | "task_gone" | "target_gone" | "conflict";
+    type MoveOutcome = "ok" | "src_gone" | "task_gone" | "target_gone" | "target_no_columns" | "conflict";
     const outcome = await storage.withBoards<MoveOutcome>(toBoardId, bid, (target, source) => {
       if (source === null) return { boardA: target, boardB: source, result: "src_gone" };
       if (target === null) return { boardA: target, boardB: source, result: "target_gone" };
       const task = source.tasks.find((t) => t.id === tid);
       if (task === undefined) return { boardA: target, boardB: source, result: "task_gone" };
       if (target.tasks.some((t) => t.id === tid)) return { boardA: target, boardB: source, result: "conflict" };
-      // Map status: keep it if the target has that column, else fall to the target's first column.
-      const status = target.columns.some((col) => col.id === task.status)
-        ? task.status
-        : (target.columns[0]?.id ?? task.status);
+      // Map status: keep it if the target has that column, else the target's LANDING column.
+      let status = task.status;
+      if (!target.columns.some((col) => col.id === task.status)) {
+        const landing = defaultColumnId(target.columns);
+        if (landing === undefined) return { boardA: target, boardB: source, result: "target_no_columns" };
+        status = landing;
+      }
       const movedTask: Task = { ...task, status, updatedAt: nowSecs() };
       return {
         boardA: { ...target, tasks: [...target.tasks, movedTask] },
@@ -1169,6 +1250,9 @@ export function createApi(opts: {
     });
     if (outcome === "src_gone" || outcome === "task_gone" || outcome === "target_gone") {
       return c.json({ error: { code: "not_found" } }, 404);
+    }
+    if (outcome === "target_no_columns") {
+      return c.json({ error: { code: "validation", message: "board has no columns" } }, 400);
     }
     if (outcome === "conflict") {
       return c.json({ error: { code: "conflict", message: "task id already exists on target" } }, 409);
@@ -1198,7 +1282,7 @@ export function createApi(opts: {
     // that IS live), so the new binding is churn-resolvable from the start; null if not yet registered.
     const liveRow = opts.poller.getSnapshot().sessions.find((s) => `${s.env}:${s.paneId}` === key);
 
-    type FromSessionResult = "board_not_found" | "conflict" | { ok: true; task: Task };
+    type FromSessionResult = "board_not_found" | "conflict" | "no_columns" | { ok: true; task: Task };
     const result = await storage.withBoard<FromSessionResult>(bid, (existing) => {
       if (existing === null) return { board: null, result: "board_not_found" };
       // Claim-check: is THIS live session already bound anywhere? Uses the exact per-link complement
@@ -1209,6 +1293,8 @@ export function createApi(opts: {
       if (isSessionBound(allLinks, { env, paneId, liveSessionId })) {
         return { board: existing, result: "conflict" as const };
       }
+      const landing = parsed.data.status ?? defaultColumnId(existing.columns);
+      if (landing === undefined) return { board: existing, result: "no_columns" as const };
       const link: SessionLink = {
         env: parsed.data.env,
         paneId: parsed.data.paneId,
@@ -1227,7 +1313,7 @@ export function createApi(opts: {
         id: generateTaskId(),
         title: parsed.data.title,
         description: parsed.data.description ?? "",
-        status: parsed.data.status,
+        status: landing,
         priority: parsed.data.priority ?? null,
         sessions: [link],
         createdAt: now,
@@ -1238,6 +1324,7 @@ export function createApi(opts: {
 
     if (result === "board_not_found") return c.json({ error: { code: "not_found" } }, 404);
     if (result === "conflict") return c.json({ error: { code: "conflict", message: "session already assigned" } }, 409);
+    if (result === "no_columns") return c.json({ error: { code: "validation", message: "board has no columns" } }, 400);
     return c.json(result.task, 201);
   });
 

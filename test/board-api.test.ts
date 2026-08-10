@@ -102,6 +102,42 @@ describe("PATCH /api/boards/:bid — column type", () => {
   });
 });
 
+describe("DELETE /api/boards/:bid", () => {
+  it("refuses to delete a board that still holds tasks, and the board survives", async () => {
+    const app = makeApi(tmpDir);
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
+    await app.request("/api/boards/test/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "T1", status: "todo" }) });
+    const res = await app.request("/api/boards/test", { method: "DELETE" });
+    expect(res.status).toBe(409);
+    const body = await res.json() as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("board_not_empty");
+    // Asserts the MESSAGE, not just the code — mirrors the session_cap precedent above: the count is
+    // the part a bare status/code can't prove, and it's what tells the operator what to do next.
+    expect(body.error.message).toContain("1 task");
+    const stillThere = await app.request("/api/boards/test");
+    expect(stillThere.status).toBe(200);
+  });
+
+  it("deletes an empty board", async () => {
+    const app = makeApi(tmpDir);
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
+    const res = await app.request("/api/boards/test", { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean };
+    expect(body.ok).toBe(true);
+    const gone = await app.request("/api/boards/test");
+    expect(gone.status).toBe(404);
+  });
+
+  it("404s deleting a board that doesn't exist", async () => {
+    const app = makeApi(tmpDir);
+    const res = await app.request("/api/boards/nope", { method: "DELETE" });
+    expect(res.status).toBe(404);
+    const body = await res.json() as { error: { code: string } };
+    expect(body.error.code).toBe("not_found");
+  });
+});
+
 describe("POST + GET /api/boards/:bid/tasks", () => {
   it("creates a task and retrieves it via board state", async () => {
     const app = makeApi(tmpDir);
@@ -115,6 +151,19 @@ describe("POST + GET /api/boards/:bid/tasks", () => {
     const task = await taskRes.json() as { id: string; title: string };
     expect(task.title).toBe("My Task");
     expect(task.id).toMatch(/^t_/);
+  });
+
+  it("lands a task created with no status in the board's landing column", async () => {
+    const app = makeApi(tmpDir);
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test2" }) });
+    const res = await app.request("/api/boards/test2/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "No status" }),
+    });
+    expect(res.status).toBe(201);
+    const task = await res.json() as { status: string };
+    expect(task.status).toBe("todo");
   });
 });
 
@@ -282,7 +331,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
     // but whose sessionId ("uuid-9") is stable.
     await storage.withBoard("test", () => ({
       board: {
-        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
+        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], spawnPresets: [], defaultSpawnPresetId: null,
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-9" }],
@@ -318,7 +367,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
     // Two sessions on one card: A stored at p1, B stored at p2.
     await storage.withBoard("test", () => ({
       board: {
-        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
+        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], spawnPresets: [], defaultSpawnPresetId: null,
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [
@@ -358,7 +407,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
     const now = Math.floor(Date.now() / 1000);
     await storage.withBoard("test", () => ({
       board: {
-        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
+        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], spawnPresets: [], defaultSpawnPresetId: null,
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-dead" }],
@@ -384,7 +433,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
     // session vanishes from BOTH the card and the pool.
     await storage.withBoard("test", () => ({
       board: {
-        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
+        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], spawnPresets: [], defaultSpawnPresetId: null,
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [{ env: "work-local", paneId: "wQ:p4", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-old" }],
@@ -468,7 +517,7 @@ describe("GET /api/state — name healing for persisted empty-name links", () =>
     const now = Math.floor(Date.now() / 1000);
     await storage.withBoard("test", () => ({
       board: {
-        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS],
+        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], spawnPresets: [], defaultSpawnPresetId: null,
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [{ env: "work-local", paneId: "old-1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "", cwdSnapshot: "", sessionId: null }],
@@ -826,7 +875,7 @@ describe("POST /api/boards/:bid/tasks/:tid/move", () => {
     const { id } = await (await app.request("/api/boards/src/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "T", status: "doing" }) })).json() as { id: string };
     // target board with custom columns that do NOT include "doing"
     await storage.withBoard("custom", () => ({
-      board: { id: "custom", label: "Custom", columns: [{ id: "backlog", label: "Backlog" }, { id: "done", label: "Done" }], tasks: [] },
+      board: { id: "custom", label: "Custom", columns: [{ id: "backlog", label: "Backlog" }, { id: "done", label: "Done" }], tasks: [], spawnPresets: [], defaultSpawnPresetId: null },
       result: undefined,
     }));
     const res = await app.request(`/api/boards/src/tasks/${id}/move`, {
@@ -1881,5 +1930,236 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — explicit null needs a repo"
     expect(res.status).toBe(400);
     expect((await res.json() as { error: { code: string } }).error.code).toBe("validation");
     expect(spawn.mock.calls).toHaveLength(0);
+  });
+});
+
+describe("landing column when position 0 is closed", () => {
+  // Board shape used by every case below: a closed column FIRST, an open one second.
+  //
+  // The open column is "backlog", NOT "todo", and that is load-bearing. `FromSessionBodySchema`
+  // currently defaults status to the literal string "todo"; if this board also had a column with
+  // that id, the from-session case would assert "todo" and pass identically before and after the
+  // fix — a green test pinning nothing at exactly the site the spec calls out as the fifth and only
+  // hardcoded one. Naming the open column anything else is what makes the test go red.
+  const closedFirst = [
+    { id: "done", label: "Done", type: "closed" },
+    { id: "backlog", label: "Backlog", type: "to-do" },
+  ];
+
+  async function boardWithClosedFirst(app: ReturnType<typeof makeApi>, id: string): Promise<void> {
+    await app.request("/api/boards", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: id }),
+    });
+    await app.request(`/api/boards/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ columns: closedFirst }),
+    });
+  }
+
+  it("reassigns tasks of a deleted column to the first NON-closed column", async () => {
+    const app = makeApi(tmpDir);
+    await boardWithClosedFirst(app, "b1");
+    await app.request("/api/boards/b1", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ columns: [...closedFirst, { id: "wip", label: "WIP" }] }),
+    });
+    const created = await (await app.request("/api/boards/b1/tasks", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Doomed", status: "wip" }),
+    })).json() as { id: string };
+    // Delete the "wip" column by PATCHing a column list without it.
+    await app.request("/api/boards/b1", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ columns: closedFirst }),
+    });
+    const board = await (await app.request("/api/boards/b1")).json() as { tasks: { id: string; status: string }[] };
+    expect(board.tasks.find((t) => t.id === created.id)?.status).toBe("backlog");
+  });
+
+  it("lands a task moved in from another board in the first non-closed column", async () => {
+    const app = makeApi(tmpDir);
+    await boardWithClosedFirst(app, "target");
+    await app.request("/api/boards", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "source" }),
+    });
+    const created = await (await app.request("/api/boards/source/tasks", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Traveller", status: "blocked" }),
+    })).json() as { id: string };
+    const res = await app.request(`/api/boards/source/tasks/${created.id}/move`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toBoardId: "target" }),
+    });
+    expect(res.status).toBe(200);
+    const board = await (await app.request("/api/boards/target")).json() as { tasks: { status: string }[] };
+    expect(board.tasks[0]?.status).toBe("backlog");
+  });
+
+  it("lands a card created from an unassigned session in the first non-closed column", async () => {
+    const app = makeApi(tmpDir);
+    await boardWithClosedFirst(app, "b2");
+    const res = await app.request("/api/boards/b2/tasks/from-session", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "From a live session", env: "work-local", paneId: "w1:p1" }),
+    });
+    expect(res.status).toBe(201);
+    const task = await res.json() as { status: string };
+    // Red before the fix: the route defaults to the literal "todo", which is not a column here.
+    expect(task.status).toBe("backlog");
+  });
+
+  it("from-session still honors an explicit status", async () => {
+    const app = makeApi(tmpDir);
+    await boardWithClosedFirst(app, "b3");
+    const res = await app.request("/api/boards/b3/tasks/from-session", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Explicit", status: "done", env: "work-local", paneId: "w1:p2" }),
+    });
+    const task = await res.json() as { status: string };
+    expect(task.status).toBe("done");
+  });
+
+  it("lands a plain task created with no status in the first non-closed column", async () => {
+    const app = makeApi(tmpDir);
+    await boardWithClosedFirst(app, "b4");
+    const res = await app.request("/api/boards/b4/tasks", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "No status, plain create" }),
+    });
+    expect(res.status).toBe(201);
+    const task = await res.json() as { status: string };
+    expect(task.status).toBe("backlog");
+  });
+
+  it("plain task create still honors an explicit status", async () => {
+    const app = makeApi(tmpDir);
+    await boardWithClosedFirst(app, "b5");
+    const res = await app.request("/api/boards/b5/tasks", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Explicit plain create", status: "done" }),
+    });
+    expect(res.status).toBe(201);
+    const task = await res.json() as { status: string };
+    expect(task.status).toBe("done");
+  });
+});
+
+it("preserves column order across a PATCH round-trip", async () => {
+  const app = makeApi(tmpDir);
+  await app.request("/api/boards", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label: "Ordered" }),
+  });
+  const reordered = [
+    { id: "doing", label: "Doing", type: "in-progress" },
+    { id: "todo", label: "Todo", type: "to-do" },
+    { id: "done", label: "Done", type: "closed" },
+  ];
+  await app.request("/api/boards/ordered", {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ columns: reordered }),
+  });
+  const board = await (await app.request("/api/boards/ordered")).json() as { columns: { id: string }[] };
+  expect(board.columns.map((c) => c.id)).toEqual(["doing", "todo", "done"]);
+});
+
+describe("PATCH /api/boards/:bid — start-command presets", () => {
+  async function makeBoard(app: ReturnType<typeof makeApi>): Promise<void> {
+    await app.request("/api/boards", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "Presets" }),
+    });
+  }
+  function patch(app: ReturnType<typeof makeApi>, body: unknown): Promise<Response> {
+    return Promise.resolve(app.request("/api/boards/presets", {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }));
+  }
+
+  it("persists presets and the default id", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    const res = await patch(app, {
+      spawnPresets: [{ id: "p1", text: "/plan" }, { id: "p2", text: "Read the card first." }],
+      defaultSpawnPresetId: "p1",
+    });
+    expect(res.status).toBe(200);
+    const board = await (await app.request("/api/boards/presets")).json() as {
+      spawnPresets: { id: string; text: string }[]; defaultSpawnPresetId: string | null;
+    };
+    expect(board.spawnPresets.map((p) => p.id)).toEqual(["p1", "p2"]);
+    expect(board.defaultSpawnPresetId).toBe("p1");
+  });
+
+  it("rejects a preset beginning with a dash — it would reach claude as a flag", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    expect((await patch(app, { spawnPresets: [{ id: "p1", text: "--continue" }] })).status).toBe(400);
+  });
+
+  // The whitelist is narrower than the flag hazard it is named for, so it refuses plenty of text that
+  // is nothing like a flag. That is the accepted trade, and it is pinned here BECAUSE it surprises:
+  // without this, the next reader meets the refusal as a bug report and widens the rule by accident.
+  it("also refuses openings that are no flag at all — non-Latin, '#', '@' — and says what IS accepted", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    for (const text of ["Продолжи работу", "「開始」", "#tag first", "@docs/spec.md review"]) {
+      expect((await patch(app, { spawnPresets: [{ id: "p1", text }] })).status).toBe(400);
+    }
+    const res = await patch(app, { spawnPresets: [{ id: "p1", text: "Продолжи работу" }] });
+    const body = await res.json() as { error: { message: string } };
+    // The refusal names the accepted format. (PATCH passes Zod's own message through, so the quotes
+    // around "/" arrive JSON-escaped — match the part that carries the meaning.)
+    expect(body.error.message).toContain("or an ASCII letter or digit");
+    // Prefixing with a slash command is the way through — the rule is about the FIRST character only.
+    expect((await patch(app, { spawnPresets: [{ id: "p1", text: "/plan Продолжи работу" }] })).status).toBe(200);
+  });
+
+  it("rejects blank, over-long, over-count and duplicate-id preset lists", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    expect((await patch(app, { spawnPresets: [{ id: "p1", text: "   " }] })).status).toBe(400);
+    expect((await patch(app, { spawnPresets: [{ id: "p1", text: `/${"x".repeat(2000)}` }] })).status).toBe(400);
+    expect((await patch(app, {
+      spawnPresets: Array.from({ length: 21 }, (_, i) => ({ id: `p${String(i)}`, text: "/plan" })),
+    })).status).toBe(400);
+    expect((await patch(app, {
+      spawnPresets: [{ id: "dup", text: "/plan" }, { id: "dup", text: "/review" }],
+    })).status).toBe(400);
+  });
+
+  it("resolves a defaultSpawnPresetId matching no preset to no default", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    await patch(app, { spawnPresets: [{ id: "p1", text: "/plan" }], defaultSpawnPresetId: "gone" });
+    const board = await (await app.request("/api/boards/presets")).json() as { defaultSpawnPresetId: string | null };
+    expect(board.defaultSpawnPresetId).toBeNull();
+  });
+
+  it("keeps a preset the default when only its text is edited", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    await patch(app, { spawnPresets: [{ id: "p1", text: "/plan" }], defaultSpawnPresetId: "p1" });
+    await patch(app, { spawnPresets: [{ id: "p1", text: "/plan the migration" }] });
+    const board = await (await app.request("/api/boards/presets")).json() as {
+      spawnPresets: { text: string }[]; defaultSpawnPresetId: string | null;
+    };
+    expect(board.spawnPresets[0]?.text).toBe("/plan the migration");
+    expect(board.defaultSpawnPresetId).toBe("p1");
+  });
+
+  it("drops a default left dangling by a later patch that never mentions it", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    await patch(app, {
+      spawnPresets: [{ id: "p1", text: "/plan" }, { id: "p2", text: "/review" }],
+      defaultSpawnPresetId: "p2",
+    });
+    // No defaultSpawnPresetId key at all — the stored "p2" would otherwise dangle once p2 is dropped.
+    await patch(app, { spawnPresets: [{ id: "p1", text: "/plan" }] });
+    const board = await (await app.request("/api/boards/presets")).json() as { defaultSpawnPresetId: string | null };
+    expect(board.defaultSpawnPresetId).toBeNull();
   });
 });

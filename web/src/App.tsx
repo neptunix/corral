@@ -176,6 +176,16 @@ export function App(): JSX.Element {
     setShowUnassigned(false);
   }
 
+  // Rejects on a server refusal (e.g. board_not_empty) so BoardSettingsModal's own catch keeps the
+  // modal open and shows it — this function only runs on a CONFIRMED delete. Moves the user off the
+  // deleted board onto whatever remains, or the empty state if it was the last one.
+  async function handleDeleteBoard(boardId: string): Promise<void> {
+    await api.boards.delete(boardId);
+    const remaining = boards.filter((b) => b.id !== boardId);
+    setBoards(remaining);
+    if (activeBoardId === boardId) setActiveBoardId(remaining[0]?.id ?? null);
+  }
+
   async function handleCreateTask(boardId: string, title: string, session: SessionRow, sessionName: string | null): Promise<void> {
     try {
       await api.tasks.fromSession(boardId, {
@@ -221,11 +231,11 @@ export function App(): JSX.Element {
 
   // Plain task create (the header "+ New task" button). Modal-driven, not window.prompt: a prior
   // dialog with "prevent additional dialogs" checked silently suppresses window.prompt (no error),
-  // which made the button appear dead. status = the target board's first column.
+  // which made the button appear dead. The server resolves the landing column — `boards` here is
+  // refreshed only by explicit fetches, so an out-of-band column change could leave it stale.
   async function handleNewTask(boardId: string, title: string): Promise<void> {
-    const status = boards.find((b) => b.id === boardId)?.columns[0]?.id ?? "todo";
     try {
-      await api.tasks.create(boardId, { title, status });
+      await api.tasks.create(boardId, { title });
     } catch (err) {
       window.alert(`Create task failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
@@ -315,9 +325,8 @@ export function App(): JSX.Element {
       {showSettings && activeBoardId !== null && activeBoardState !== null && (
         <BoardSettingsModal
           board={activeBoardState.board}
-          onSave={(patch) => {
-            void api.boards.update(activeBoardId, patch).then(() => { refreshBoards(); });
-          }}
+          onSave={(patch) => api.boards.update(activeBoardId, patch).then(() => { refreshBoards(); })}
+          onDelete={() => handleDeleteBoard(activeBoardId)}
           onClose={() => { setShowSettings(false); }}
         />
       )}

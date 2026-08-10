@@ -2,66 +2,73 @@ import type { EnrichedTask, Board, Priority, SessionLink } from "@shared/board-s
 import type { JSX } from "react";
 import { useEffect, useState } from "react";
 
-import { api } from "../lib/api";
+import type { SpawnEnvOption } from "./SpawnPanel";
+import { SpawnPanel } from "./SpawnPanel";
+import type { SpawnRequestBody } from "../lib/api";
 
 interface Props {
   readonly task: EnrichedTask;
   readonly board: Board;
-  readonly envIds: readonly string[];
-  readonly onSave: (patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority">>) => void;
-  readonly onDelete: () => void;
-  readonly onSpawn: (args: { env: string; targetWorkspaceId: string | null; repo: string | null; model: string | null; remoteControl: boolean }) => Promise<SessionLink>;
+  readonly envs: readonly SpawnEnvOption[];
+  // Rejects on a server refusal so handleSave can keep the modal open and show the message, instead
+  // of closing on a failure it never saw (mirrors BoardSettingsModal's onSave contract).
+  readonly onSave: (patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority">>) => Promise<void>;
+  // Same reject-on-refusal contract as onSave.
+  readonly onDelete: () => Promise<void>;
+  readonly onSpawn: (body: SpawnRequestBody) => Promise<SessionLink>;
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly boards: readonly Board[];
   readonly onMove: (toBoardId: string) => Promise<void>;
   readonly onClose: () => void;
 }
 
-export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, onOpenSession, boards, onMove, onClose }: Props): JSX.Element {
+export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, onOpenSession, boards, onMove, onClose }: Props): JSX.Element {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [priority, setPriority] = useState<Priority>(task.priority);
   const [status, setStatus] = useState(task.status);
-  const [spawning, setSpawning] = useState(false);
-  const [spawnEnv, setSpawnEnv] = useState(envIds[0] ?? "");
-  // "" is the picker's "default" — no model field is sent, so the session inherits the last-used one.
-  const [spawnModel, setSpawnModel] = useState("");
-  // Unchecked by default, and deliberately NOT persisted between spawns: ticking it connects the new
-  // session to claude.ai, so it is an explicit decision every time (spec A.1).
-  const [spawnRemoteControl, setSpawnRemoteControl] = useState(false);
-  // Spawn "Into" targets: existing herdr spaces (join) + the env's configured repos (create new).
-  const [targets, setTargets] = useState<{ readonly spaces: readonly { workspaceId: string; label: string }[]; readonly repos: readonly { name: string }[] }>({ spaces: [], repos: [] });
-  const [selectedTarget, setSelectedTarget] = useState<string>(""); // a workspaceId (join) or "new:<repo>" (create)
-  const [spawnError, setSpawnError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [targetBoardId, setTargetBoardId] = useState(board.id);
   const [moving, setMoving] = useState(false);
   const [moveError, setMoveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [taskError, setTaskError] = useState<string | null>(null);
 
-  // Fetch spawn targets for the chosen env (unreachable env → no join spaces, but configured repos still show).
   useEffect(() => {
-    let cancelled = false;
-    if (spawnEnv === "") { setTargets({ spaces: [], repos: [] }); return; }
-    api.envs.spawnTargets(spawnEnv)
-      .then((t) => { if (!cancelled) setTargets(t); })
-      .catch(() => { if (!cancelled) setTargets({ spaces: [], repos: [] }); });
-    return () => { cancelled = true; };
-  }, [spawnEnv]);
+    // A save or delete in flight must not let a dismissal race its refusal — the same reason the
+    // overlay click and Cancel button below are guarded.
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === "Escape" && !saving && !deleting) onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("keydown", onKey); };
+  }, [onClose, saving, deleting]);
 
-  // A configured repo that already has a same-named space isn't offered as "new" — you'd join instead.
-  const spaceLabels = new Set(targets.spaces.map((s) => s.label.toLowerCase()));
-  const newRepoOptions = targets.repos.filter((r) => !spaceLabels.has(r.name.toLowerCase()));
+  async function handleSave(): Promise<void> {
+    setTaskError(null);
+    setSaving(true);
+    try {
+      await onSave({ title: title.trim(), description, status, priority });
+      onClose();
+    } catch (err) {
+      setTaskError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
 
-  // Default the picker to the first available target — an existing space, else a new-from-repo. The
-  // card no longer carries a repository to seed it from.
-  useEffect(() => {
-    const firstRepo = targets.repos[0];
-    setSelectedTarget(targets.spaces[0]?.workspaceId ?? (firstRepo !== undefined ? `new:${firstRepo.name}` : ""));
-  }, [targets]);
-
-  function handleSave(): void {
-    onSave({ title: title.trim(), description, status, priority });
-    onClose();
+  async function handleDelete(): Promise<void> {
+    setTaskError(null);
+    setDeleting(true);
+    try {
+      await onDelete();
+      onClose();
+    } catch (err) {
+      setTaskError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeleting(false);
+    }
   }
 
   async function handleMove(): Promise<void> {
@@ -78,46 +85,39 @@ export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, 
     }
   }
 
-  async function handleSpawn(): Promise<void> {
-    setSpawning(true);
-    setSpawnError(null);
-    try {
-      // Target value is either an existing workspaceId (join) or "new:<repo>" (create a space at the
-      // repo's configured path).
-      const isNew = selectedTarget.startsWith("new:");
-      const targetWorkspaceId = isNew ? null : selectedTarget;
-      const repoArg = isNew ? selectedTarget.slice(4) : null;
-      const link = await onSpawn({
-        env: spawnEnv, targetWorkspaceId, repo: repoArg,
-        model: spawnModel === "" ? null : spawnModel,
-        remoteControl: spawnRemoteControl,
-      });
-      onClose();
-      onOpenSession(link.env, link.paneId, true, task.title); // auto-attach; retry until claude registers as an agent
-    } catch (err) {
-      setSpawnError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSpawning(false);
-    }
-  }
-
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-card border border-border rounded-lg p-6 w-[480px] max-h-[80vh] overflow-y-auto" onClick={(e) => { e.stopPropagation(); }}>
-        <h2 className="text-foreground font-semibold mb-4">Edit task</h2>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" role="dialog" aria-modal="true"
+      onClick={() => { if (!saving && !deleting) onClose(); }}>
+      <div className="bg-card border border-border rounded-lg w-[min(900px,92vw)] max-h-[80vh] flex flex-col" onClick={(e) => { e.stopPropagation(); }}>
+        <h2 className="text-foreground font-semibold px-6 pt-6 pb-4">Edit task</h2>
+        <div className="px-6 overflow-y-auto flex-1">
 
-        <label className="block text-xs text-muted-foreground mb-1">Board / Project</label>
-        <div className="flex gap-2 mb-3">
-          <select className="flex-1 bg-background border border-border rounded px-3 py-2 text-foreground text-sm"
-            value={targetBoardId} onChange={(e) => { setTargetBoardId(e.target.value); }}>
-            {boards.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
-          </select>
-          {targetBoardId !== board.id && (
-            <button onClick={() => { void handleMove(); }} disabled={moving}
-              className="shrink-0 px-3 py-2 text-sm rounded border border-primary/60 text-primary hover:bg-primary/10 disabled:opacity-50">
-              {moving ? "Moving…" : "Move"}
-            </button>
-          )}
+        <div className="flex gap-3 mb-3">
+          <div className="flex-1 min-w-0">
+            <label className="block text-xs text-muted-foreground mb-1">Board / Project</label>
+            <div className="flex gap-2">
+              {/* min-w-0: a <select> won't shrink below its widest option on its own, so a long board
+                  name would push the Move button out of this row and over the Column select beside
+                  it (same family as ebd9d75's shrink-0-sibling overlap). */}
+              <select className="flex-1 min-w-0 bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
+                value={targetBoardId} onChange={(e) => { setTargetBoardId(e.target.value); }}>
+                {boards.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+              </select>
+              {targetBoardId !== board.id && (
+                <button onClick={() => { void handleMove(); }} disabled={moving}
+                  className="shrink-0 px-3 py-2 text-sm rounded border border-primary/60 text-primary hover:bg-primary/10 disabled:opacity-50">
+                  {moving ? "Moving…" : "Move"}
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <label className="block text-xs text-muted-foreground mb-1">Column</label>
+            <select className="w-full bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
+              value={status} onChange={(e) => { setStatus(e.target.value); }}>
+              {board.columns.map((col) => <option key={col.id} value={col.id}>{col.label}</option>)}
+            </select>
+          </div>
         </div>
         {moveError !== null && <p className="text-xs text-destructive mb-3">{moveError}</p>}
 
@@ -125,8 +125,8 @@ export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, 
         <input className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-3"
           value={title} onChange={(e) => { setTitle(e.target.value); }} />
 
-        <label className="block text-xs text-muted-foreground mb-1">Description (markdown)</label>
-        <textarea rows={4} className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-3 resize-none"
+        <label className="block text-xs text-muted-foreground mb-1">Description</label>
+        <textarea rows={11} className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-3 resize-y"
           value={description} onChange={(e) => { setDescription(e.target.value); }} />
 
         <label className="block text-xs text-muted-foreground mb-1">Priority</label>
@@ -139,79 +139,39 @@ export function TaskEditModal({ task, board, envIds, onSave, onDelete, onSpawn, 
           ))}
         </div>
 
-        <label className="block text-xs text-muted-foreground mb-1">Column</label>
-        <select className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-4"
-          value={status} onChange={(e) => { setStatus(e.target.value); }}>
-          {board.columns.map((col) => <option key={col.id} value={col.id}>{col.label}</option>)}
-        </select>
+        <SpawnPanel
+          envs={envs}
+          presets={board.spawnPresets}
+          defaultPresetId={board.defaultSpawnPresetId}
+          hasSessions={task.sessions.length > 0}
+          onSpawn={onSpawn}
+          onSpawned={(link) => { onClose(); onOpenSession(link.env, link.paneId, true, task.title); }}
+        />
+        </div>
 
-        {(() => {
-          const noTargets = targets.spaces.length === 0 && newRepoOptions.length === 0;
-          const canSpawn = spawnEnv !== "" && selectedTarget !== "";
-          return (
-            <div className="mb-4 p-3 bg-muted rounded">
-              <p className="text-xs text-muted-foreground mb-2">
-                {task.sessions.length > 0 ? "Spawn another session" : "Spawn a new session"}
-              </p>
-              <div className="flex gap-2 mb-1">
-                <select className="w-32 shrink-0 bg-background border border-border rounded px-2 py-1.5 text-foreground text-sm"
-                  value={spawnEnv} onChange={(e) => { setSpawnEnv(e.target.value); }} title="Environment">
-                  {envIds.map((id) => <option key={id} value={id}>{id}</option>)}
-                </select>
-                <select className="w-24 shrink-0 bg-background border border-border rounded px-2 py-1.5 text-foreground text-sm"
-                  value={spawnModel} onChange={(e) => { setSpawnModel(e.target.value); }} title="Model">
-                  <option value="">default</option>
-                  <option value="sonnet">sonnet</option>
-                  <option value="opus">opus</option>
-                  <option value="fable">fable</option>
-                </select>
-                <select className="flex-1 min-w-0 bg-background border border-border rounded px-2 py-1.5 text-foreground text-sm"
-                  value={selectedTarget} onChange={(e) => { setSelectedTarget(e.target.value); }} title="Where the session runs" disabled={noTargets}>
-                  {targets.spaces.length > 0 && (
-                    <optgroup label="Existing spaces (join)">
-                      {targets.spaces.map((s) => <option key={s.workspaceId} value={s.workspaceId}>{s.label}</option>)}
-                    </optgroup>
-                  )}
-                  {newRepoOptions.length > 0 && (
-                    <optgroup label="New space from repo">
-                      {newRepoOptions.map((r) => <option key={r.name} value={`new:${r.name}`}>＋ {r.name}</option>)}
-                    </optgroup>
-                  )}
-                </select>
-                <button onClick={() => { void handleSpawn(); }} disabled={spawning || !canSpawn}
-                  className="shrink-0 px-3 py-1.5 bg-success text-success-foreground text-sm rounded hover:bg-success/90 disabled:opacity-50">
-                  {spawning ? "Spawning…" : "Spawn"}
-                </button>
-              </div>
-              <p className="text-xs text-muted-foreground">Into an existing herdr space, or a new one from a repo in <span className="text-foreground/80 font-mono">environments.json</span>.</p>
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1 cursor-pointer">
-                <input type="checkbox" className="accent-success"
-                  checked={spawnRemoteControl}
-                  onChange={(e) => { setSpawnRemoteControl(e.target.checked); }} />
-                Remote Control — start it connected to claude.ai, reachable from a phone
-              </label>
-              {noTargets && spawnError === null && (
-                <p className="text-xs text-muted-foreground mt-1">No spaces or configured repos for this env — add repos to its <span className="font-mono">environments.json</span> entry, or create a space in herdr.</p>
-              )}
-              {spawnError !== null && (
-                <p className="text-xs text-destructive whitespace-pre-wrap mt-1">{spawnError}</p>
-              )}
+        <div className="flex flex-col gap-2 px-6 py-4 border-t border-border bg-card">
+          {taskError !== null && <p className="text-xs text-destructive">{taskError}</p>}
+          <div className="flex justify-between">
+            {confirmDelete
+              ? <div className="flex gap-2">
+                  <span className="text-xs text-destructive self-center">Delete this task?</span>
+                  <button onClick={() => { void handleDelete(); }} disabled={deleting || saving}
+                    className="px-3 py-1.5 bg-destructive text-destructive-foreground text-xs rounded disabled:opacity-50">
+                    {deleting ? "Deleting…" : "Confirm"}
+                  </button>
+                  <button onClick={() => { setConfirmDelete(false); }} disabled={deleting}
+                    className="px-3 py-1.5 text-xs text-muted-foreground disabled:opacity-50">Cancel</button>
+                </div>
+              : <button onClick={() => { setConfirmDelete(true); }} className="text-xs text-destructive hover:text-destructive/80">Delete task</button>
+            }
+            <div className="flex gap-2">
+              <button onClick={onClose} disabled={saving || deleting}
+                className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50">Cancel</button>
+              <button onClick={() => { void handleSave(); }} disabled={saving || deleting}
+                className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90 disabled:opacity-50">
+                {saving ? "Saving…" : "Save"}
+              </button>
             </div>
-          );
-        })()}
-
-        <div className="flex justify-between">
-          {confirmDelete
-            ? <div className="flex gap-2">
-                <span className="text-xs text-destructive self-center">Delete this task?</span>
-                <button onClick={onDelete} className="px-3 py-1.5 bg-destructive text-destructive-foreground text-xs rounded">Confirm</button>
-                <button onClick={() => { setConfirmDelete(false); }} className="px-3 py-1.5 text-xs text-muted-foreground">Cancel</button>
-              </div>
-            : <button onClick={() => { setConfirmDelete(true); }} className="text-xs text-destructive hover:text-destructive/80">Delete task</button>
-          }
-          <div className="flex gap-2">
-            <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
-            <button onClick={handleSave} className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90">Save</button>
           </div>
         </div>
       </div>

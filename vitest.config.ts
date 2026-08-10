@@ -7,7 +7,8 @@ export default defineConfig({
   // or every test importing `@shared/schema` (Tasks 2, 7, 8, 10, 11) fails to resolve.
   resolve: { alias: { "@shared": path.resolve(import.meta.dirname, "shared") } },
   test: {
-    include: ["test/**/*.test.ts"],
+    // .tsx for the one component test (BoardSettingsModal) that renders JSX; every other test stays .ts.
+    include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
     environment: "node",
     globals: false,
     // environments.ts loads ENVIRONMENTS at import time from $CORRAL_CONFIG. A SETUP FILE (not

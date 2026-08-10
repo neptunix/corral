@@ -28,6 +28,19 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+// The spawn body, built by the caller. An eighth positional argument whose neighbors are already
+// `null` is past the point of readability, so this route takes one object. Optional keys are
+// OMITTED, never sent as null/false: the route reads absence as "off" for remoteControl and as
+// "inherit" for model.
+export interface SpawnRequestBody {
+  readonly env: string;
+  readonly targetWorkspaceId: string | null;
+  readonly repo: string | null;
+  readonly model?: string;
+  readonly remoteControl?: true;
+  readonly startCommand?: string;
+}
+
 export const api = {
   boards: {
     list: () => req<Board[]>("/api/boards"),
@@ -36,7 +49,7 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ label }),
       }),
-    update: (bid: string, patch: Partial<Pick<Board, "label" | "columns">>) =>
+    update: (bid: string, patch: Partial<Pick<Board, "label" | "columns" | "spawnPresets" | "defaultSpawnPresetId">>) =>
       req<Board>(`/api/boards/${bid}`, {
         method: "PATCH",
         body: JSON.stringify(patch),
@@ -49,7 +62,8 @@ export const api = {
       bid: string,
       data: {
         title: string;
-        status: string;
+        // Omitted → the server resolves the board's landing column (mirrors fromSession below).
+        status?: string;
         priority?: string | null;
         description?: string;
       },
@@ -116,21 +130,10 @@ export const api = {
         method: "POST",
         body: JSON.stringify(data),
       }),
-    // repo (config key) roots a NEW space; null when joining an existing space. model is null for the
-    // picker's "default" — the field is then omitted so the session inherits the last-used model.
-    // remoteControl false is likewise omitted rather than sent: the route reads absence as off, and
-    // connecting a session to claude.ai is never implied (spec A.1).
-    spawn: (bid: string, tid: string, env: string, targetWorkspaceId: string | null, repo: string | null, model: string | null, remoteControl: boolean) =>
+    spawn: (bid: string, tid: string, body: SpawnRequestBody) =>
       req<SessionLink & { idempotent: boolean }>(
         `/api/boards/${bid}/tasks/${tid}/spawn`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            env, targetWorkspaceId, repo,
-            ...(model === null ? {} : { model }),
-            ...(remoteControl ? { remoteControl: true } : {}),
-          }),
-        },
+        { method: "POST", body: JSON.stringify(body) },
       ),
     move: (bid: string, tid: string, toBoardId: string) =>
       req<{ ok: boolean }>(`/api/boards/${bid}/tasks/${tid}/move`, {

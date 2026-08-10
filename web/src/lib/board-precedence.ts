@@ -2,8 +2,9 @@ import type { BoardState, StreamFrame } from "@shared/board-schema";
 
 /**
  * Which of the three board sources the view renders. Kept here, pure and tested, because the order is
- * the whole safety argument for the REST seed and a single `??` swap silently inverts it — there is no
- * component test runner in this repo to catch that (vitest runs in `node`).
+ * the whole safety argument for the REST seed and a single `??` swap silently inverts it — asserting
+ * it directly on three plain inputs is more direct than driving App's full render tree through mocked
+ * SSE/fetch just to hit one branch order.
  *
  * Freshest first: an optimistic / post-mutation override, then the live SSE frame, then the cold-start
  * seed fetched once per board from `GET /api/state?board=`.

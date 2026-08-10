@@ -11,7 +11,7 @@ beforeEach(() => { tmpDir = mkdtempSync(path.join(os.tmpdir(), "storage-test-"))
 afterEach(() => { rmSync(tmpDir, { recursive: true, force: true }); });
 
 const makeBoard = (id: string): Board => ({
-  id, label: id, columns: [{ id: "todo", label: "Todo" }], tasks: [],
+  id, label: id, columns: [{ id: "todo", label: "Todo" }], tasks: [], spawnPresets: [], defaultSpawnPresetId: null,
 });
 
 describe("createStorage", () => {

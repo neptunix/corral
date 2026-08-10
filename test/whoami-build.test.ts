@@ -47,6 +47,7 @@ const board: Board = {
       { env: "work-local", paneId: "w1:p9", tabId: "tab9", tabLabel: "api-refactor-c", workspaceId: "ws1", workspaceLabel: "repo", name: "api-refactor-c", cwdSnapshot: "/repo", sessionId: "00000000-0000-4000-8000-000000000000" },
     ],
   }],
+  spawnPresets: [], defaultSpawnPresetId: null,
 };
 
 describe("buildWhoami", () => {
