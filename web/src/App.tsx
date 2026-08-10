@@ -318,7 +318,9 @@ export function App(): JSX.Element {
         <BoardSettingsModal
           board={activeBoardState.board}
           onSave={(patch) => {
-            void api.boards.update(activeBoardId, patch).then(() => { refreshBoards(); });
+            void api.boards.update(activeBoardId, patch)
+              .then(() => { refreshBoards(); })
+              .catch((err: unknown) => { window.alert(`Save failed: ${err instanceof Error ? err.message : String(err)}`); });
           }}
           onClose={() => { setShowSettings(false); }}
         />

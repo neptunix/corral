@@ -142,11 +142,10 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
   }
 
   function handleSave(): void {
-    // Every PATCH-boundary rule is pre-checked HERE, and that is not belt-and-braces. The save is
-    // fire-and-forget at the render site (App.tsx: `void api.boards.update(...)`) and this modal
-    // closes on Save, so a 400 from the server is invisible — and it takes the label and the columns
-    // down with the presets, because they all travel in one patch. Any rejection the server can
-    // produce must therefore be unreachable from this button.
+    // These pre-checks cover the rejections this form can itself produce (blank name, bad/oversized/
+    // too-many presets) — they can't cover a 503/404/dropped connection, so the render site's `.catch`
+    // (App.tsx) is what makes those visible instead of silent.
+    if (label.trim() === "") { setSaveError("A board needs a name."); return; }
     // Blank rows are dropped rather than rejected: an empty row is "I changed my mind", not an error.
     const kept = presets.filter((p) => p.text.trim() !== "").map((p) => ({ ...p, text: p.text.trim() }));
     const bad = kept.find((p) => !/^[/A-Za-z0-9]/.test(p.text));
