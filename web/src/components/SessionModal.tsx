@@ -12,6 +12,7 @@ import { formatDropInjection, formatPaste } from "../lib/paste";
 import { closeMessage } from "../lib/protocol";
 import { sessionStateLabel } from "../lib/session-state";
 import { isStale } from "../lib/time";
+import { attachTouchScroll } from "../lib/touch-scroll";
 import { isFileDrag, uploadFile, UPLOAD_MAX_BYTES } from "../lib/upload";
 
 import "@xterm/xterm/css/xterm.css";
@@ -288,12 +289,15 @@ export function SessionModal({
 
     const ro = new ResizeObserver(() => { sendResize(); });
     ro.observe(el);
+    // Without this the pane cannot be scrolled at all on a phone — why, in lib/touch-scroll.ts.
+    const detachTouchScroll = attachTouchScroll(el);
 
     return () => {
       disposed = true;
       if (liveTimer !== undefined) clearTimeout(liveTimer);
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       ro.disconnect();
+      detachTouchScroll();
       el.removeEventListener("paste", onPasteCapture, true);
       dataSub.dispose();
       selSub.dispose();
@@ -340,7 +344,10 @@ export function SessionModal({
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
       <div
-        className="relative bg-card/75 backdrop-blur-md border border-border rounded-lg shadow-2xl w-[90vw] h-[90vh] flex flex-col overflow-hidden"
+        // dvh, not vh: on iOS `vh` is the LARGE viewport (toolbars hidden), so with the Safari toolbars
+        // shown a 90vh panel overflows the visible area — and `fixed inset-0` means it cannot be
+        // scrolled to. The terminal is the flex child that absorbs the difference.
+        className="relative bg-card/75 backdrop-blur-md border border-border rounded-lg shadow-2xl w-[90vw] h-[90dvh] flex flex-col overflow-hidden"
         onClick={(e) => { e.stopPropagation(); }}
         onDragEnter={(e) => { if (canAttachFiles && isFileDrag(e.dataTransfer.types)) { e.preventDefault(); setDragging(true); } }}
         onDragOver={(e) => { if (canAttachFiles && isFileDrag(e.dataTransfer.types)) e.preventDefault(); }}
