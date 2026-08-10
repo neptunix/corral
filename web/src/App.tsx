@@ -317,11 +317,7 @@ export function App(): JSX.Element {
       {showSettings && activeBoardId !== null && activeBoardState !== null && (
         <BoardSettingsModal
           board={activeBoardState.board}
-          onSave={(patch) => {
-            void api.boards.update(activeBoardId, patch)
-              .then(() => { refreshBoards(); })
-              .catch((err: unknown) => { window.alert(`Save failed: ${err instanceof Error ? err.message : String(err)}`); });
-          }}
+          onSave={(patch) => api.boards.update(activeBoardId, patch).then(() => { refreshBoards(); })}
           onClose={() => { setShowSettings(false); }}
         />
       )}

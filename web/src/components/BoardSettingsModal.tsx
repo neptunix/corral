@@ -8,7 +8,9 @@ import { useEffect, useState } from "react";
 
 interface Props {
   readonly board: Board;
-  readonly onSave: (patch: { label?: string; columns?: Column[]; spawnPresets?: SpawnPreset[]; defaultSpawnPresetId?: string | null }) => void;
+  // Returns a promise that REJECTS on a refused save, so handleSave can keep the modal open and
+  // show the server's message instead of closing on a failure it never saw.
+  readonly onSave: (patch: { label?: string; columns?: Column[]; spawnPresets?: SpawnPreset[]; defaultSpawnPresetId?: string | null }) => Promise<void>;
   readonly onClose: () => void;
 }
 
@@ -85,6 +87,7 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
   const [presets, setPresets] = useState<SpawnPreset[]>([...board.spawnPresets]);
   const [defaultPresetId, setDefaultPresetId] = useState<string | null>(board.defaultSpawnPresetId);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
@@ -149,10 +152,10 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
     setDefaultPresetId((cur) => cur === id ? null : cur);
   }
 
-  function handleSave(): void {
+  async function handleSave(): Promise<void> {
     // These pre-checks cover the rejections this form can itself produce (blank name, bad/oversized/
-    // too-many presets) — they can't cover a 503/404/dropped connection, so the render site's `.catch`
-    // (App.tsx) is what makes those visible instead of silent.
+    // too-many presets) — they can't cover a 503/404/dropped connection, so a rejected `onSave` below
+    // is what makes those visible, through this same saveError channel, instead of silent.
     if (label.trim() === "") { setSaveError("A board needs a name."); return; }
     // Blank rows are dropped rather than rejected: an empty row is "I changed my mind", not an error.
     const kept = presets.filter((p) => p.text.trim() !== "").map((p) => ({ ...p, text: p.text.trim() }));
@@ -173,13 +176,20 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
     // Duplicate ids cannot happen through this UI (generateSpawnPresetId mints each row), so there is
     // no fourth check — the server's rule guards the API, not this form.
     setSaveError(null);
-    onSave({
-      label: label.trim(),
-      columns,
-      spawnPresets: kept,
-      defaultSpawnPresetId: kept.some((p) => p.id === defaultPresetId) ? defaultPresetId : null,
-    });
-    onClose();
+    setSaving(true);
+    try {
+      await onSave({
+        label: label.trim(),
+        columns,
+        spawnPresets: kept,
+        defaultSpawnPresetId: kept.some((p) => p.id === defaultPresetId) ? defaultPresetId : null,
+      });
+      onClose();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -246,8 +256,8 @@ export function BoardSettingsModal({ board, onSave, onClose }: Props): JSX.Eleme
           {saveError !== null && <p className="text-xs text-destructive min-w-0 flex-1">{saveError}</p>}
           <div className="flex gap-2 shrink-0 ml-auto">
             <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
-            <button onClick={handleSave}
-              className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90">Save</button>
+            <button onClick={() => { void handleSave(); }} disabled={saving}
+              className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90 disabled:opacity-50">Save</button>
           </div>
         </div>
       </div>
