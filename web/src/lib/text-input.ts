@@ -25,79 +25,87 @@
 // insertCompositionText inputType, and xterm's CompositionHelper still owns the preedit overlay and the
 // commit. Only committed plain text is claimed.
 
+/** The part of a keydown that says whether an input method ate the character. */
+export interface KeydownFacts {
+  readonly key: string;
+  readonly keyCode: number;
+}
+
+/**
+ * True when the IM consumed the keystroke and left the character to arrive as inserted text — the case
+ * xterm cannot handle. `key === "Process"` is the spec value for exactly that and is what Firefox
+ * reports behind ibus/fcitx. The keyCode 229 arm covers engines that report "Unidentified" instead, but
+ * ONLY when `key` is not the character itself: iOS Safari also reports 229 for its software keyboard
+ * while putting the real character in `key`, and there xterm's own _inputEvent path works — claiming
+ * those would send every letter twice.
+ */
+export function isImSwallowedKeydown(e: KeydownFacts): boolean {
+  if (e.key === "Process") return true;
+  return e.keyCode === 229 && e.key.length !== 1;
+}
+
 /** The decision `beforeinput` needs, split out from the DOM so it is testable. */
 export interface BeforeInputFacts {
   readonly isComposing: boolean;
   readonly inputType: string;
   readonly data: string | null;
+  /** Whether the keydown that produced this insertion was IM-swallowed (isImSwallowedKeydown). */
+  readonly afterImKeydown: boolean;
 }
 
 /**
  * Text to send for a `beforeinput`, or null to leave the event alone.
  *
- * Only `insertText` outside a composition is claimed. Deletions, history (undo/redo), drops and every
- * composition inputType fall through: Backspace and friends arrive as real keys that xterm's keydown
- * path already handles, and stealing them here would double them up.
+ * Only `insertText` outside a composition, and only following an IM-swallowed keydown. Everything else
+ * belongs to xterm and stealing it doubles the character: an ordinary keydown is sent by _keyDown, and
+ * an insertion with no keydown at all (iOS software keyboard, dictation, autocorrect) satisfies
+ * _inputEvent's `!_keyDownSeen` gate and is sent there. Deletions, history and composition inputTypes
+ * fall through for the same reason.
  */
 export function committedText(e: BeforeInputFacts): string | null {
+  if (!e.afterImKeydown) return null;
   if (e.isComposing) return null;
   if (e.inputType !== "insertText") return null;
   return e.data !== null && e.data !== "" ? e.data : null;
 }
 
 /**
- * One-slot guard so a single keystroke cannot reach the socket twice. Both senders — xterm's onData and
- * the beforeinput path below — claim through it, and the first one for a given text wins.
- *
- * Needed because the two paths are not mutually exclusive on every platform. On Linux/Firefox behind an
- * IM module only beforeinput carries the character, which is the whole point of this module; on iOS
- * Safari the software keyboard ALSO drives one of xterm's own paths, and preventDefault does not
- * reliably suppress the insertion, so the same letter arrived twice. Rather than enumerate which
- * internal path fires where, dedupe on the one fact that matters: the same text, for the same key event.
- *
- * Ordering makes the window exact. Within one key event the possible sends are, in order:
- *   (a) xterm's keydown/keypress handler, (b) this module's beforeinput, (c) xterm's textarea diff,
- * where (c) is a setTimeout(0) armed back at keydown. A claim arms its own setTimeout(0) release, and
- * same-delay timers fire in the order they were scheduled — so (c)'s timer, scheduled first, always runs
- * while the slot is still held. Two genuine presses of the same key are separate tasks tens of
- * milliseconds apart (even at auto-repeat), so the slot is long released by the second.
- */
-export interface EchoGuard {
-  /** True when the caller should send; false when an identical send already happened for this key event. */
-  readonly claim: (text: string) => boolean;
-}
-
-/** `defer` is injectable so tests can drive the release without timers. */
-export function createEchoGuard(defer: (fn: () => void) => void = (fn) => { setTimeout(fn, 0); }): EchoGuard {
-  let inFlight: string | null = null;
-  return {
-    claim(text: string): boolean {
-      if (inFlight === text) return false;
-      inFlight = text;
-      defer(() => { inFlight = null; });
-      return true;
-    },
-  };
-}
-
-/**
  * Binds the path to xterm's helper textarea. `send` receives the committed text; it must apply the same
- * live/OPEN gating as the onData handler, and claim through the shared EchoGuard.
+ * live/OPEN gating as the onData handler.
  *
- * CAPTURE phase, and preventDefault on every claimed event: where the browser honours it the textarea
- * stays byte-identical, so xterm's pending diff sees no growth and never sends a second copy. Where it
- * does not (iOS), the EchoGuard catches what gets through.
+ * The keydown listener only records whether the IM ate the character; the flag is consumed by the next
+ * insertion so one keydown can authorise at most one, and any keydown that is not IM-swallowed clears it.
+ *
+ * CAPTURE phase, and preventDefault on every claimed event: the textarea must stay byte-identical, or
+ * _handleAnyTextareaChanges' pending diff sees growth and sends a second copy of the same character.
  */
 export function attachCommittedTextInput(
   textarea: HTMLTextAreaElement,
   send: (text: string) => void,
 ): () => void {
+  let afterImKeydown = false;
+
+  function onKeyDown(e: KeyboardEvent): void {
+    afterImKeydown = isImSwallowedKeydown(e);
+  }
+
   function onBeforeInput(e: InputEvent): void {
-    const text = committedText(e);
+    const text = committedText({
+      isComposing: e.isComposing,
+      inputType: e.inputType,
+      data: e.data,
+      afterImKeydown,
+    });
+    afterImKeydown = false;
     if (text === null) return;
     e.preventDefault();
     send(text);
   }
+
+  textarea.addEventListener("keydown", onKeyDown, true);
   textarea.addEventListener("beforeinput", onBeforeInput, true);
-  return () => { textarea.removeEventListener("beforeinput", onBeforeInput, true); };
+  return () => {
+    textarea.removeEventListener("keydown", onKeyDown, true);
+    textarea.removeEventListener("beforeinput", onBeforeInput, true);
+  };
 }
