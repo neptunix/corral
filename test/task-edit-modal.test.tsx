@@ -142,3 +142,26 @@ describe("TaskEditModal — dismissal guarded while in flight", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+describe("TaskEditModal — Board/Project row layout", () => {
+  it("keeps the Board select and Move button as siblings, with min-w-0 on the select so it can shrink below its widest option", () => {
+    const board = makeBoard();
+    const otherBoard = makeBoard({ id: "b2", label: "A".repeat(80) });
+    const task = makeTask();
+    render(<TaskEditModal task={task} board={board} {...baseProps} onSave={vi.fn()} onDelete={vi.fn()} boards={[board, otherBoard]} onClose={vi.fn()} />);
+
+    // Picking a different board renders the Move button next to the select — the layout under test.
+    fireEvent.change(screen.getByDisplayValue(board.label), { target: { value: otherBoard.id } });
+
+    const moveButton = screen.getByRole("button", { name: "Move" });
+    const row = moveButton.parentElement;
+    expect(row).not.toBeNull();
+    if (row === null) return;
+    const select = Array.from(row.children).find((el): el is HTMLSelectElement => el instanceof HTMLSelectElement);
+    expect(select).toBeDefined();
+    if (select === undefined) return;
+    // A <select> won't shrink below its widest option on its own — min-w-0 is what lets the flex-1
+    // box actually shrink instead of pushing this row's shrink-0 sibling (the Move button) out.
+    expect(select.className.split(/\s+/)).toContain("min-w-0");
+  });
+});

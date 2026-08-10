@@ -96,7 +96,10 @@ export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, on
           <div className="flex-1 min-w-0">
             <label className="block text-xs text-muted-foreground mb-1">Board / Project</label>
             <div className="flex gap-2">
-              <select className="flex-1 bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
+              {/* min-w-0: a <select> won't shrink below its widest option on its own, so a long board
+                  name would push the Move button out of this row and over the Column select beside
+                  it (same family as ebd9d75's shrink-0-sibling overlap). */}
+              <select className="flex-1 min-w-0 bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
                 value={targetBoardId} onChange={(e) => { setTargetBoardId(e.target.value); }}>
                 {boards.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
               </select>
