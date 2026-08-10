@@ -11,7 +11,7 @@ import { contextLevelClass } from "../lib/level";
 import { formatDropInjection, formatPaste } from "../lib/paste";
 import { closeMessage } from "../lib/protocol";
 import { sessionStateLabel } from "../lib/session-state";
-import { attachCommittedTextInput } from "../lib/text-input";
+import { attachCommittedTextInput, createEchoGuard } from "../lib/text-input";
 import { isStale } from "../lib/time";
 import { isFileDrag, uploadFile, UPLOAD_MAX_BYTES } from "../lib/upload";
 
@@ -233,11 +233,15 @@ export function SessionModal({
       setCloseInfo({ code: e.code, reason: e.reason });
     };
 
+    // Shared by both keystroke senders so one key press cannot be transmitted twice — see lib/text-input.ts.
+    const echo = createEchoGuard();
+
     // Keystrokes → binary frame (the bridge treats binary as raw input); resize → text frame (JSON control).
     const dataSub = term.onData((d) => {
       // Drop input while buffering a not-yet-live session: output is hidden during "starting…", so any
       // keystroke would be blind — typed into a terminal the operator can't see. Flows once goLive fires.
       if (!live) return;
+      if (!echo.claim(d)) return;
       if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(d));
     });
 
@@ -279,6 +283,7 @@ export function SessionModal({
       ? () => undefined
       : attachCommittedTextInput(helperTextarea, (text) => {
         if (!live || ws.readyState !== WebSocket.OPEN) return;
+        if (!echo.claim(text)) return;
         ws.send(new TextEncoder().encode(text));
         if (term.options.scrollOnUserInput === true) term.scrollToBottom();
       });

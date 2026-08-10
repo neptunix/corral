@@ -46,11 +46,47 @@ export function committedText(e: BeforeInputFacts): string | null {
 }
 
 /**
- * Binds the path to xterm's helper textarea. `send` receives the committed text; it must apply the same
- * live/OPEN gating as the onData handler.
+ * One-slot guard so a single keystroke cannot reach the socket twice. Both senders — xterm's onData and
+ * the beforeinput path below — claim through it, and the first one for a given text wins.
  *
- * CAPTURE phase, and preventDefault on every claimed event: the textarea must stay byte-identical, or
- * _handleAnyTextareaChanges' pending diff sees growth and sends a second copy of the same character.
+ * Needed because the two paths are not mutually exclusive on every platform. On Linux/Firefox behind an
+ * IM module only beforeinput carries the character, which is the whole point of this module; on iOS
+ * Safari the software keyboard ALSO drives one of xterm's own paths, and preventDefault does not
+ * reliably suppress the insertion, so the same letter arrived twice. Rather than enumerate which
+ * internal path fires where, dedupe on the one fact that matters: the same text, for the same key event.
+ *
+ * Ordering makes the window exact. Within one key event the possible sends are, in order:
+ *   (a) xterm's keydown/keypress handler, (b) this module's beforeinput, (c) xterm's textarea diff,
+ * where (c) is a setTimeout(0) armed back at keydown. A claim arms its own setTimeout(0) release, and
+ * same-delay timers fire in the order they were scheduled — so (c)'s timer, scheduled first, always runs
+ * while the slot is still held. Two genuine presses of the same key are separate tasks tens of
+ * milliseconds apart (even at auto-repeat), so the slot is long released by the second.
+ */
+export interface EchoGuard {
+  /** True when the caller should send; false when an identical send already happened for this key event. */
+  readonly claim: (text: string) => boolean;
+}
+
+/** `defer` is injectable so tests can drive the release without timers. */
+export function createEchoGuard(defer: (fn: () => void) => void = (fn) => { setTimeout(fn, 0); }): EchoGuard {
+  let inFlight: string | null = null;
+  return {
+    claim(text: string): boolean {
+      if (inFlight === text) return false;
+      inFlight = text;
+      defer(() => { inFlight = null; });
+      return true;
+    },
+  };
+}
+
+/**
+ * Binds the path to xterm's helper textarea. `send` receives the committed text; it must apply the same
+ * live/OPEN gating as the onData handler, and claim through the shared EchoGuard.
+ *
+ * CAPTURE phase, and preventDefault on every claimed event: where the browser honours it the textarea
+ * stays byte-identical, so xterm's pending diff sees no growth and never sends a second copy. Where it
+ * does not (iOS), the EchoGuard catches what gets through.
  */
 export function attachCommittedTextInput(
   textarea: HTMLTextAreaElement,
