@@ -64,7 +64,9 @@ export const BoardSchema = z.object({
   columns: z.array(ColumnSchema),
   tasks: z.array(TaskSchema).default([]),
   // Defaults, never .optional(): a board written before these existed heals on parse, and every Board
-  // value is uniformly shaped. A defaultSpawnPresetId matching no preset resolves to no default.
+  // value is uniformly shaped. A dangling defaultSpawnPresetId (matching no preset) is NOT resolved
+  // here — that normalization lives only at the PATCH boundary (server/api.ts), so a board file
+  // carrying a stale id still parses and loads with it.
   spawnPresets: z.array(SpawnPresetSchema).default([]),
   defaultSpawnPresetId: z.string().nullable().default(null),
 });

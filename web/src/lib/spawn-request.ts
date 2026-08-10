@@ -3,7 +3,9 @@ import type { SpawnRequestBody } from "./api";
 /**
  * The spawn request body, built from the panel's form state.
  *
- * Pure and tested here because two rules carry real logic and this repo has no component test runner:
+ * Pure and tested here because two rules carry real logic — asserting them directly on plain input is
+ * more direct than driving SpawnPanel's rendered form through several layers of DOM interaction to
+ * hit the same two branches:
  *
  * 1. Optional keys are OMITTED at their defaults, never sent as null/false — the route reads absence
  *    as "off" (remoteControl) and "inherit" (model), so sending a falsy value is a different request.
