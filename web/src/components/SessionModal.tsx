@@ -11,6 +11,7 @@ import { contextLevelClass } from "../lib/level";
 import { formatDropInjection, formatPaste } from "../lib/paste";
 import { closeMessage } from "../lib/protocol";
 import { sessionStateLabel } from "../lib/session-state";
+import { attachCommittedTextInput } from "../lib/text-input";
 import { isStale } from "../lib/time";
 import { attachTouchScroll } from "../lib/touch-scroll";
 import { isFileDrag, uploadFile, UPLOAD_MAX_BYTES } from "../lib/upload";
@@ -272,6 +273,17 @@ export function SessionModal({
     };
     el.addEventListener("paste", onPasteCapture, true);
 
+    // IM-routed keystrokes (ibus/fcitx → keydown "Process"/229) never reach term.onData — see
+    // lib/text-input.ts. Same live/OPEN gate, plus the scroll-to-bottom triggerDataEvent would have done.
+    const helperTextarea = term.textarea;
+    const detachTextInput = helperTextarea === undefined
+      ? () => undefined
+      : attachCommittedTextInput(helperTextarea, (text) => {
+        if (!live || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(new TextEncoder().encode(text));
+        if (term.options.scrollOnUserInput === true) term.scrollToBottom();
+      });
+
     // Bridge for the drop handler to inject uploaded file paths over the same binary keystroke channel.
     // Guarded on `live` + OPEN like onData, so a drop during "starting…" or after close is a safe no-op.
     sendInputRef.current = (bytes: Uint8Array): void => {
@@ -299,6 +311,7 @@ export function SessionModal({
       ro.disconnect();
       detachTouchScroll();
       el.removeEventListener("paste", onPasteCapture, true);
+      detachTextInput();
       dataSub.dispose();
       selSub.dispose();
       // Closing the socket triggers the server-side SIGHUP→SIGKILL reap and releases herdr --takeover,
