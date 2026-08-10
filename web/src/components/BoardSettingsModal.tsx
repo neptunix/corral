@@ -274,35 +274,43 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
         </div>
         <button onClick={addPreset} className="px-3 py-1 mb-4 bg-muted text-foreground text-sm rounded hover:bg-muted/80">Add start command</button>
         </div>
-        <div className="flex items-center gap-2 px-6 py-4 border-t border-border bg-card">
-          {confirmDelete ? (
-            <div className="flex gap-2 items-center shrink-0">
-              <span className="text-xs text-destructive">Delete this board?</span>
-              <button onClick={() => { void handleDelete(); }} disabled={deleting}
-                className="px-3 py-1.5 bg-destructive text-destructive-foreground text-xs rounded disabled:opacity-50">Confirm</button>
-              <button onClick={() => { setConfirmDelete(false); }} disabled={deleting}
-                className="px-3 py-1.5 text-xs text-muted-foreground">Cancel</button>
+        {/* Its own row above the button row: the error must always render at full width, never
+            squeezed by a `shrink-0` sibling down to a zero-width box that overlaps the buttons. */}
+        <div className="flex flex-col gap-2 px-6 py-4 border-t border-border bg-card">
+          {saveError !== null && <p className="text-xs text-destructive">{saveError}</p>}
+          <div className="flex items-center gap-2 flex-wrap">
+            {confirmDelete ? (
+              <div className="flex gap-2 items-center flex-wrap">
+                <span className="text-xs text-destructive">Delete this board?</span>
+                <button onClick={() => { void handleDelete(); }} disabled={deleting}
+                  className="px-3 py-1.5 bg-destructive text-destructive-foreground text-xs rounded disabled:opacity-50">Confirm</button>
+                {/* Not "Cancel" — the footer's other button already means "close the modal"; this one
+                    only abandons the delete confirmation, so it needs its own label. */}
+                <button onClick={() => { setConfirmDelete(false); }} disabled={deleting}
+                  className="px-3 py-1.5 text-xs text-muted-foreground">Keep board</button>
+              </div>
+            ) : (
+              // Column, not row: the reason sits below the button instead of beside it, so a long
+              // reason wraps in its own block instead of competing with the button for row width.
+              <div className="flex flex-col gap-0.5 min-w-0">
+                {/* Disabled-with-a-reason, not hidden — a board with tasks teaches the operator nothing
+                    if the control just isn't there. The count is the server's own not-empty rule. */}
+                <button onClick={() => { setConfirmDelete(true); }} disabled={taskCount > 0 || deleting}
+                  className="text-xs text-destructive hover:text-destructive/80 disabled:opacity-50 disabled:hover:text-destructive text-left">
+                  Delete board
+                </button>
+                {taskCount > 0 && (
+                  <span className="text-[11px] text-muted-foreground">
+                    Delete is available only for an empty board ({String(taskCount)} task{taskCount === 1 ? "" : "s"})
+                  </span>
+                )}
+              </div>
+            )}
+            <div className="flex gap-2 ml-auto">
+              <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
+              <button onClick={() => { void handleSave(); }} disabled={saving || deleting}
+                className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90 disabled:opacity-50">Save</button>
             </div>
-          ) : (
-            <div className="flex items-center gap-2 shrink-0 min-w-0">
-              {/* Disabled-with-a-reason, not hidden — a board with tasks teaches the operator nothing
-                  if the control just isn't there. The count is the server's own not-empty rule. */}
-              <button onClick={() => { setConfirmDelete(true); }} disabled={taskCount > 0 || deleting}
-                className="text-xs text-destructive hover:text-destructive/80 disabled:opacity-50 disabled:hover:text-destructive">
-                Delete board
-              </button>
-              {taskCount > 0 && (
-                <span className="text-[11px] text-muted-foreground">
-                  Delete is available only for an empty board ({String(taskCount)} task{taskCount === 1 ? "" : "s"})
-                </span>
-              )}
-            </div>
-          )}
-          {saveError !== null && <p className="text-xs text-destructive min-w-0 flex-1">{saveError}</p>}
-          <div className="flex gap-2 shrink-0 ml-auto">
-            <button onClick={onClose} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground">Cancel</button>
-            <button onClick={() => { void handleSave(); }} disabled={saving || deleting}
-              className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90 disabled:opacity-50">Save</button>
           </div>
         </div>
       </div>

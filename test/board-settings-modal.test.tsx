@@ -114,4 +114,48 @@ describe("BoardSettingsModal — delete board", () => {
     await waitFor(() => { expect(screen.getByText("Board has 1 task — delete or move them first.")).toBeDefined(); });
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it("does not show two identically-labelled Cancel controls while the delete confirmation is open", () => {
+    render(<BoardSettingsModal board={makeBoard()} onSave={vi.fn()} onDelete={vi.fn()} onClose={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete board" }));
+
+    // Two distinct actions ("abandon the delete confirmation" vs. "close the modal") must not share
+    // one ambiguous label.
+    expect(screen.getAllByRole("button", { name: "Cancel" })).toHaveLength(1);
+  });
+});
+
+describe("BoardSettingsModal — footer layout under a long disabled-reason plus a saveError", () => {
+  // jsdom does not compute real geometry, so this cannot see the actual zero-width collapse or the
+  // painted overlap. It instead guards the DOM-level mechanism that produced it: a saveError sharing
+  // a flex row with a `shrink-0` sibling (which is what let the sibling starve saveError's `flex-1`
+  // box to zero width), and saveError being nested inside the Cancel/Save button group.
+  it("keeps the saveError text out of the Cancel/Save button group and off a flex row with a shrink-0 sibling", async () => {
+    const board = makeBoard({ tasks: [makeTask(), makeTask({ id: "t2" })] });
+    const onSave = vi.fn(() => Promise.reject(new Error("Boards service unavailable")));
+    render(<BoardSettingsModal board={board} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+
+    // The long disabled-reason is present (board has tasks).
+    expect(screen.getByText(/available only for an empty board \(2 tasks\)/i)).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const errorEl = await waitFor(() => screen.getByText("Boards service unavailable"));
+
+    const saveButton = screen.getByRole("button", { name: "Save" });
+    const actionsGroup = saveButton.parentElement;
+    expect(actionsGroup).not.toBeNull();
+    if (actionsGroup !== null) {
+      expect(actionsGroup.contains(errorEl)).toBe(false);
+    }
+
+    const errorParent = errorEl.parentElement;
+    expect(errorParent).not.toBeNull();
+    if (errorParent !== null) {
+      const shrinkSiblings = Array.from(errorParent.children).filter(
+        (el) => el !== errorEl && el.className.includes("shrink-0"),
+      );
+      expect(shrinkSiblings).toHaveLength(0);
+    }
+  });
 });
