@@ -47,12 +47,10 @@ function makeEngine(over?: {
   now?: () => number;
 }) {
   const spawn = vi.fn(over?.spawn ?? (async () => okSpawn));
-  const clearPending = vi.fn();
   const engine = createFleetRestore({
     envs: over?.envs ?? [env("e1")],
     mirrorFilePath: "/unused-in-tests",
     spawn,
-    clearPendingRestore: clearPending,
     listFn: async () => {
       if (over?.listThrows !== undefined) throw new Error(over.listThrows);
       return over?.live ?? [];
@@ -64,7 +62,7 @@ function makeEngine(over?: {
     },
     ...(over?.now !== undefined ? { nowFn: over.now } : {}),
   });
-  return { engine, spawn, clearPending };
+  return { engine, spawn };
 }
 
 describe("createFleetRestore statuses", () => {
@@ -106,7 +104,7 @@ describe("createFleetRestore statuses", () => {
     const run = await engine.run({ env: "e2" });
     expect(run.status).toBe("ok");
     if (run.status === "ok") {
-      expect(run.report.envs.e2).toEqual({ error: "not_in_mirror", updatedAt: null, unmirrored: 0, sessions: [] });
+      expect(run.report.envs.e2).toEqual({ error: "not_in_mirror", updatedAt: null, unmirrored: 0, sessions: [], pendingRestore: false });
     }
   });
 
@@ -124,11 +122,11 @@ describe("createFleetRestore statuses", () => {
     if (run.status === "ok") expect(Object.keys(run.report.envs)).toEqual(["e1"]);
   });
 
-  it("listing failure → env-level error; other envs proceed", async () => {
+  it("listing failure → env-level error; other envs proceed; pendingRestore still carries through", async () => {
     const mirror: FleetMirrorFile = {
       version: 1,
       envs: {
-        e1: { updatedAt: 1, pendingRestore: false, sessions: [mirrorSession(UUID_A)] },
+        e1: { updatedAt: 1, pendingRestore: true, sessions: [mirrorSession(UUID_A)] },
         e2: { updatedAt: 2, pendingRestore: false, sessions: [mirrorSession(UUID_B)] },
       },
     };
@@ -139,7 +137,7 @@ describe("createFleetRestore statuses", () => {
     const spawn = vi.fn(async () => okSpawn);
     const engine = createFleetRestore({
       envs: [env("e1"), env("e2")], mirrorFilePath: "/unused", spawn,
-      clearPendingRestore: () => undefined, listFn,
+      listFn,
       sessionCwdFn: async () => null, readMirrorFn: () => mirror,
     });
     const run = await engine.run({});
@@ -147,7 +145,9 @@ describe("createFleetRestore statuses", () => {
     if (run.status === "ok") {
       expect(run.report.envs.e1?.error).toContain("ssh timeout");
       expect(run.report.envs.e1?.sessions).toEqual([]);
+      expect(run.report.envs.e1?.pendingRestore).toBe(true); // listing-failed path still carries the mirror's flag
       expect(run.report.envs.e2?.sessions[0]?.outcome).toBe("resumed");
+      expect(run.report.envs.e2?.pendingRestore).toBe(false);
     }
   });
 });
@@ -155,7 +155,7 @@ describe("createFleetRestore statuses", () => {
 describe("createFleetRestore dry run", () => {
   it("inventories without spawning: would_resume / skipped_alive, and counts unmirrored", async () => {
     const mirror = mirrorOf("e1", [mirrorSession(UUID_A), mirrorSession(UUID_B)]);
-    const { engine, spawn, clearPending } = makeEngine({
+    const { engine, spawn } = makeEngine({
       mirror,
       live: [liveRow("e1", UUID_A), liveRow("e1", UUID_C), liveRow("e1", null)], // C is live-but-unmirrored
     });
@@ -169,7 +169,6 @@ describe("createFleetRestore dry run", () => {
       expect(e1?.sessions.map((s) => s.outcome).sort()).toEqual(["skipped_alive", "would_resume"]);
     }
     expect(spawn).not.toHaveBeenCalled();
-    expect(clearPending).not.toHaveBeenCalled(); // dry run never clears the flag
   });
 });
 
@@ -235,7 +234,7 @@ describe("createFleetRestore live resume", () => {
       if (o.resumeSessionId === UUID_A) throw new Error("pane run failed");
       return okSpawn;
     });
-    const { engine, clearPending } = makeEngine({
+    const { engine } = makeEngine({
       mirror: mirrorOf("e1", [mirrorSession(UUID_A), mirrorSession(UUID_B)]),
       spawn: spawnImpl,
     });
@@ -245,16 +244,10 @@ describe("createFleetRestore live resume", () => {
       const outcomes = new Map(run.report.envs.e1?.sessions.map((s) => [s.sessionId, s.outcome]));
       expect(outcomes.get(UUID_A)).toBe("failed");
       expect(outcomes.get(UUID_B)).toBe("resumed");
+      // pendingRestore is not touched by fleet-restore at all — only the mirror's own merge branch
+      // self-clears it, once every mirrored record is observed live again.
+      expect(run.report.envs.e1?.pendingRestore).toBe(true);
     }
-    expect(clearPending).not.toHaveBeenCalled();
-  });
-
-  it("a zero-failed run clears pendingRestore for the env", async () => {
-    const { engine, clearPending } = makeEngine({
-      mirror: mirrorOf("e1", [mirrorSession(UUID_A)]),
-    });
-    await engine.run({});
-    expect(clearPending).toHaveBeenCalledWith("e1");
   });
 
   it("an immediate re-run resumes nothing the previous run spawned (skipped_recent); after the window a still-dead session is retried", async () => {
@@ -286,7 +279,7 @@ describe("createFleetRestore live resume", () => {
   });
 
   it("idempotent rejoin (a live tab with this name already exists) → failed, not resumed; pendingRestore stays set", async () => {
-    const { engine, clearPending } = makeEngine({
+    const { engine } = makeEngine({
       mirror: mirrorOf("e1", [mirrorSession(UUID_A)]),
       spawn: async () => ({ ...okSpawn, idempotent: true }),
     });
@@ -296,8 +289,8 @@ describe("createFleetRestore live resume", () => {
       const s = run.report.envs.e1?.sessions[0];
       expect(s?.outcome).toBe("failed");
       expect(s?.error).toContain("collision");
+      expect(run.report.envs.e1?.pendingRestore).toBe(true);
     }
-    expect(clearPending).not.toHaveBeenCalled();
   });
 
   it("two records whose names slugify to the same tab name → first resumes, second collides and fails", async () => {

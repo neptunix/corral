@@ -75,7 +75,6 @@ void (async () => {
     envs: ENVS,
     mirrorFilePath: mirrorPath(BOARD_DATA_DIR),
     spawn,
-    clearPendingRestore: (envId) => { mirror.clearPendingRestore(envId); },
   });
 
   const app = createApi({

@@ -37,7 +37,7 @@ function report(over?: Partial<FleetRestoreReport>): FleetRestoreReport {
     dryRun: false,
     envs: {
       e1: {
-        error: null, updatedAt: 1000, unmirrored: 0,
+        error: null, updatedAt: 1000, unmirrored: 0, pendingRestore: false,
         sessions: [
           { sessionId: "aaaaaaaa-0000-4000-8000-000000000001", name: "ok-tab", outcome: "resumed", error: null },
           { sessionId: "bbbbbbbb-0000-4000-8000-000000000002", name: `bad${String.fromCharCode(0x1b)}[2Jtab`, outcome: "failed", error: "spawn: pane run failed" },
@@ -59,19 +59,54 @@ describe("formatRestoreReport", () => {
     expect(text).toContain("mirror updated 10m ago"); // updatedAt=1000, nowSecs=1600 → 600s
   });
 
-  it("exit 0 on a clean report; dry run surfaces a nonzero unmirrored count as the do-not-kill-herdr warning", () => {
-    const clean = formatRestoreReport({ dryRun: false, envs: { e1: { error: null, updatedAt: 1000, unmirrored: 0, sessions: [] } } }, 1600);
+  it("exit 0 on a clean report", () => {
+    const clean = formatRestoreReport({ dryRun: false, envs: { e1: { error: null, updatedAt: 1000, unmirrored: 0, pendingRestore: false, sessions: [] } } }, 1600);
     expect(clean.exitCode).toBe(0);
-    const dry = formatRestoreReport({ dryRun: true, envs: { e1: { error: null, updatedAt: 1000, unmirrored: 3, sessions: [] } } }, 1600);
-    expect(dry.exitCode).toBe(0);
+  });
+
+  it("dry run with a nonzero unmirrored count → exit 3, the hard pre-upgrade interlock", () => {
+    const dry = formatRestoreReport({ dryRun: true, envs: { e1: { error: null, updatedAt: 1000, unmirrored: 3, pendingRestore: false, sessions: [] } } }, 1600);
+    expect(dry.exitCode).toBe(3);
     expect(dry.text).toContain("unmirrored 3");
     expect(dry.text.toLowerCase()).toContain("do not kill herdr");
   });
 
+  it("dry run with BOTH an env error and unmirrored>0 → exit 1 (error wins over the interlock)", () => {
+    const r = formatRestoreReport(
+      { dryRun: true, envs: { e1: { error: "not_in_mirror", updatedAt: null, unmirrored: 3, pendingRestore: false, sessions: [] } } },
+      1600,
+    );
+    expect(r.exitCode).toBe(1);
+  });
+
+  it("a non-dry run with unmirrored>0 stays exit 0 — the interlock is a dry-run gate only", () => {
+    const r = formatRestoreReport(
+      { dryRun: false, envs: { e1: { error: null, updatedAt: 1000, unmirrored: 3, pendingRestore: false, sessions: [] } } },
+      1600,
+    );
+    expect(r.exitCode).toBe(0);
+  });
+
   it("env error → exit 1 and the error line, sanitized", () => {
-    const r = formatRestoreReport({ dryRun: false, envs: { e1: { error: "not_in_mirror", updatedAt: null, unmirrored: 0, sessions: [] } } }, 1600);
+    const r = formatRestoreReport({ dryRun: false, envs: { e1: { error: "not_in_mirror", updatedAt: null, unmirrored: 0, pendingRestore: false, sessions: [] } } }, 1600);
     expect(r.exitCode).toBe(1);
     expect(r.text).toContain("not_in_mirror");
+  });
+
+  it("pendingRestore set is shown in the env header line; absent when false", () => {
+    const r = formatRestoreReport(
+      {
+        dryRun: false,
+        envs: {
+          e1: { error: null, updatedAt: 1000, unmirrored: 0, pendingRestore: true, sessions: [] },
+          e2: { error: null, updatedAt: 1000, unmirrored: 0, pendingRestore: false, sessions: [] },
+        },
+      },
+      1600,
+    );
+    expect(r.text).toContain("e1  (mirror updated 10m ago, pendingRestore set)");
+    expect(r.text).toContain("e2  (mirror updated 10m ago)");
+    expect(r.text).not.toContain("e2  (mirror updated 10m ago, pendingRestore set)");
   });
 
   it("nothing to restore: an empty envs report exits 0 and says so", () => {
@@ -81,7 +116,7 @@ describe("formatRestoreReport", () => {
   });
 
   function ageReport(updatedAt: number): FleetRestoreReport {
-    return { dryRun: false, envs: { e1: { error: null, updatedAt, unmirrored: 0, sessions: [] } } };
+    return { dryRun: false, envs: { e1: { error: null, updatedAt, unmirrored: 0, pendingRestore: false, sessions: [] } } };
   }
 
   it("formats age at the second/minute/hour rounding boundaries (Math.round, not floor)", () => {

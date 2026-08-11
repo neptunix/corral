@@ -156,6 +156,8 @@ export const FleetRestoreEnvReportSchema = z.object({
   updatedAt: z.number().nullable(),
   unmirrored: z.number(),
   sessions: z.array(FleetRestoreSessionSchema),
+  // the stuck-pending visibility signal for the pre-upgrade dry run
+  pendingRestore: z.boolean(),
 });
 
 export const FleetRestoreReportSchema = z.object({

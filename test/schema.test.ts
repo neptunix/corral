@@ -203,10 +203,10 @@ describe("FleetRestoreReportSchema", () => {
       dryRun: false,
       envs: {
         e1: {
-          error: null, updatedAt: 1700000000, unmirrored: 0,
+          error: null, updatedAt: 1700000000, unmirrored: 0, pendingRestore: true,
           sessions: [{ sessionId: "3f2a9c1e-0000-4000-8000-000000000001", name: "t", outcome: "resumed", error: null }],
         },
-        e2: { error: "not_in_mirror", updatedAt: null, unmirrored: 2, sessions: [] },
+        e2: { error: "not_in_mirror", updatedAt: null, unmirrored: 2, pendingRestore: false, sessions: [] },
       },
     };
     expect(FleetRestoreReportSchema.parse(good)).toEqual(good);

@@ -58,7 +58,6 @@ export function createFleetRestore(opts: {
   readonly envs: readonly HerdrEnv[];
   readonly mirrorFilePath: string;
   readonly spawn: (o: SpawnOpts) => Promise<SpawnResult>;
-  readonly clearPendingRestore: (envId: string) => void;
   readonly listFn?: (env: HerdrEnv) => Promise<SessionRow[]>;
   readonly sessionCwdFn?: (env: HerdrEnv, sessionId: string) => Promise<string | null>;
   readonly readMirrorFn?: (filePath: string) => FleetMirrorFile | null;
@@ -75,7 +74,7 @@ export function createFleetRestore(opts: {
 
   async function restoreEnv(env: HerdrEnv, entry: MirrorEnv | undefined, dryRun: boolean): Promise<FleetRestoreEnvReport> {
     if (entry === undefined) {
-      return { error: "not_in_mirror", updatedAt: null, unmirrored: 0, sessions: [] };
+      return { error: "not_in_mirror", updatedAt: null, unmirrored: 0, sessions: [], pendingRestore: false };
     }
     // Fresh listing — the poller snapshot may predate the herdr restart.
     let liveRows: SessionRow[];
@@ -84,7 +83,7 @@ export function createFleetRestore(opts: {
     } catch (err) {
       return {
         error: `listing failed: ${err instanceof Error ? err.message : String(err)}`,
-        updatedAt: entry.updatedAt, unmirrored: 0, sessions: [],
+        updatedAt: entry.updatedAt, unmirrored: 0, sessions: [], pendingRestore: entry.pendingRestore,
       };
     }
     const liveIds = new Set<string>();
@@ -94,14 +93,10 @@ export function createFleetRestore(opts: {
     for (const id of liveIds) if (!mirroredIds.has(id)) unmirrored += 1;
 
     const sessions: FleetRestoreSession[] = [];
-    let failed = 0;
     for (const rec of orderByWorkspace(entry.sessions)) {
-      const outcomeOf = await restoreRecord(env, rec, liveIds, dryRun);
-      sessions.push(outcomeOf);
-      if (outcomeOf.outcome === "failed") failed += 1;
+      sessions.push(await restoreRecord(env, rec, liveIds, dryRun));
     }
-    if (!dryRun && failed === 0) opts.clearPendingRestore(env.id);
-    return { error: null, updatedAt: entry.updatedAt, unmirrored, sessions };
+    return { error: null, updatedAt: entry.updatedAt, unmirrored, sessions, pendingRestore: entry.pendingRestore };
   }
 
   async function restoreRecord(

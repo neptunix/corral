@@ -77,18 +77,20 @@ function formatAge(secs: number): string {
 export function formatRestoreReport(
   report: FleetRestoreReport,
   nowSecs: number,
-): { readonly text: string; readonly exitCode: 0 | 1 } {
+): { readonly text: string; readonly exitCode: 0 | 1 | 3 } {
   const lines: string[] = [];
-  let exitCode: 0 | 1 = 0;
+  let sawFailure = false;
+  let sawUnmirrored = false;
   const entries = Object.entries(report.envs);
   if (entries.length === 0) {
     return { text: "nothing to restore — no configured environment appears in the mirror", exitCode: 0 };
   }
   for (const [envId, envRep] of entries) {
     const age = envRep.updatedAt === null ? "no mirror entry" : `mirror updated ${formatAge(nowSecs - envRep.updatedAt)} ago`;
-    lines.push(`${envId}  (${age})`);
+    const pendingSuffix = envRep.pendingRestore ? ", pendingRestore set" : "";
+    lines.push(`${envId}  (${age}${pendingSuffix})`);
     if (envRep.error !== null) {
-      exitCode = 1;
+      sawFailure = true;
       lines.push(`  ERROR: ${stripControl(envRep.error)}`);
     }
     const counts = new Map<FleetRestoreOutcome, number>();
@@ -103,12 +105,16 @@ export function formatRestoreReport(
     );
     for (const s of envRep.sessions) {
       if (s.outcome !== "failed") continue;
-      exitCode = 1;
+      sawFailure = true;
       lines.push(`  FAILED ${s.sessionId}  ${stripControl(s.name)}: ${stripControl(s.error ?? "")}`);
     }
     if (report.dryRun && envRep.unmirrored > 0) {
+      sawUnmirrored = true;
       lines.push(`  WARNING: ${String(envRep.unmirrored)} live session(s) missing from the mirror — do not kill herdr until a poll has caught up`);
     }
   }
+  // Env/session failures always win: a failed run is never masked by the dry-run interlock. The
+  // interlock itself only fires on a clean dry run — a non-dry run with unmirrored>0 stays exit 0.
+  const exitCode: 0 | 1 | 3 = sawFailure ? 1 : report.dryRun && sawUnmirrored ? 3 : 0;
   return { text: lines.join("\n"), exitCode };
 }
