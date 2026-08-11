@@ -568,10 +568,23 @@ therefore keeps a continuous mirror of the live fleet and can bulk-resume it.
 - **CLI**: `npm run fleet:restore [-- --dry-run] [-- --env <id>]`. Dry run is the pre-upgrade
   check: a nonzero `unmirrored` count means live sessions are missing from the mirror — do not
   kill herdr yet. Exit 1 on any env error or failed session.
-- **Residual risk — post-restore mirror dip:** a zero-failure restore clears `pendingRestore`, and
-  the next steady poll replaces the env's mirror set with the live projection. Sessions just
-  resumed but not yet re-registered with herdr drop out of the mirror for a poll tick or two; a
-  herdr crash inside that window cannot be restored from the mirror alone.
+- **Residual risks:**
+  - **Post-restore mirror dip:** a zero-failure restore clears `pendingRestore`, and the next
+    steady poll replaces the env's mirror set with the live projection. Sessions just resumed but
+    not yet re-registered with herdr drop out of the mirror for a poll tick or two; a herdr crash
+    inside that window cannot be restored from the mirror alone.
+  - **Unobserved restart:** a herdr kill+restart that completes entirely between two poll ticks
+    (default ~30s) is invisible to the transition detector — the next steady poll replaces the
+    env's mirror entry with the (possibly empty) live set. Stop corral during the upgrade, or make
+    sure corral observes the outage before the new herdr starts.
+  - **Invisible in-pane resume failure:** `resumed` means the resume command was sent to the pane;
+    a `claude --resume` that fails inside the pane is invisible to corral, and a zero-failure run
+    still clears `pendingRestore` — after which the next steady poll drops the never-registered
+    record. Re-run a dry run after a restore to verify the fleet re-registered.
+  - **Pending-window resurrection:** while `pendingRestore` is set the mirror is merge-only, so
+    sessions the operator deliberately closes during that window stay mirrored and a restore
+    re-run resurrects them; there is no force-clear switch yet — hand-edit the mirror file if
+    needed.
 
 Upgrade workflow:
 
