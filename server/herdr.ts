@@ -126,7 +126,7 @@ export async function runHerdr(
   return env.kind === "remote" ? stdout.replace(SSH_NOISE, "") : stdout;
 }
 
-const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+export const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 const WorkspaceListSchema = z.object({
   result: z.object({ workspaces: z.array(z.object({ workspace_id: z.string(), label: z.string() })).default([]) }).default({ workspaces: [] }),

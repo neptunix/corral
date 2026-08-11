@@ -23,7 +23,7 @@ import {
 import type { HerdrEnv } from "../environments.ts";
 import { briefByteLength, cleanupBrief, composeBrief, START_COMMAND_FALLBACK, writeBrief } from "./brief.ts";
 import { syncClaudeThemeBase, ThemeModeSchema } from "./claude-theme.ts";
-import { closePane, listWorkspaces, paneIdentity, readPane, type ReadFn } from "./herdr.ts";
+import { closePane, listWorkspaces, paneIdentity, readPane, type ReadFn, UUID_RE } from "./herdr.ts";
 import { isLoopbackHost } from "./host-guard.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
@@ -44,7 +44,6 @@ const TID_RE = /^t_[A-Za-z0-9_-]{7}$/;
 // herdr workspace ids (e.g. "w8", "w6555cedb91c1d3"). Must not start with '-' (option-injection into
 // `--workspace <id>`); matches the BID_RE/TID_RE/PANE_RE guard discipline for client-supplied ids.
 const WS_RE = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$/;
-const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const LAST_ACTIVE_TTL_MS = 60_000;
 // How long a ?deferred=1 close waits after responding before killing the pane. Long enough for the
 // HTTP response to flush to the MCP client, short enough that the operator sees the pane die "now".
