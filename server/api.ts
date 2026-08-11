@@ -23,6 +23,7 @@ import {
 import type { HerdrEnv } from "../environments.ts";
 import { briefByteLength, cleanupBrief, composeBrief, START_COMMAND_FALLBACK, writeBrief } from "./brief.ts";
 import { syncClaudeThemeBase, ThemeModeSchema } from "./claude-theme.ts";
+import type { FleetRestore } from "./fleet-restore.ts";
 import { closePane, listWorkspaces, paneIdentity, readPane, type ReadFn, UUID_RE } from "./herdr.ts";
 import { isLoopbackHost } from "./host-guard.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
@@ -211,6 +212,12 @@ const DetachBodySchema = z.object({
   sessionId: z.string().nullable().default(null),
 });
 
+// Body of POST /api/fleet/restore (server-only boundary; the response shape lives in shared/schema.ts).
+const FleetRestoreRequestSchema = z.object({
+  env: z.string().optional(),
+  dryRun: z.boolean().optional(),
+});
+
 const FromSessionBodySchema = z.object({
   title: z.string().min(1),
   // No literal default: a card created from an unassigned session must land in THIS board's landing
@@ -247,6 +254,7 @@ export function createApi(opts: {
   uploadRoot?: string; // drop-upload temp root (injectable so tests write to a scratch dir)
   briefRoot?: string; // spawn-brief root (injectable so tests write to a scratch dir)
   briefCleanupDelayMs?: number; // injectable so the post-spawn brief unlink is testable without a real wait
+  fleetRestore?: FleetRestore;
 }): Hono {
   const read = opts.read ?? readPane;
   const listWs = opts.listWorkspaces ?? listWorkspaces;
@@ -989,6 +997,36 @@ export function createApi(opts: {
       };
     });
     return c.json(rebuilt);
+  });
+
+  // Bulk restore of the mirrored fleet after a herdr restart (docs spec: fleet mirror + restore).
+  // Board data is deliberately untouched: buildBoardState re-attaches card links by sessionId once a
+  // resumed session registers, and unassigned sessions reappear unassigned.
+  app.post("/api/fleet/restore", async (c) => {
+    if (opts.fleetRestore === undefined) return c.json({ error: { code: "not_configured" } }, 503);
+    const text = await c.req.text();
+    let body: unknown = {};
+    if (text !== "") {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        return c.json({ error: { code: "validation", message: "invalid JSON" } }, 400);
+      }
+    }
+    const parsed = FleetRestoreRequestSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: { code: "validation", message: parsed.error.message } }, 400);
+    const run = await opts.fleetRestore.run(parsed.data);
+    if (run.status === "ok") return c.json(run.report);
+    if (run.status === "no_mirror") {
+      return c.json({ error: { code: "no_mirror", message: "no fleet mirror recorded yet — the poller writes it once a live claude session is seen" } }, 404);
+    }
+    if (run.status === "mirror_unreadable") {
+      return c.json({ error: { code: "mirror_unreadable", message: run.message } }, 500);
+    }
+    if (run.status === "unknown_env") {
+      return c.json({ error: { code: "unknown_env", message: `no configured environment "${run.env}"` } }, 400);
+    }
+    return c.json({ error: { code: "restore_in_flight", message: "a restore is already running" } }, 409);
   });
 
   app.post("/api/boards/:bid/tasks/:tid/spawn", async (c) => {
