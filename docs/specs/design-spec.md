@@ -563,31 +563,29 @@ therefore keeps a continuous mirror of the live fleet and can bulk-resume it.
   fresh, skips sessions already alive (or resumed by this process within the last ~2 minutes),
   probes each transcript for the true cwd, and resumes the rest sequentially via
   `<spawnCommand> --resume <uuid>`, re-grouping sessions into workspaces by mirrored label.
-  Board data is untouched — card links re-attach by sessionId. A run with zero failures clears
-  `pendingRestore`. Concurrent runs 409.
-- **CLI**: `npm run fleet:restore [-- --dry-run] [-- --env <id>]`. Dry run is the pre-upgrade
-  check: a nonzero `unmirrored` count means live sessions are missing from the mirror — do not
-  kill herdr yet. Exit 1 on any env error or failed session.
+  Board data is untouched — card links re-attach by sessionId. `pendingRestore` clears itself,
+  purely inside the mirror, once every mirrored record for the env is observed live again; a
+  session that never re-registers keeps the flag set and stays mirrored for a retry. Concurrent
+  runs 409.
+- **CLI**: `npm run fleet:restore [-- --dry-run] [-- --env <id>]`. Exit 1 on any env error or
+  failed session; exit 3 on a dry run with a nonzero `unmirrored` count — the hard pre-upgrade
+  interlock: do not kill herdr yet. The report also flags `pendingRestore` per env.
 - **Residual risks:**
-  - **Post-restore mirror dip:** a zero-failure restore clears `pendingRestore`, and the next
-    steady poll replaces the env's mirror set with the live projection. Sessions just resumed but
-    not yet re-registered with herdr drop out of the mirror for a poll tick or two; a herdr crash
-    inside that window cannot be restored from the mirror alone.
   - **Unobserved restart:** a herdr kill+restart that completes entirely between two poll ticks
     (default ~30s) is invisible to the transition detector — the next steady poll replaces the
     env's mirror entry with the (possibly empty) live set. Stop corral during the upgrade, or make
     sure corral observes the outage before the new herdr starts.
   - **Invisible in-pane resume failure:** `resumed` means the resume command was sent to the pane;
-    a `claude --resume` that fails inside the pane is invisible to corral, and a zero-failure run
-    still clears `pendingRestore` — after which the next steady poll drops the never-registered
-    record. Re-run a dry run after a restore to verify the fleet re-registered.
+    a `claude --resume` that fails inside the pane is still invisible to corral, but the record is
+    no longer lost — `pendingRestore` stays set and the session stays mirrored for a retry, and a
+    follow-up dry run shows the flag.
   - **Pending-window resurrection:** while `pendingRestore` is set the mirror is merge-only, so
     sessions the operator deliberately closes during that window stay mirrored and a restore
     re-run resurrects them; there is no force-clear switch yet — hand-edit the mirror file if
-    needed.
+    needed. The flag is now visible in every report, so this window is no longer silent.
 
 Upgrade workflow:
 
-    npm run fleet:restore -- --dry-run   # optional: unmirrored must be 0
+    npm run fleet:restore -- --dry-run   # optional: unmirrored must be 0 (exit 3 = mirror lagging, do not kill herdr)
     kill herdr → upgrade → start herdr server
     npm run fleet:restore                # any time — pendingRestore holds the frozen state
