@@ -8,13 +8,15 @@ import {
 import { createApi } from "./api.ts";
 import { createAttentionStore } from "./attention-store.ts";
 import { sweepBriefRoot } from "./brief.ts";
+import { createFleetMirror, ensureMirrorGitignore, mirrorPath } from "./fleet-mirror.ts";
+import { createFleetRestore } from "./fleet-restore.ts";
 import { createGit } from "./git.ts";
 import { closePane, listAllPanes, listWorkspaces, listWorkspacesStrict, readPane, workspaceClose } from "./herdr.ts";
 import { assertLoopback } from "./host-guard.ts";
 import { createPoller } from "./poller.ts";
 import { formatReport, resolveReapGrace, runPreflight } from "./preflight.ts";
 import { startReconciler } from "./reconcile.ts";
-import { spawnSession } from "./spawn.ts";
+import { spawnSession, type SpawnOpts, type SpawnResult } from "./spawn.ts";
 import { createStorage } from "./storage.ts";
 import { readLastActivity } from "./transcript.ts";
 import { sweepUploadRoot } from "./uploads.ts";
@@ -36,6 +38,9 @@ const git = createGit(BOARD_DATA_DIR);
 void (async () => {
   await storage.ensureFirstRunBoard();
   await git.ensureRepo();
+  // BEFORE git.start(): the mirror is high-churn derived state and must never enter the board
+  // store's git history (the auto-commit is `add -A`).
+  await ensureMirrorGitignore(BOARD_DATA_DIR);
   git.start();
   await sweepUploadRoot(UPLOAD_ROOT); // clear last run's dropped files (bounded disk use, no GC)
   await sweepBriefRoot(BRIEF_ROOT); // same contract for MCP spawn briefs
@@ -44,6 +49,9 @@ void (async () => {
   const attention = createAttentionStore({ dataDir: BOARD_DATA_DIR, read: readPane });
   attention.init(); // load attention.json once at startup (§3.2)
   const poller = createPoller({ envs: ENVS, attention });
+  // Continuous fleet mirror: subscribe before the first poll so no snapshot is missed.
+  const mirror = createFleetMirror({ dataDir: BOARD_DATA_DIR });
+  mirror.start(poller);
   poller.start();
   // Backfill stored links' Claude sessionId once the poller sees it (spawned links start null) — the
   // write-side half of persistent session identity; buildBoardState does the read-side churn-heal.
@@ -57,17 +65,26 @@ void (async () => {
     startZombieReaper({ poller, storage, envs: ENVS, listPanes: listAllPanes, closePane, graceMs: reapGrace.ms });
   }
 
+  const spawn = (opts: SpawnOpts): Promise<SpawnResult> => spawnSession({
+    ...opts,
+    workspaceListFn: listWorkspaces,
+    workspaceListStrictFn: listWorkspacesStrict,
+    workspaceCloseFn: workspaceClose,
+  });
+  const fleetRestore = createFleetRestore({
+    envs: ENVS,
+    mirrorFilePath: mirrorPath(BOARD_DATA_DIR),
+    spawn,
+    clearPendingRestore: (envId) => { mirror.clearPendingRestore(envId); },
+  });
+
   const app = createApi({
     poller, envs: ENVS, storage,
     listWorkspaces,
     lastActivity: readLastActivity,
     allowedOrigins: WS_ALLOWED_ORIGINS,
-    spawn: (opts) => spawnSession({
-      ...opts,
-      workspaceListFn: listWorkspaces,
-      workspaceListStrictFn: listWorkspacesStrict,
-      workspaceCloseFn: workspaceClose,
-    }),
+    spawn,
+    fleetRestore,
   });
   app.use("/*", serveStatic({ root: "./web/dist" })); // built frontend (Task 13+); absent in dev — harmless
 
