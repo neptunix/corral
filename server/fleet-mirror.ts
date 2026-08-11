@@ -1,10 +1,10 @@
 import type { Snapshot } from "@shared/schema";
-import { execFile } from "node:child_process";
 import { existsSync, readFileSync, renameSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 
 import { writeAtomic } from "./atomic-store.ts";
+import { runGit } from "./git.ts";
 import { UUID_RE } from "./herdr.ts";
 import type { Poller } from "./poller.ts";
 
@@ -28,7 +28,7 @@ const MirrorEnvSchema = z.object({
   sessions: z.array(MirrorSessionSchema),
 });
 
-export const FleetMirrorFileSchema = z.object({
+const FleetMirrorFileSchema = z.object({
   version: z.literal(1),
   envs: z.record(z.string(), MirrorEnvSchema),
 });
@@ -199,15 +199,6 @@ export function createFleetMirror(opts: { readonly dataDir: string; readonly now
   };
 }
 
-function defaultGit(cwd: string, args: readonly string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    execFile("git", [...args], { cwd, timeout: 15_000 }, (err) => {
-      if (err) reject(new Error(err.message));
-      else resolve();
-    });
-  });
-}
-
 /**
  * Call at startup, BEFORE the first mirror write and BEFORE git.start(): the board store auto-commits
  * `add -A`, and the mirror is derived state that must not churn that history. The `*` also excludes
@@ -216,7 +207,7 @@ function defaultGit(cwd: string, args: readonly string[]): Promise<void> {
  */
 export async function ensureMirrorGitignore(
   dataDir: string,
-  gitFn: (cwd: string, args: readonly string[]) => Promise<void> = defaultGit,
+  gitFn: (cwd: string, args: readonly string[]) => Promise<void> = runGit,
 ): Promise<void> {
   const giPath = path.join(dataDir, ".gitignore");
   const line = `${FLEET_MIRROR_FILENAME}*`;
