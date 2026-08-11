@@ -29,6 +29,7 @@ function post(): Promise<{ status: number; text: string }> {
         res.setEncoding("utf8");
         res.on("data", (chunk: string) => { text += chunk; });
         res.on("end", () => { resolve({ status: res.statusCode ?? 0, text }); });
+        res.on("error", reject);
       },
     );
     req.on("error", reject);
