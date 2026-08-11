@@ -543,6 +543,7 @@ corral/  (repo root)
   Not the real agent; no LLM.
 - **Real auth + remote deploy** (token/mTLS, CORS, rate limiting) — the gate for non-loopback bind.
 - **Typed custom-field schemas**, **labels/tags**, **per-board column editing UI**, **MCP server**.
+- **Agent eval** — use the time-to-ack signal (§10) + outcome labels to measure prioritization quality.
 
 ---
 
@@ -573,4 +574,3 @@ Upgrade workflow:
     npm run fleet:restore -- --dry-run   # optional: unmirrored must be 0
     kill herdr → upgrade → start herdr server
     npm run fleet:restore                # any time — pendingRestore holds the frozen state
-- **Agent eval** — use the time-to-ack signal (§10) + outcome labels to measure prioritization quality.
