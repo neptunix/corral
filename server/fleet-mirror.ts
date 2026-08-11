@@ -1,4 +1,5 @@
 import type { Snapshot } from "@shared/schema";
+import { execFile } from "node:child_process";
 import { existsSync, readFileSync, renameSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -196,4 +197,42 @@ export function createFleetMirror(opts: { readonly dataDir: string; readonly now
       return structuredClone(state);
     },
   };
+}
+
+function defaultGit(cwd: string, args: readonly string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile("git", [...args], { cwd, timeout: 15_000 }, (err) => {
+      if (err) reject(new Error(err.message));
+      else resolve();
+    });
+  });
+}
+
+/**
+ * Call at startup, BEFORE the first mirror write and BEFORE git.start(): the board store auto-commits
+ * `add -A`, and the mirror is derived state that must not churn that history. The `*` also excludes
+ * writeAtomic's `.tmp` sibling. `git rm --cached` heals a store where a prior run ever tracked the
+ * file (an ignored-but-tracked file churns forever); `--ignore-unmatch` makes it a no-op otherwise.
+ */
+export async function ensureMirrorGitignore(
+  dataDir: string,
+  gitFn: (cwd: string, args: readonly string[]) => Promise<void> = defaultGit,
+): Promise<void> {
+  const giPath = path.join(dataDir, ".gitignore");
+  const line = `${FLEET_MIRROR_FILENAME}*`;
+  let content = "";
+  try {
+    content = readFileSync(giPath, "utf8");
+  } catch {
+    // absent → created below
+  }
+  if (!content.split("\n").some((l) => l.trim() === line)) {
+    const next = content === "" || content.endsWith("\n") ? `${content}${line}\n` : `${content}\n${line}\n`;
+    writeAtomic(giPath, next);
+  }
+  try {
+    await gitFn(dataDir, ["rm", "--cached", "--ignore-unmatch", "-q", FLEET_MIRROR_FILENAME]);
+  } catch (err) {
+    console.warn(`[fleet-mirror] git rm --cached failed (mirror may stay tracked): ${err instanceof Error ? err.message : String(err)}`);
+  }
 }

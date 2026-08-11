@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createFleetMirror, FLEET_MIRROR_FILENAME, mirrorPath, readMirrorFile } from "../server/fleet-mirror.ts";
+import { createFleetMirror, ensureMirrorGitignore, FLEET_MIRROR_FILENAME, mirrorPath, readMirrorFile } from "../server/fleet-mirror.ts";
 import type { Poller } from "../server/poller.ts";
 
 const UUID_A = "aaaaaaaa-0000-4000-8000-000000000001";
@@ -286,5 +286,28 @@ describe("createFleetMirror write policy", () => {
     expect(m.getState().envs.e1?.pendingRestore).toBe(false);
     const disk: unknown = readState(tmpDir);
     expect(disk).toMatchObject({ envs: { e1: { pendingRestore: false } } });
+  });
+});
+
+describe("ensureMirrorGitignore", () => {
+  it("adds the line exactly once, preserving existing content, and untracks a previously tracked mirror", async () => {
+    const gi = path.join(tmpDir, ".gitignore");
+    writeFileSync(gi, "boards-backup/\n");
+    const calls: (readonly string[])[] = [];
+    const gitFn = async (_cwd: string, args: readonly string[]): Promise<void> => { calls.push(args); };
+    await ensureMirrorGitignore(tmpDir, gitFn);
+    await ensureMirrorGitignore(tmpDir, gitFn); // idempotent
+    const content = readFileSync(gi, "utf8");
+    expect(content.split("\n").filter((l) => l === "fleet-mirror.json*")).toHaveLength(1);
+    expect(content.startsWith("boards-backup/\n")).toBe(true);
+    expect(calls[0]).toEqual(["rm", "--cached", "--ignore-unmatch", "-q", FLEET_MIRROR_FILENAME]);
+  });
+
+  it("creates .gitignore when absent and survives a failing git", async () => {
+    const gitFn = async (): Promise<void> => { throw new Error("not a repo"); };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    await expect(ensureMirrorGitignore(tmpDir, gitFn)).resolves.toBeUndefined();
+    expect(readFileSync(path.join(tmpDir, ".gitignore"), "utf8")).toContain("fleet-mirror.json*");
+    warn.mockRestore();
   });
 });
