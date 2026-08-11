@@ -543,4 +543,34 @@ corral/  (repo root)
   Not the real agent; no LLM.
 - **Real auth + remote deploy** (token/mTLS, CORS, rate limiting) — the gate for non-loopback bind.
 - **Typed custom-field schemas**, **labels/tags**, **per-board column editing UI**, **MCP server**.
+
+---
+
+## 18. Fleet mirror & restore
+
+Killing the herdr server kills every pane, and sessions survive only as transcripts. Corral
+therefore keeps a continuous mirror of the live fleet and can bulk-resume it.
+
+- **Mirror** (`server/fleet-mirror.ts`): a poller subscriber writes every live session that has a
+  herdr-registered Claude sessionId to `<dataDir>/fleet-mirror.json` (uuid-pinned, atomic writes,
+  gitignored in the board store). The write policy is transition-aware: an unreachable environment
+  freezes its entries; an environment coming back after a gap is merged, never replaced — and if
+  mirrored sessions are missing, a persisted `pendingRestore` flag keeps the frozen state through
+  any number of polls, corral restarts, and partial restores. Only a steady reachable→reachable
+  poll replaces the set (dropping operator-closed sessions).
+- **Restore** (`server/fleet-restore.ts`, `POST /api/fleet/restore`): re-lists each environment
+  fresh, skips sessions already alive (or resumed by this process within the last ~2 minutes),
+  probes each transcript for the true cwd, and resumes the rest sequentially via
+  `<spawnCommand> --resume <uuid>`, re-grouping sessions into workspaces by mirrored label.
+  Board data is untouched — card links re-attach by sessionId. A run with zero failures clears
+  `pendingRestore`. Concurrent runs 409.
+- **CLI**: `npm run fleet:restore [-- --dry-run] [-- --env <id>]`. Dry run is the pre-upgrade
+  check: a nonzero `unmirrored` count means live sessions are missing from the mirror — do not
+  kill herdr yet. Exit 1 on any env error or failed session.
+
+Upgrade workflow:
+
+    npm run fleet:restore -- --dry-run   # optional: unmirrored must be 0
+    kill herdr → upgrade → start herdr server
+    npm run fleet:restore                # any time — pendingRestore holds the frozen state
 - **Agent eval** — use the time-to-ack signal (§10) + outcome labels to measure prioritization quality.
