@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { HerdrEnv } from "../environments.ts";
 import type { FleetMirrorFile } from "../server/fleet-mirror.ts";
-import { createFleetRestore } from "../server/fleet-restore.ts";
+import { createFleetRestore, RECENT_RESUME_WINDOW_MS } from "../server/fleet-restore.ts";
 import type { SpawnOpts, SpawnResult } from "../server/spawn.ts";
 
 const UUID_A = "aaaaaaaa-0000-4000-8000-000000000001";
@@ -168,5 +168,118 @@ describe("createFleetRestore dry run", () => {
     }
     expect(spawn).not.toHaveBeenCalled();
     expect(clearPending).not.toHaveBeenCalled(); // dry run never clears the flag
+  });
+});
+
+describe("createFleetRestore live resume", () => {
+  it("passes the probed cwd as BOTH cwd and repoPath, resolves by label, resumes with the env's spawn command", async () => {
+    const { engine, spawn } = makeEngine({
+      mirror: mirrorOf("e1", [mirrorSession(UUID_A, { cwd: "/pane-cwd", workspaceLabel: "acme:web" })]),
+      cwd: async () => "/probed",
+    });
+    const run = await engine.run({});
+    expect(run.status).toBe("ok");
+    const call = spawn.mock.calls[0]?.[0];
+    expect(call?.cwd).toBe("/probed");
+    expect(call?.repoPath).toBe("/probed");
+    expect(call?.repo).toBe("acme:web");
+    expect(call?.targetWorkspaceId).toBeUndefined();
+    expect(call?.resumeSessionId).toBe(UUID_A);
+    expect(call?.spawnCommand).toBe("claude");
+    expect(call?.sessionName).toBe("my-tab");
+    expect(call?.assignedPaneIds.size).toBe(0);
+  });
+
+  it("probe failure falls back to the mirrored pane cwd", async () => {
+    const { engine, spawn } = makeEngine({
+      mirror: mirrorOf("e1", [mirrorSession(UUID_A, { cwd: "/pane-cwd" })]),
+      cwd: async () => { throw new Error("no transcript"); },
+    });
+    await engine.run({});
+    expect(spawn.mock.calls[0]?.[0]?.cwd).toBe("/pane-cwd");
+    expect(spawn.mock.calls[0]?.[0]?.repoPath).toBe("/pane-cwd");
+  });
+
+  it('placeholder workspace labels ("" and "?") do NOT group: repo is null, label falls back to the session name', async () => {
+    const { engine, spawn } = makeEngine({
+      mirror: mirrorOf("e1", [
+        mirrorSession(UUID_A, { workspaceLabel: "?" }),
+        mirrorSession(UUID_B, { workspaceLabel: "", name: "" }),
+      ]),
+    });
+    await engine.run({});
+    expect(spawn.mock.calls[0]?.[0]?.repo).toBeNull();
+    expect(spawn.mock.calls[1]?.[0]?.repo).toBeNull();
+    // unusable name → restored-<uuid8> for the tab, and its slug for the workspace label
+    expect(spawn.mock.calls[1]?.[0]?.sessionName).toBe(`restored-${UUID_B.slice(0, 8)}`);
+    expect(spawn.mock.calls[1]?.[0]?.taskSlug).toBe(`restored-${UUID_B.slice(0, 8)}`);
+  });
+
+  it("same-label records are resumed adjacently (create then join-by-label), interleaved input notwithstanding", async () => {
+    const { engine, spawn } = makeEngine({
+      mirror: mirrorOf("e1", [
+        mirrorSession(UUID_A, { workspaceLabel: "acme:web" }),
+        mirrorSession(UUID_B, { workspaceLabel: "other" }),
+        mirrorSession(UUID_C, { workspaceLabel: "acme:web" }),
+      ]),
+    });
+    await engine.run({});
+    const orderedIds = spawn.mock.calls.map((c) => c[0].resumeSessionId);
+    expect(orderedIds).toEqual([UUID_A, UUID_C, UUID_B]);
+  });
+
+  it("one spawn failure → failed entry, the sequence continues, pendingRestore stays set", async () => {
+    const spawnImpl = vi.fn(async (o: SpawnOpts): Promise<SpawnResult> => {
+      if (o.resumeSessionId === UUID_A) throw new Error("pane run failed");
+      return okSpawn;
+    });
+    const { engine, clearPending } = makeEngine({
+      mirror: mirrorOf("e1", [mirrorSession(UUID_A), mirrorSession(UUID_B)]),
+      spawn: spawnImpl,
+    });
+    const run = await engine.run({});
+    expect(run.status).toBe("ok");
+    if (run.status === "ok") {
+      const outcomes = new Map(run.report.envs.e1?.sessions.map((s) => [s.sessionId, s.outcome]));
+      expect(outcomes.get(UUID_A)).toBe("failed");
+      expect(outcomes.get(UUID_B)).toBe("resumed");
+    }
+    expect(clearPending).not.toHaveBeenCalled();
+  });
+
+  it("a zero-failed run clears pendingRestore for the env", async () => {
+    const { engine, clearPending } = makeEngine({
+      mirror: mirrorOf("e1", [mirrorSession(UUID_A)]),
+    });
+    await engine.run({});
+    expect(clearPending).toHaveBeenCalledWith("e1");
+  });
+
+  it("an immediate re-run resumes nothing the previous run spawned (skipped_recent); after the window a still-dead session is retried", async () => {
+    let clock = 1_000_000_000_000;
+    const { engine, spawn } = makeEngine({
+      mirror: mirrorOf("e1", [mirrorSession(UUID_A)]),
+      now: () => clock,
+    });
+    await engine.run({});
+    expect(spawn).toHaveBeenCalledTimes(1);
+    clock += 10_000; // 10s later — inside the window
+    const rerun = await engine.run({});
+    expect(spawn).toHaveBeenCalledTimes(1);
+    if (rerun.status === "ok") expect(rerun.report.envs.e1?.sessions[0]?.outcome).toBe("skipped_recent");
+    clock += RECENT_RESUME_WINDOW_MS; // well past the window, session still dead
+    await engine.run({});
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it("a record with an invalid uuid is failed, never spawned", async () => {
+    const mirror: FleetMirrorFile = {
+      version: 1,
+      envs: { e1: { updatedAt: 1, pendingRestore: false, sessions: [mirrorSession("evil; rm -rf /")] } },
+    };
+    const { engine, spawn } = makeEngine({ mirror });
+    const run = await engine.run({});
+    expect(spawn).not.toHaveBeenCalled();
+    if (run.status === "ok") expect(run.report.envs.e1?.sessions[0]?.outcome).toBe("failed");
   });
 });
