@@ -1,7 +1,5 @@
-import { StatuslineDataSchema, StatuslineStatusSchema, SessionRowSchema, RegistryStatusSchema, AccountUsageSchema, UploadResponseSchema, UPLOAD_MAX_BYTES, EnvStateSchema } from "@shared/schema";
+import { StatuslineDataSchema, StatuslineStatusSchema, SessionRowSchema, RegistryStatusSchema, AccountUsageSchema, UploadResponseSchema, UPLOAD_MAX_BYTES, EnvStateSchema, AttentionMapSchema, AttentionRecordSchema, PaneReadSchema, SnapshotSchema, FleetRestoreReportSchema } from "@shared/schema";
 import { describe, it, expect } from "vitest";
-
-import { AttentionMapSchema, AttentionRecordSchema, PaneReadSchema, SnapshotSchema } from "../shared/schema.ts";
 
 describe("shared schema", () => {
   it("parses a snapshot without recap fields (defaults to null)", () => {
@@ -196,5 +194,23 @@ describe("SessionRow — Claude's own session state", () => {
   it("RegistryStatus has no-config-dirs, which StatuslineStatus does not", () => {
     expect(RegistryStatusSchema.safeParse("no-config-dirs").success).toBe(true);
     expect(StatuslineStatusSchema.safeParse("no-config-dirs").success).toBe(false);
+  });
+});
+
+describe("FleetRestoreReportSchema", () => {
+  it("accepts a full report and rejects a bad outcome", () => {
+    const good = {
+      dryRun: false,
+      envs: {
+        e1: {
+          error: null, updatedAt: 1700000000, unmirrored: 0,
+          sessions: [{ sessionId: "3f2a9c1e-0000-4000-8000-000000000001", name: "t", outcome: "resumed", error: null }],
+        },
+        e2: { error: "not_in_mirror", updatedAt: null, unmirrored: 2, sessions: [] },
+      },
+    };
+    expect(FleetRestoreReportSchema.parse(good)).toEqual(good);
+    const bad = { ...good, envs: { e1: { ...good.envs.e1, sessions: [{ sessionId: "x", name: "t", outcome: "exploded", error: null }] } } };
+    expect(FleetRestoreReportSchema.safeParse(bad).success).toBe(false);
   });
 });
