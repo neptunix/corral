@@ -92,6 +92,8 @@ describe("createFleetRestore statuses", () => {
     const gate = new Promise<void>((r) => { release = r; });
     const { engine } = makeEngine({ spawn: async () => { await gate; return okSpawn; } });
     const first = engine.run({});
+    // Validation runs before the in-flight guard: a typo diagnoses even mid-restore.
+    expect(await engine.run({ env: "nope" })).toEqual({ status: "unknown_env", env: "nope" });
     const second = await engine.run({});
     expect(second).toEqual({ status: "in_flight" });
     release?.();
@@ -281,5 +283,58 @@ describe("createFleetRestore live resume", () => {
     const run = await engine.run({});
     expect(spawn).not.toHaveBeenCalled();
     if (run.status === "ok") expect(run.report.envs.e1?.sessions[0]?.outcome).toBe("failed");
+  });
+
+  it("idempotent rejoin (a live tab with this name already exists) → failed, not resumed; pendingRestore stays set", async () => {
+    const { engine, clearPending } = makeEngine({
+      mirror: mirrorOf("e1", [mirrorSession(UUID_A)]),
+      spawn: async () => ({ ...okSpawn, idempotent: true }),
+    });
+    const run = await engine.run({});
+    expect(run.status).toBe("ok");
+    if (run.status === "ok") {
+      const s = run.report.envs.e1?.sessions[0];
+      expect(s?.outcome).toBe("failed");
+      expect(s?.error).toContain("collision");
+    }
+    expect(clearPending).not.toHaveBeenCalled();
+  });
+
+  it("two records whose names slugify to the same tab name → first resumes, second collides and fails", async () => {
+    let calls = 0;
+    const spawnImpl = vi.fn(async (): Promise<SpawnResult> => {
+      calls += 1;
+      return calls === 1 ? okSpawn : { ...okSpawn, idempotent: true };
+    });
+    const { engine } = makeEngine({
+      mirror: mirrorOf("e1", [
+        mirrorSession(UUID_A, { name: "Fix (a)" }),
+        mirrorSession(UUID_B, { name: "Fix [a]" }),
+      ]),
+      spawn: spawnImpl,
+    });
+    const run = await engine.run({});
+    expect(run.status).toBe("ok");
+    if (run.status === "ok") {
+      expect(run.report.envs.e1?.sessions.map((s) => s.outcome)).toEqual(["resumed", "failed"]);
+    }
+  });
+
+  it("resumes run sequentially across a multi-session mirror, never concurrently", async () => {
+    let inFlightCount = 0;
+    let max = 0;
+    const spawnImpl = vi.fn(async (): Promise<SpawnResult> => {
+      inFlightCount += 1;
+      max = Math.max(max, inFlightCount);
+      await new Promise((r) => setTimeout(r, 0));
+      inFlightCount -= 1;
+      return okSpawn;
+    });
+    const { engine } = makeEngine({
+      mirror: mirrorOf("e1", [mirrorSession(UUID_A), mirrorSession(UUID_B), mirrorSession(UUID_C)]),
+      spawn: spawnImpl,
+    });
+    await engine.run({});
+    expect(max).toBe(1);
   });
 });

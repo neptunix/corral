@@ -62,13 +62,11 @@ export function createFleetRestore(opts: {
   readonly listFn?: (env: HerdrEnv) => Promise<SessionRow[]>;
   readonly sessionCwdFn?: (env: HerdrEnv, sessionId: string) => Promise<string | null>;
   readonly readMirrorFn?: (filePath: string) => FleetMirrorFile | null;
-  readonly recentWindowMs?: number;
   readonly nowFn?: () => number;
 }): FleetRestore {
   const list = opts.listFn ?? listSessions;
   const sessionCwd = opts.sessionCwdFn ?? readSessionCwd;
   const readMirror = opts.readMirrorFn ?? readMirrorFile;
-  const recentWindowMs = opts.recentWindowMs ?? RECENT_RESUME_WINDOW_MS;
   const now = opts.nowFn ?? Date.now;
   // "<envId>:<sessionId>" → ms timestamp of the resume this process performed. Bounded by fleet
   // size — no pruning needed.
@@ -120,7 +118,7 @@ export function createFleetRestore(opts: {
     }
     const recentKey = `${env.id}:${rec.sessionId}`;
     const resumedAt = recent.get(recentKey);
-    if (resumedAt !== undefined && now() - resumedAt < recentWindowMs) {
+    if (resumedAt !== undefined && now() - resumedAt < RECENT_RESUME_WINDOW_MS) {
       return { ...base, outcome: "skipped_recent", error: null };
     }
     if (dryRun) {
@@ -140,7 +138,7 @@ export function createFleetRestore(opts: {
     const sessionName = nameSlug !== "" ? nameSlug : `restored-${rec.sessionId.slice(0, 8)}`;
     const grouped = groupable(rec.workspaceLabel);
     try {
-      await opts.spawn({
+      const result = await opts.spawn({
         env,
         // Workspace-label fallback for the solo (placeholder-label) create path: the session's own
         // name. sanitizeSlug caps it at 32 chars — a >32-char tab name yields a truncated solo
@@ -162,6 +160,17 @@ export function createFleetRestore(opts: {
         resumeSessionId: rec.sessionId,
         sessionName,
       });
+      // spawnSession's join-path idempotency rejoins any LIVE tab already named `sessionName` in the
+      // target workspace WITHOUT running `--resume` — e.g. two mirrored records whose names slugify
+      // identically, or an unrelated live tab with the same name. Report it as a failure (not
+      // "resumed") so pendingRestore stays set and the record survives for a retry, instead of a
+      // zero-failure run silently clearing the flag over a session that was never actually resumed.
+      if (result.idempotent) {
+        return {
+          ...base, outcome: "failed",
+          error: "tab-name collision: a live tab with this name already exists in the workspace — not resumed",
+        };
+      }
       recent.set(recentKey, now());
       return { ...base, outcome: "resumed", error: null };
     } catch (err) {
