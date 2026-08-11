@@ -97,10 +97,6 @@ function row(env: string, sessionId: string | null, over?: Partial<SessionRow>):
   };
 }
 
-function readState(dir: string): unknown {
-  return JSON.parse(readFileSync(mirrorPath(dir), "utf8"));
-}
-
 describe("createFleetMirror write policy", () => {
   it("steady state replaces: a closed session drops, a new one appears", () => {
     const fp = fakePoller();
@@ -271,54 +267,6 @@ describe("createFleetMirror write policy", () => {
     warn.mockRestore();
   });
 
-  it("clearPendingRestore flips the flag and persists", () => {
-    const fp = fakePoller();
-    const m = createFleetMirror({ dataDir: tmpDir });
-    m.start(fp.poller);
-    fp.set({ e1: UP }, [row("e1", UUID_A)]);
-    fp.emit();
-    fp.set({ e1: DOWN }, []);
-    fp.emit();
-    fp.set({ e1: UP }, []);
-    fp.emit();
-    expect(m.getState().envs.e1?.pendingRestore).toBe(true);
-    m.clearPendingRestore("e1");
-    expect(m.getState().envs.e1?.pendingRestore).toBe(false);
-    const disk: unknown = readState(tmpDir);
-    expect(disk).toMatchObject({ envs: { e1: { pendingRestore: false } } });
-  });
-
-  it("clearPendingRestore contains a write failure: memory still flips, a [fleet-mirror] warning fires, and it never throws", () => {
-    const fp = fakePoller();
-    const m = createFleetMirror({ dataDir: tmpDir });
-    m.start(fp.poller);
-    fp.set({ e1: UP }, [row("e1", UUID_A)]);
-    fp.emit();
-    fp.set({ e1: DOWN }, []);
-    fp.emit();
-    fp.set({ e1: UP }, []);
-    fp.emit();
-    expect(m.getState().envs.e1?.pendingRestore).toBe(true);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    rmSync(tmpDir, { recursive: true, force: true }); // next write throws (ENOENT)
-    expect(() => { m.clearPendingRestore("e1"); }).not.toThrow();
-    expect(warn.mock.calls.some((c) => String(c[0]).includes("[fleet-mirror]"))).toBe(true);
-    expect(m.getState().envs.e1?.pendingRestore).toBe(false); // memory flipped despite the failed write
-    warn.mockRestore();
-  });
-
-  it("clearPendingRestore is a no-op (mirror bytes unchanged) for an unknown env or one that isn't pending", () => {
-    const fp = fakePoller();
-    const m = createFleetMirror({ dataDir: tmpDir });
-    m.start(fp.poller);
-    fp.set({ e1: UP }, [row("e1", UUID_A)]);
-    fp.emit(); // steady, first observation → pendingRestore false
-    const before = readFileSync(mirrorPath(tmpDir), "utf8");
-    m.clearPendingRestore("unknown");
-    expect(readFileSync(mirrorPath(tmpDir), "utf8")).toBe(before);
-    m.clearPendingRestore("e1"); // e1 exists but isn't pending
-    expect(readFileSync(mirrorPath(tmpDir), "utf8")).toBe(before);
-  });
 });
 
 describe("ensureMirrorGitignore", () => {

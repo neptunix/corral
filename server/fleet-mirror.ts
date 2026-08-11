@@ -61,8 +61,6 @@ export function readMirrorFile(filePath: string): FleetMirrorFile | null {
 export interface FleetMirror {
   /** Subscribe to the poller; returns the unsubscribe function (reconcile.ts shape). */
   start(poller: Poller): () => void;
-  /** Restore engine calls this after a run with zero failed outcomes for the env. */
-  clearPendingRestore(envId: string): void;
   /** Deep copy — tests and diagnostics only. */
   getState(): FleetMirrorFile;
 }
@@ -180,18 +178,6 @@ export function createFleetMirror(opts: { readonly dataDir: string; readonly now
   return {
     start(poller) {
       return poller.onSnapshot(onSnapshot);
-    },
-    clearPendingRestore(envId) {
-      const entry = state.envs[envId];
-      if (!entry?.pendingRestore) return;
-      state.envs[envId] = { ...entry, pendingRestore: false, updatedAt: Math.floor(now() / 1000) };
-      try {
-        persist();
-      } catch (err) {
-        // The restore itself succeeded; a failed flag write must not fail the route. The next
-        // snapshot tick's unconditional persist() retries it (lastWritten only moves on success).
-        console.warn(`[fleet-mirror] clearPendingRestore(${envId}) write failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
     },
     getState() {
       return structuredClone(state);
