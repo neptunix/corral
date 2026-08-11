@@ -568,6 +568,10 @@ therefore keeps a continuous mirror of the live fleet and can bulk-resume it.
 - **CLI**: `npm run fleet:restore [-- --dry-run] [-- --env <id>]`. Dry run is the pre-upgrade
   check: a nonzero `unmirrored` count means live sessions are missing from the mirror — do not
   kill herdr yet. Exit 1 on any env error or failed session.
+- **Residual risk — post-restore mirror dip:** a zero-failure restore clears `pendingRestore`, and
+  the next steady poll replaces the env's mirror set with the live projection. Sessions just
+  resumed but not yet re-registered with herdr drop out of the mirror for a poll tick or two; a
+  herdr crash inside that window cannot be restored from the mirror alone.
 
 Upgrade workflow:
 
