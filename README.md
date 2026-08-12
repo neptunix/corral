@@ -108,6 +108,12 @@ session is created on first start; there is no `herdr session create` and nothin
 beforehand. Run it from a terminal outside Claude Code, for the same reason corral itself refuses to
 start there (see [Launching corral](#launching-corral)).
 
+**Recommended on macOS: skip the hand-started form above and go straight to a LaunchAgent per
+session** ([Keep it running](#keep-it-running), below). A hand-started server does not survive
+logout or reboot; a LaunchAgent does, starts clean (never inherits a Claude Code session's
+environment), and is what shows up as an ordinary entry under System Settings → General → Login
+Items & Extensions — one entry per session, matching the one-server-per-session model above.
+
 Use the `--session <name>` **flag**, not the `HERDR_SESSION` environment variable. Every herdr pane
 exports `HERDR_SOCKET_PATH`, and that variable silently outranks `HERDR_SESSION` — run
 `HERDR_SESSION=work herdr server` from inside a pane and it reports `herdr server is already running`
