@@ -544,3 +544,48 @@ corral/  (repo root)
 - **Real auth + remote deploy** (token/mTLS, CORS, rate limiting) — the gate for non-loopback bind.
 - **Typed custom-field schemas**, **labels/tags**, **per-board column editing UI**, **MCP server**.
 - **Agent eval** — use the time-to-ack signal (§10) + outcome labels to measure prioritization quality.
+
+---
+
+## 18. Fleet mirror & restore
+
+Killing the herdr server kills every pane, and sessions survive only as transcripts. Corral
+therefore keeps a continuous mirror of the live fleet and can bulk-resume it.
+
+- **Mirror** (`server/fleet-mirror.ts`): a poller subscriber writes every live session that has a
+  herdr-registered Claude sessionId to `<dataDir>/fleet-mirror.json` (uuid-pinned, atomic writes,
+  gitignored in the board store). The write policy is transition-aware: an unreachable environment
+  freezes its entries; an environment coming back after a gap is merged, never replaced — and if
+  mirrored sessions are missing, a persisted `pendingRestore` flag keeps the frozen state through
+  any number of polls, corral restarts, and partial restores. Only a steady reachable→reachable
+  poll replaces the set (dropping operator-closed sessions).
+- **Restore** (`server/fleet-restore.ts`, `POST /api/fleet/restore`): re-lists each environment
+  fresh, skips sessions already alive (or resumed by this process within the last ~2 minutes),
+  probes each transcript for the true cwd, and resumes the rest sequentially via
+  `<spawnCommand> --resume <uuid>`, re-grouping sessions into workspaces by mirrored label.
+  Board data is untouched — card links re-attach by sessionId. `pendingRestore` clears itself,
+  purely inside the mirror, once every mirrored record for the env is observed live again; a
+  session that never re-registers keeps the flag set and stays mirrored for a retry. Concurrent
+  runs 409.
+- **CLI**: `npm run fleet:restore [-- --dry-run] [-- --env <id>]`. Exit 1 on any env error or
+  failed session; exit 3 on a dry run with a nonzero `unmirrored` count — the hard pre-upgrade
+  interlock: do not kill herdr yet. The report also flags `pendingRestore` per env.
+- **Residual risks:**
+  - **Unobserved restart:** a herdr kill+restart that completes entirely between two poll ticks
+    (default ~30s) is invisible to the transition detector — the next steady poll replaces the
+    env's mirror entry with the (possibly empty) live set. Stop corral during the upgrade, or make
+    sure corral observes the outage before the new herdr starts.
+  - **Invisible in-pane resume failure:** `resumed` means the resume command was sent to the pane;
+    a `claude --resume` that fails inside the pane is still invisible to corral, but the record is
+    no longer lost — `pendingRestore` stays set and the session stays mirrored for a retry, and a
+    follow-up dry run shows the flag.
+  - **Pending-window resurrection:** while `pendingRestore` is set the mirror is merge-only, so
+    sessions the operator deliberately closes during that window stay mirrored and a restore
+    re-run resurrects them; there is no force-clear switch yet — hand-edit the mirror file if
+    needed. The flag is now visible in every report, so this window is no longer silent.
+
+Upgrade workflow:
+
+    npm run fleet:restore -- --dry-run   # optional: unmirrored must be 0 (exit 3 = mirror lagging, do not kill herdr)
+    kill herdr → upgrade → start herdr server
+    npm run fleet:restore                # any time — pendingRestore holds the frozen state

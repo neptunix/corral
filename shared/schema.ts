@@ -134,6 +134,37 @@ export const UploadResponseSchema = z.object({ path: z.string() });
 // hono/body-limit) and the web pre-checks against it, so client and server limits cannot drift.
 export const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
 
+// ---- fleet restore (POST /api/fleet/restore → scripts/fleet-restore.ts) ----
+// Crosses the REST boundary to the terminal script, hence shared. `would_resume` is the dry-run
+// outcome; `unmirrored` counts live sessions carrying a sessionId that the mirror has NO record of —
+// the pre-upgrade health signal (a nonzero value on a dry run means "do not kill herdr yet").
+export const FleetRestoreOutcomeSchema = z.enum([
+  "resumed", "skipped_alive", "skipped_recent", "failed", "would_resume",
+]);
+
+export const FleetRestoreSessionSchema = z.object({
+  sessionId: z.string(),
+  name: z.string(),
+  outcome: FleetRestoreOutcomeSchema,
+  error: z.string().nullable(),
+});
+
+export const FleetRestoreEnvReportSchema = z.object({
+  // env-level failure: unreachable / listing failed / not_in_mirror. Session-level outcomes are per-row.
+  error: z.string().nullable(),
+  // the env's mirror updatedAt (secs) — staleness signal; null when the env has no mirror entry
+  updatedAt: z.number().nullable(),
+  unmirrored: z.number(),
+  sessions: z.array(FleetRestoreSessionSchema),
+  // the stuck-pending visibility signal for the pre-upgrade dry run
+  pendingRestore: z.boolean(),
+});
+
+export const FleetRestoreReportSchema = z.object({
+  dryRun: z.boolean(),
+  envs: z.record(z.string(), FleetRestoreEnvReportSchema),
+});
+
 export type EnvState = z.infer<typeof EnvStateSchema>;
 export type RecapStatus = z.infer<typeof RecapStatusSchema>;
 export type SessionRow = z.infer<typeof SessionRowSchema>;
@@ -149,3 +180,7 @@ export type StatuslineData = z.infer<typeof StatuslineDataSchema>;
 export type StatuslineStatus = z.infer<typeof StatuslineStatusSchema>;
 export type RegistryStatus = z.infer<typeof RegistryStatusSchema>;
 export type AccountUsage = z.infer<typeof AccountUsageSchema>;
+export type FleetRestoreOutcome = z.infer<typeof FleetRestoreOutcomeSchema>;
+export type FleetRestoreSession = z.infer<typeof FleetRestoreSessionSchema>;
+export type FleetRestoreEnvReport = z.infer<typeof FleetRestoreEnvReportSchema>;
+export type FleetRestoreReport = z.infer<typeof FleetRestoreReportSchema>;

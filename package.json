@@ -16,6 +16,7 @@
     "build": "vite build",
     "start": "tsx scripts/preflight.ts && tsx server/index.ts",
     "mcp": "tsx mcp/index.ts",
+    "fleet:restore": "tsx scripts/fleet-restore.ts",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
