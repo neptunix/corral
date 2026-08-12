@@ -23,7 +23,16 @@ Tests are Vitest, `test/<name>.test.ts`.
 
 ## Critical herdr-integration rules
 - **`pane run` only** to send commands (appends Enter). Never `agent send` (staged-text garble).
-- **`HERDR_SOCKET_PATH` is the ONLY routing mechanism** — no `--socket`/`--session` flag.
+- **corral's own `execFile` calls in `server/herdr.ts` route via `HERDR_SOCKET_PATH` only** — no
+  `--socket`/`--session` flag. Scoped to that code path; NOT guidance for manually starting a herdr
+  server (see the rule below and `README.md` → "Running herdr").
+- **Never start/stop/reload a herdr server, or launch corral itself, via Bash from inside a Claude
+  Code session — not even with `nohup`/`disown`.** The child inherits this process's own
+  `CLAUDE_CODE_CHILD_SESSION`, and every pane that server later spawns inherits it too, silently
+  breaking transcript persistence fleet-wide. `HERDR_SOCKET_PATH=... herdr server &` is the same
+  violation with different syntax. Correct commands live in `README.md` → "Running herdr" /
+  "Launching corral" — hand the exact command to the operator to run themselves; never execute it
+  yourself, including during incident recovery.
 - **`pane read` returns RAW TEXT, never JSON.** Only `workspace/tab/agent list` are JSON (Zod-validated).
 - **All herdr/SSH calls use `execFile` with arg arrays** (`server/herdr.ts`); remote quotes user
   tokens with `shell-quote`; never `exec` with string interpolation.
