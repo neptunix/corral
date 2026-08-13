@@ -331,3 +331,70 @@ describe("createFleetRestore live resume", () => {
     expect(max).toBe(1);
   });
 });
+
+describe("createFleetRestore — resume stagger (staggerMs/sleepFn)", () => {
+  const UUID_D = "dddddddd-0000-4000-8000-000000000004";
+  const UUID_E = "eeeeeeee-0000-4000-8000-000000000005";
+  const UUID_F = "ffffffff-0000-4000-8000-000000000006";
+
+  it("pauses before every resume after the first in a run, and the pause-free slot resets on the next run", async () => {
+    const sleeps: number[] = [];
+    let mirror = mirrorOf("e1", [mirrorSession(UUID_A), mirrorSession(UUID_B, { name: "b" }), mirrorSession(UUID_C, { name: "c" })]);
+    const engine = createFleetRestore({
+      envs: [env("e1")],
+      mirrorFilePath: "/unused-in-tests",
+      spawn: vi.fn(async () => okSpawn),
+      listFn: async () => [],
+      sessionCwdFn: async () => "/probed",
+      readMirrorFn: () => mirror,
+      staggerMs: 1500,
+      sleepFn: async (ms) => { sleeps.push(ms); },
+    });
+
+    await engine.run({});
+    expect(sleeps).toEqual([1500, 1500]); // 3 resumes -> a pause before the 2nd and 3rd, none before the 1st
+
+    // Different sessionIds than the first run, so RECENT_RESUME_WINDOW_MS's own de-dup can't mask this:
+    // this run must not inherit `resumedOnce` from the prior run.
+    sleeps.length = 0;
+    mirror = mirrorOf("e1", [mirrorSession(UUID_D), mirrorSession(UUID_E, { name: "e" }), mirrorSession(UUID_F, { name: "f" })]);
+    await engine.run({});
+    expect(sleeps).toEqual([1500, 1500]);
+  });
+
+  it("a record that short-circuits before spawning (already alive) does not consume the pause-free first slot", async () => {
+    const sleeps: number[] = [];
+    const engine = createFleetRestore({
+      envs: [env("e1")],
+      mirrorFilePath: "/unused-in-tests",
+      spawn: vi.fn(async () => okSpawn),
+      listFn: async () => [liveRow("e1", UUID_A)], // A is already live -> skipped_alive, never reaches spawn
+      sessionCwdFn: async () => "/probed",
+      readMirrorFn: () => mirrorOf("e1", [mirrorSession(UUID_A), mirrorSession(UUID_B, { name: "b" })]),
+      staggerMs: 1500,
+      sleepFn: async (ms) => { sleeps.push(ms); },
+    });
+
+    const run = await engine.run({});
+    expect(sleeps).toEqual([]); // B is the only actual resume — no pause before it
+    if (run.status === "ok") {
+      expect(run.report.envs.e1?.sessions.find((s) => s.sessionId === UUID_A)?.outcome).toBe("skipped_alive");
+      expect(run.report.envs.e1?.sessions.find((s) => s.sessionId === UUID_B)?.outcome).toBe("resumed");
+    }
+  });
+
+  it("staggerMs: 0 (the default) never sleeps", async () => {
+    const sleep = vi.fn(async () => undefined);
+    const engine = createFleetRestore({
+      envs: [env("e1")],
+      mirrorFilePath: "/unused-in-tests",
+      spawn: vi.fn(async () => okSpawn),
+      listFn: async () => [],
+      sessionCwdFn: async () => "/probed",
+      readMirrorFn: () => mirrorOf("e1", [mirrorSession(UUID_A), mirrorSession(UUID_B, { name: "b" })]),
+      sleepFn: sleep,
+    });
+    await engine.run({});
+    expect(sleep).not.toHaveBeenCalled();
+  });
+});

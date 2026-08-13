@@ -619,6 +619,50 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn", () => {
 });
 
 describe("POST /api/boards/:bid/tasks/:tid/spawn — idempotent adoption of an already-bound pane", () => {
+  it("heals a churn-moved link's location fields instead of returning the stale pane", async () => {
+    // The stored link's pane moved (herdr restart) — same Claude session, new paneId. linkBindsSession
+    // matches it via the sessionId-only disjunct even though paneId differs; the adoption must rewrite
+    // the link's paneId/tabId/workspace to the fresh spawn result, not hand back the pre-move pane.
+    const snapshot: Snapshot = {
+      envs: { "work-local": { reachable: true } },
+      sessions: [{
+        env: "work-local", paneId: "w1-new", status: "idle", agent: "claude",
+        cwd: "/repo/x", tab: "renamed-tab", workspace: "new-ws",
+        sessionId: "sess-abc", recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+      }],
+    };
+    const spawn = vi.fn(async (_opts: unknown): Promise<SpawnResult> => ({
+      paneId: "w1-new", tabId: "t-new", workspaceId: "w-new",
+      workspaceLabel: "new-ws", tabLabel: "renamed-tab", cwdSnapshot: "/repo/x", idempotent: true,
+    }));
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage: createStorage(tmpDir), spawn, listWorkspaces: vi.fn().mockResolvedValue([]) });
+    const tid = await createTaskOnTestBoard(app);
+    // Seed the pre-move link directly (its paneId "w1-old" is now dead — attach would need a live row).
+    const storage = createStorage(tmpDir);
+    await storage.withBoard("test", (b) => {
+      if (b === null) return { board: null, result: undefined };
+      const t = b.tasks.find((x) => x.id === tid);
+      if (t === undefined) return { board: b, result: undefined };
+      return {
+        board: { ...b, tasks: b.tasks.map((x) => x.id === tid ? { ...x, sessions: [{ env: "work-local", paneId: "w1-old", tabId: "t-old", tabLabel: "old-tab", workspaceId: "w-old", workspaceLabel: "old-ws", name: "old-tab", cwdSnapshot: "/repo/x", sessionId: "sess-abc" }] } : x) },
+        result: undefined,
+      };
+    });
+
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "second-name" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { idempotent: boolean; paneId: string };
+    expect(body.idempotent).toBe(true);
+    expect(body.paneId).toBe("w1-new"); // healed to the fresh pane, not the stale "w1-old"
+    const state = await (await app.request("/api/state?board=test")).json() as { tasks: { sessions: { paneId: string; tabLabel: string }[] }[] };
+    expect(state.tasks[0]?.sessions).toHaveLength(1); // still no duplicate
+    expect(state.tasks[0]?.sessions[0]?.paneId).toBe("w1-new");
+  });
+
   it("does not append a duplicate link when the adopted pane is already on this card", async () => {
     // Reproduces the duplicate-session-row bug: spawnSession's join-path rejoin scan can hand back a
     // pane that is ALREADY linked to this very card (e.g. under a different requested name). Appending
