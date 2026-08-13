@@ -62,15 +62,23 @@ export function createFleetRestore(opts: {
   readonly sessionCwdFn?: (env: HerdrEnv, sessionId: string) => Promise<string | null>;
   readonly readMirrorFn?: (filePath: string) => FleetMirrorFile | null;
   readonly nowFn?: () => number;
+  readonly sleepFn?: (ms: number) => Promise<void>;
+  // Pause before every resume after the first. 0 disables staggering (e.g. in tests).
+  readonly staggerMs?: number;
 }): FleetRestore {
   const list = opts.listFn ?? listSessions;
   const sessionCwd = opts.sessionCwdFn ?? readSessionCwd;
   const readMirror = opts.readMirrorFn ?? readMirrorFile;
   const now = opts.nowFn ?? Date.now;
+  const sleep = opts.sleepFn ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
+  const staggerMs = opts.staggerMs ?? 0;
   // "<envId>:<sessionId>" → ms timestamp of the resume this process performed. Bounded by fleet
   // size — no pruning needed.
   const recent = new Map<string, number>();
   let inFlight = false;
+  // Set once the first ACTUAL resume of a run has fired — the stagger delays every one after it,
+  // never the first, so a restore of a single lingering session pays no latency.
+  let resumedOnce = false;
 
   async function restoreEnv(env: HerdrEnv, entry: MirrorEnv | undefined, dryRun: boolean): Promise<FleetRestoreEnvReport> {
     if (entry === undefined) {
@@ -132,6 +140,8 @@ export function createFleetRestore(opts: {
     const nameSlug = slugify(rec.name, NAME_MAX);
     const sessionName = nameSlug !== "" ? nameSlug : `restored-${rec.sessionId.slice(0, 8)}`;
     const grouped = groupable(rec.workspaceLabel);
+    if (resumedOnce && staggerMs > 0) await sleep(staggerMs);
+    resumedOnce = true;
     try {
       const result = await opts.spawn({
         env,
@@ -184,6 +194,7 @@ export function createFleetRestore(opts: {
       }
       if (inFlight) return { status: "in_flight" };
       inFlight = true;
+      resumedOnce = false; // stagger applies fresh to each run — never delays a run's first resume
       try {
         let mirror: FleetMirrorFile | null;
         try {

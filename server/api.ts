@@ -28,7 +28,7 @@ import { closePane, listWorkspaces, paneIdentity, readPane, type ReadFn, UUID_RE
 import { isLoopbackHost } from "./host-guard.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
-import { isSessionBound, resolveLinkIndex } from "./session-binding.ts";
+import { isSessionBound, linkBindsSession, resolveLinkIndex } from "./session-binding.ts";
 import { composeSessionName, fallbackNamePrefix, NAME_MAX, sanitizeSlug, slugify } from "./spawn.ts";
 import type { SpawnOpts, SpawnResult } from "./spawn.ts";
 import { aggregateAccounts } from "./statusline.ts";
@@ -1235,6 +1235,7 @@ export function createApi(opts: {
     }
     try {
       const result = await Promise.race([spawnPromise, spawnTimeoutPromise]);
+      const liveSessionId = opts.poller.getSnapshot().sessions.find((s) => s.env === targetEnv.id && s.paneId === result.paneId)?.sessionId ?? null;
       const link: SessionLink = {
         env: targetEnv.id, paneId: result.paneId,
         tabId: result.tabId, tabLabel: result.tabLabel,
@@ -1242,15 +1243,44 @@ export function createApi(opts: {
         name: sessionName, cwdSnapshot: result.cwdSnapshot,
         // Almost always null here — Claude hasn't registered on the fresh pane yet (it's absent from
         // `agent list` until then). Not a bug: the reconciler backfills it once the poller sees the id.
-        sessionId: opts.poller.getSnapshot().sessions.find((s) => s.env === targetEnv.id && s.paneId === result.paneId)?.sessionId ?? null,
+        sessionId: liveSessionId,
       };
-      await opts.storage.withBoard(bid, (b) => {
-        if (b === null) return { board: null, result: undefined };
+      // An idempotent spawn adopts a pane spawnSession found ALREADY live in the workspace (see
+      // spawn.ts's join-path rejoin scan) — that pane can already be linked on THIS card (e.g. a
+      // stale/renamed link whose pane moved, or a retried spawn). Appending unconditionally would put
+      // two links on the card resolving to the same live session, so this re-checks and writes in the
+      // SAME withBoard transaction — `task` above is a pre-spawn snapshot (spawn can run up to
+      // SPAWN_TIMEOUT_MS) and is stale by the time the write happens, exactly the gap /attach closes by
+      // doing its identical isSessionBound check inside its own withBoard callback.
+      const { link: responseLink, alreadyOnCard } = await opts.storage.withBoard(bid, (b) => {
+        if (b === null) return { board: null, result: { link, alreadyOnCard: false } };
         const t = b.tasks.find((x) => x.id === tid);
-        if (t === undefined) return { board: b, result: undefined };
-        return { board: { ...b, tasks: b.tasks.map((x) => x.id === tid ? { ...x, sessions: [...x.sessions, link], updatedAt: nowSecs() } : x) }, result: undefined };
+        if (t === undefined) return { board: b, result: { link, alreadyOnCard: false } };
+        const existing = t.sessions.find((s) => linkBindsSession(s, { env: targetEnv.id, paneId: result.paneId, liveSessionId }));
+        if (existing === undefined) {
+          return {
+            board: { ...b, tasks: b.tasks.map((x) => x.id === tid ? { ...x, sessions: [...x.sessions, link], updatedAt: nowSecs() } : x) },
+            result: { link, alreadyOnCard: false },
+          };
+        }
+        // Churn-heal: the match came via linkBindsSession's sessionId-only disjunct (the pane moved), so
+        // the existing link's location fields are stale — heal them from the fresh spawn/poller result
+        // rather than returning the pre-move pane.
+        const healed: SessionLink = {
+          ...existing, paneId: result.paneId, tabId: result.tabId, tabLabel: result.tabLabel,
+          workspaceId: result.workspaceId, workspaceLabel: result.workspaceLabel,
+          cwdSnapshot: result.cwdSnapshot, sessionId: liveSessionId ?? existing.sessionId,
+        };
+        if (healed.paneId === existing.paneId && healed.tabId === existing.tabId
+          && healed.workspaceId === existing.workspaceId && healed.sessionId === existing.sessionId) {
+          return { board: b, result: { link: existing, alreadyOnCard: true } };
+        }
+        return {
+          board: { ...b, tasks: b.tasks.map((x) => x.id === tid ? { ...x, sessions: x.sessions.map((s) => s === existing ? healed : s), updatedAt: nowSecs() } : x) },
+          result: { link: healed, alreadyOnCard: true },
+        };
       });
-      return c.json({ ...link, idempotent: result.idempotent });
+      return c.json({ ...responseLink, idempotent: result.idempotent || alreadyOnCard });
     } catch (err) {
       const timedOut = err instanceof Error && err.message === "spawn_timeout";
       if (timedOut) {

@@ -46,6 +46,15 @@ export function TaskCard({ task, onEdit, onOpenSession, onDetachSession, onClose
   // row opens that specific one; the ⚙ always edits. With no session, the body falls to edit.
   const liveSession = task.sessions.find((s) => s.live !== null && !s.live.detached);
   const primary = liveSession ?? task.sessions[0];
+  // Safety net against a server-side link bug (a spawn/attach race can persist two links resolving to
+  // the same live session): collapse exact (env, paneId, sessionId) duplicates before rendering.
+  const seenSessionKeys = new Set<string>();
+  const dedupedSessions = task.sessions.filter((s) => {
+    const key = `${s.env}:${s.paneId}:${s.sessionId ?? ""}`;
+    if (seenSessionKeys.has(key)) return false;
+    seenSessionKeys.add(key);
+    return true;
+  });
   const handleCardClick = (): void => {
     if (primary !== undefined) onOpenSession(primary.env, primary.paneId, false, task.title);
     else onEdit();
@@ -80,9 +89,9 @@ export function TaskCard({ task, onEdit, onOpenSession, onDetachSession, onClose
           >⚙</button>
         </div>
       </div>
-      {task.sessions.length > 0 && (
+      {dedupedSessions.length > 0 && (
         <div className="flex flex-col gap-1 mt-2">
-          {task.sessions.map((s) => (
+          {dedupedSessions.map((s) => (
             // Key includes sessionId: after churn-heal two links can share an enriched paneId (one
             // live at the reused pane, one detached still pointing at it), but their sessionIds differ.
             <SessionRow
