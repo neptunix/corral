@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 
 import {
-  BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, HOST, LIST_TIMEOUT, PORT,
+  BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, FLEET_RESTORE_STAGGER_MS, HOST, LIST_TIMEOUT, PORT,
   UPLOAD_ROOT, WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED, ZOMBIE_REAP_GRACE_MS,
 } from "../config.ts";
 import { createApi } from "./api.ts";
@@ -75,6 +75,7 @@ void (async () => {
     envs: ENVS,
     mirrorFilePath: mirrorPath(BOARD_DATA_DIR),
     spawn,
+    staggerMs: FLEET_RESTORE_STAGGER_MS,
   });
 
   const app = createApi({

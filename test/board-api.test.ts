@@ -618,6 +618,43 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn", () => {
   });
 });
 
+describe("POST /api/boards/:bid/tasks/:tid/spawn — idempotent adoption of an already-bound pane", () => {
+  it("does not append a duplicate link when the adopted pane is already on this card", async () => {
+    // Reproduces the duplicate-session-row bug: spawnSession's join-path rejoin scan can hand back a
+    // pane that is ALREADY linked to this very card (e.g. under a different requested name). Appending
+    // unconditionally puts two links on the card resolving to the same live session.
+    const snapshot: Snapshot = {
+      envs: { "work-local": { reachable: true } },
+      sessions: [{
+        env: "work-local", paneId: "w1-1", status: "idle", agent: "claude",
+        cwd: "/repo/x", tab: "already-here", workspace: "demo-api",
+        sessionId: "sess-abc", recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+      }],
+    };
+    const spawn = vi.fn(async (_opts: unknown): Promise<SpawnResult> => ({
+      paneId: "w1-1", tabId: "w1-1", workspaceId: "w1",
+      workspaceLabel: "demo-api", tabLabel: "already-here", cwdSnapshot: "/repo/x", idempotent: true,
+    }));
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage: createStorage(tmpDir), spawn, listWorkspaces: vi.fn().mockResolvedValue([]) });
+    const tid = await createTaskOnTestBoard(app);
+    await app.request(`/api/boards/test/tasks/${tid}/attach`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", paneId: "w1-1" }),
+    });
+
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "second-name" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { idempotent: boolean };
+    expect(body.idempotent).toBe(true);
+    const state = await (await app.request("/api/state?board=test")).json() as { tasks: { sessions: unknown[] }[] };
+    expect(state.tasks[0]?.sessions).toHaveLength(1); // no duplicate link
+  });
+});
+
 describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", () => {
   async function seedTaskWithSessionNames(dataDir: string, names: readonly string[]): Promise<{ app: ReturnType<typeof createApi>; spawn: ReturnType<typeof vi.fn>; tid: string }> {
     const { app, spawn } = makeApiWithSpawn(dataDir);

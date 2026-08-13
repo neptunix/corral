@@ -90,6 +90,13 @@ export const BOARD_DATA_DIR = process.env.BOARD_DATA_DIR ?? CORRAL_HOME;
 export const GIT_COMMIT_INTERVAL_MS = 10_000;
 export const SPAWN_TIMEOUT_MS = 60_000;
 
+// Pause between successive `claude --resume` launches in a fleet restore (server/fleet-restore.ts).
+// A restart can leave dozens of mirrored sessions to resume; firing them back-to-back both spikes
+// CPU/disk at once and narrows the window before the poller has seen the new pane, which is exactly
+// the staleness spawnSession's join-path idempotency scan can misread as "an unrelated live tab
+// already has this name" (see fleet-restore.ts's own comment on that outcome).
+export const FLEET_RESTORE_STAGGER_MS = intFromEnv("FLEET_RESTORE_STAGGER_MS", 1500, { min: 0 });
+
 // ---- WebSocket live-terminal attach (§3.4/§3.7) ----
 export const WS_MAX_PAYLOAD = 64 * 1024; // keyboard channel; ws's 100 MiB default is a needless DoS surface
 export const WS_MAX_CONCURRENT = intFromEnv("WS_MAX_CONCURRENT", 3, { min: 1 }); // SEC-2 hard cap

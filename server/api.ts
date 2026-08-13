@@ -28,7 +28,7 @@ import { closePane, listWorkspaces, paneIdentity, readPane, type ReadFn, UUID_RE
 import { isLoopbackHost } from "./host-guard.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
-import { isSessionBound, resolveLinkIndex } from "./session-binding.ts";
+import { isSessionBound, linkBindsSession, resolveLinkIndex } from "./session-binding.ts";
 import { composeSessionName, fallbackNamePrefix, NAME_MAX, sanitizeSlug, slugify } from "./spawn.ts";
 import type { SpawnOpts, SpawnResult } from "./spawn.ts";
 import { aggregateAccounts } from "./statusline.ts";
@@ -1235,6 +1235,7 @@ export function createApi(opts: {
     }
     try {
       const result = await Promise.race([spawnPromise, spawnTimeoutPromise]);
+      const liveSessionId = opts.poller.getSnapshot().sessions.find((s) => s.env === targetEnv.id && s.paneId === result.paneId)?.sessionId ?? null;
       const link: SessionLink = {
         env: targetEnv.id, paneId: result.paneId,
         tabId: result.tabId, tabLabel: result.tabLabel,
@@ -1242,8 +1243,18 @@ export function createApi(opts: {
         name: sessionName, cwdSnapshot: result.cwdSnapshot,
         // Almost always null here — Claude hasn't registered on the fresh pane yet (it's absent from
         // `agent list` until then). Not a bug: the reconciler backfills it once the poller sees the id.
-        sessionId: opts.poller.getSnapshot().sessions.find((s) => s.env === targetEnv.id && s.paneId === result.paneId)?.sessionId ?? null,
+        sessionId: liveSessionId,
       };
+      // An idempotent spawn adopts a pane spawnSession found ALREADY live in the workspace (see
+      // spawn.ts's join-path rejoin scan) — that pane can already be linked on THIS card (e.g. a
+      // stale/renamed link whose pane moved, or a retried spawn). Appending unconditionally would put
+      // two links on the card resolving to the same live session. isSessionBound is the same guard
+      // /attach uses for the identical question.
+      const alreadyBound = isSessionBound(task.sessions, { env: targetEnv.id, paneId: result.paneId, liveSessionId });
+      if (alreadyBound) {
+        const existing = task.sessions.find((s) => linkBindsSession(s, { env: targetEnv.id, paneId: result.paneId, liveSessionId }));
+        return c.json({ ...(existing ?? link), idempotent: true });
+      }
       await opts.storage.withBoard(bid, (b) => {
         if (b === null) return { board: null, result: undefined };
         const t = b.tasks.find((x) => x.id === tid);
