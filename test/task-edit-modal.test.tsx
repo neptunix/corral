@@ -65,6 +65,8 @@ describe("TaskEditModal — save error channel", () => {
     const onClose = vi.fn(() => { order.push("close"); });
     render(<TaskEditModal task={task} board={board} {...baseProps} onSave={onSave} onDelete={vi.fn()} boards={[board]} onClose={onClose} />);
 
+    // Save only accepts a click once something changed — see the dirty-gate describe below.
+    fireEvent.change(screen.getByDisplayValue("Original title"), { target: { value: "Edited title" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => { expect(onClose).toHaveBeenCalledTimes(1); });
@@ -77,6 +79,7 @@ describe("TaskEditModal — save error channel", () => {
     const onSave = vi.fn(() => new Promise<void>(() => { /* never settles for this assertion */ }));
     render(<TaskEditModal task={task} board={board} {...baseProps} onSave={onSave} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()} />);
 
+    fireEvent.change(screen.getByDisplayValue("Original title"), { target: { value: "Edited title" } });
     const saveButton = screen.getByRole("button", { name: "Save" });
     expect(saveButton.hasAttribute("disabled")).toBe(false);
     fireEvent.click(saveButton);
@@ -122,6 +125,7 @@ describe("TaskEditModal — dismissal guarded while in flight", () => {
     const onClose = vi.fn();
     render(<TaskEditModal task={task} board={board} {...baseProps} onSave={onSave} onDelete={vi.fn()} boards={[board]} onClose={onClose} />);
 
+    fireEvent.change(screen.getByDisplayValue("Original title"), { target: { value: "Edited title" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     fireEvent.keyDown(window, { key: "Escape" });
 
@@ -140,6 +144,99 @@ describe("TaskEditModal — dismissal guarded while in flight", () => {
     fireEvent.keyDown(window, { key: "Escape" });
 
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+// The operator's own report: reaching for the spawn action and hitting Save instead, over and over.
+// Save being inert until something actually changed is what makes that misclick harmless.
+describe("TaskEditModal — Save is refused until something changed", () => {
+  function renderTask(task: EnrichedTask, onSave = vi.fn()) {
+    const board = makeBoard();
+    render(<TaskEditModal task={task} board={board} {...baseProps} onSave={onSave} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()} />);
+    return { onSave, save: screen.getByRole("button", { name: "Save" }) };
+  }
+
+  it("starts disabled on an untouched task and says why", () => {
+    const { save } = renderTask(makeTask());
+    expect(save.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("no changes")).toBeDefined();
+  });
+
+  it("enables on a title, description, column or priority edit", () => {
+    const { save } = renderTask(makeTask());
+    fireEvent.change(screen.getByDisplayValue("Original title"), { target: { value: "Edited" } });
+    expect(save.hasAttribute("disabled")).toBe(false);
+
+    cleanup();
+    const second = renderTask(makeTask());
+    fireEvent.click(screen.getByRole("button", { name: "P1" }));
+    expect(second.save.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("stays disabled when an edit is reverted, and when only surrounding whitespace was typed", () => {
+    const { save } = renderTask(makeTask({ title: "Original title" }));
+    const input = screen.getByDisplayValue("Original title");
+
+    fireEvent.change(input, { target: { value: "Edited" } });
+    fireEvent.change(input, { target: { value: "Original title" } });
+    expect(save.hasAttribute("disabled")).toBe(true);
+
+    // handleSave sends the TRIMMED title, so trailing space is not a change the server would see.
+    fireEvent.change(input, { target: { value: "Original title  " } });
+    expect(save.hasAttribute("disabled")).toBe(true);
+  });
+
+  // The stored title is compared TRIMMED on both sides. Comparing a trimmed input against a raw stored
+  // value made a card whose title has surrounding whitespace — the server accepts one — open already
+  // dirty, with no edit, and never return to clean.
+  it("starts clean on a stored title that carries surrounding whitespace", () => {
+    const { save } = renderTask(makeTask({ title: "  Spaced title  " }));
+    expect(save.hasAttribute("disabled")).toBe(true);
+
+    // getByDisplayValue normalizes whitespace, so this matches the padded value too.
+    fireEvent.change(screen.getByDisplayValue("Spaced title"), { target: { value: "Spaced title" } });
+    expect(save.hasAttribute("disabled")).toBe(true); // whitespace-only difference is still no change
+
+    fireEvent.change(screen.getByDisplayValue("Spaced title"), { target: { value: "Different" } });
+    expect(save.hasAttribute("disabled")).toBe(false);
+  });
+});
+
+describe("TaskEditModal — Task / Run Claude tabs", () => {
+  it("shows Save on the Task tab and the launch button on the Run Claude tab, never both", () => {
+    const board = makeBoard();
+    render(<TaskEditModal task={makeTask()} board={board} {...baseProps} onSave={vi.fn()} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Run Claude" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: /Run Claude/ }));
+
+    // The two primary actions never share a footer, so the one the operator aims at is the only one there.
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Run Claude" })).toBeDefined();
+    expect(screen.queryByDisplayValue("Original title")).toBeNull(); // the Task fields are off screen
+
+    fireEvent.click(screen.getByRole("tab", { name: "Task" }));
+    expect(screen.getByRole("button", { name: "Save" })).toBeDefined();
+  });
+
+  it("keeps edits made on the Task tab across a round trip through the Run Claude tab", () => {
+    const board = makeBoard();
+    render(<TaskEditModal task={makeTask()} board={board} {...baseProps} onSave={vi.fn()} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByDisplayValue("Original title"), { target: { value: "Edited title" } });
+    fireEvent.click(screen.getByRole("tab", { name: /Run Claude/ }));
+    fireEvent.click(screen.getByRole("tab", { name: "Task" }));
+
+    expect(screen.getByDisplayValue("Edited title")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Save" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("opens on the Task tab", () => {
+    const board = makeBoard();
+    render(<TaskEditModal task={makeTask()} board={board} {...baseProps} onSave={vi.fn()} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()} />);
+    expect(screen.getByRole("tab", { name: "Task" }).getAttribute("aria-selected")).toBe("true");
   });
 });
 
