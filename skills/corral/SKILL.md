@@ -44,8 +44,9 @@ the log from memory.
 <!-- ctx-signal:start -->
 ## Context pressure signal
 
-`[corral] ctx {pct}% (notice|nudge|urgent)` appears on prompts once session context passes
-30/40/60%. Same number `corral_whoami` reports — corral hands it to you before you ask.
+`[corral] ctx {pct}% (notice|nudge|urgent)` appears on prompts once session context crosses the
+configured thresholds (default 30/40/60%). Same number `corral_whoami` reports — corral hands it
+to you before you ask.
 
 - **notice:** drop a light, low-key mention into your normal reply — "context's at N%" in passing.
 - **nudge:** be more direct — context is climbing, and a handoff is available if there's work left.

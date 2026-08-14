@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 
 const SCRIPT = path.resolve(import.meta.dirname, "../scripts/corral-claude-hook.sh");
 
@@ -13,9 +13,19 @@ function hasJq(): boolean {
   try { execFileSync("jq", ["--version"], { stdio: "ignore" }); return true; } catch { return false; }
 }
 
+// Default CORRAL_HOME for tests that don't care about thresholds config — keeps the hook from
+// reading the real machine's ~/.corral/config.json (see finding #2, test hermeticity). Fresh per
+// test, cleaned up alongside the other fixture dirs in afterEach.
+let defaultCorralHome = "";
+beforeEach(() => {
+  defaultCorralHome = mkdtempSync(path.join(os.tmpdir(), "corral-home-default-"));
+  dirs.push(defaultCorralHome);
+});
+
 function run(input: string, env: NodeJS.ProcessEnv = {}): { stdout: string; status: number } {
+  const withDefaultHome = "CORRAL_HOME" in env ? env : { ...env, CORRAL_HOME: defaultCorralHome };
   try {
-    const stdout = execFileSync("bash", [SCRIPT], { input, env: { ...process.env, ...env } });
+    const stdout = execFileSync("bash", [SCRIPT], { input, env: { ...process.env, ...withDefaultHome } });
     return { stdout: stdout.toString(), status: 0 };
   } catch (err) {
     const e = err as { status: number | null; stdout: Buffer };
@@ -226,6 +236,7 @@ describe.skipIf(!hasJq())("corral-claude-hook.sh — UserPromptSubmit", () => {
     ["malformed JSON", "{not json"],
     ["wrong-shaped array (2 elements)", JSON.stringify({ hooks: { ctxThresholds: [30, 40] } })],
     ["non-monotonic array", JSON.stringify({ hooks: { ctxThresholds: [60, 40, 30] } })],
+    ["empty config.json", ""],
   ])("falls back to default thresholds on %s", (_label, contents) => {
     const configDir = mkdtempSync(path.join(os.tmpdir(), "corral-hook-"));
     dirs.push(configDir);

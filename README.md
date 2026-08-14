@@ -473,9 +473,10 @@ corral can tell a session about its own context-window pressure before it asks �
 `UserPromptSubmit` hook injects a short `[corral] ctx {pct}% (notice|nudge|urgent)` signal once
 context crosses 30/40/60%, and a `SessionStart` hook primes the protocol for what to do about it
 once per session (and again after `/compact`). Both read the same
-`corral-status/<session_id>.json` the statusline capture already writes — **install the
-statusline script above first**; without it this hook silently does nothing (best-effort, same
-contract as the capture script).
+`corral-status/<session_id>.json` the statusline capture already writes — this hook reads the
+file `corral-status-capture.sh` writes, so that script must already be installed and wired into
+your statusline command (see above) — without it this hook silently does nothing (best-effort,
+same contract as the capture script).
 
 Thresholds are configurable in `~/.corral/config.json` (falls back to `30/40/60` if absent or
 malformed):
@@ -548,7 +549,7 @@ If you installed the context-pressure hook, register it under both events in the
 {
   "hooks": {
     "SessionStart": [
-      { "matcher": "startup|clear|compact",
+      { "matcher": "startup|resume|clear|compact",
         "hooks": [{ "type": "command", "command": "/absolute/path/to/corral-claude-hook.sh" }] }
     ],
     "UserPromptSubmit": [

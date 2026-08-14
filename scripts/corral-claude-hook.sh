@@ -48,6 +48,7 @@ case "$event" in
         then "\($t[0]) \($t[1]) \($t[2])"
         else "30 40 60" end
     ' "$thresholds_file" 2>/dev/null || echo "30 40 60")"
+    [ -z "$thresholds" ] && thresholds="30 40 60"
     # shellcheck disable=SC2086
     set -- $thresholds
     t1="$1"; t2="$2"; t3="$3"
