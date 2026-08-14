@@ -271,11 +271,20 @@ describe("readRecap", () => {
     expect(recap).toBeNull();
   });
 
-  it("returns read-error when the exec for remote ssh throws", async () => {
-    const exec: ExecFn = vi.fn(() => Promise.reject(new Error("ssh fail")));
-    const { recap, status } = await readRecap(makeRemoteEnv(["/r/.claude"]), VALID_UUID, exec);
-    expect(["not-found", "read-error"]).toContain(status);
+  it("returns read-error when the remote tail read throws", async () => {
+    // The lookup must SUCCEED and only the tail fail, or findTranscript returns null and the function
+    // exits on not-found — leaving the read-error branch unexercised while the test still passes.
+    const found = `/r/.claude/projects/d/${VALID_UUID}.jsonl`;
+    const exec: ExecFn = vi.fn((_file: string, args: readonly string[]) => {
+      const sshCmd = args[args.length - 1] ?? "";
+      return sshCmd.includes("tail -c")
+        ? Promise.reject(new Error("ssh fail"))
+        : Promise.resolve({ stdout: found + "\n", stderr: "" });
+    });
+    const { recap, status, source } = await readRecap(makeRemoteEnv(["/r/.claude"]), VALID_UUID, exec);
+    expect(status).toBe("read-error");
     expect(recap).toBeNull();
+    expect(source).toBeNull();
   });
 
   it("caps recap content to RECAP_CONTENT_MAX chars", async () => {

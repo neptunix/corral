@@ -56,7 +56,9 @@ export const STATUSLINE_STALE_MS = intFromEnv("STATUSLINE_STALE_MS", 120000, { m
  * - opening/closing a session's web terminal: focus the session's tab, then restore the previously
  *   focused tab — a full focus-in/out cycle for the pane, and the operator's own view ends where it
  *   started;
- * - `tab create` at spawn: an explicit focus flag, because a never-focused pane is `unknown`, not
+ * - spawn: an explicit focus flag on `tab create` AND on `workspace create` — a spawn that makes its
+ *   own workspace reuses the seeded root tab and never reaches `tab create` — because a
+ *   never-focused pane is `unknown`, not
  *   `blurred`, and could never produce a recap at all. This one MOVES the operator's view and does NOT
  *   restore it, including on a spawn another Claude session requested over MCP. That is not an
  *   oversight: at create time the pane holds a shell, not Claude, so a focus-out delivered right after

@@ -31,6 +31,23 @@ export interface FocusTranslator {
   onAttachClose(env: HerdrEnv, paneId: string): void;
 }
 
+interface AttachState {
+  /** Live web terminals on this environment. Restore happens only on the transition back to 0. */
+  readonly count: number;
+  /**
+   * The operator's tab, read once at the first attach that got far enough to ask herdr.
+   * `undefined` — not read yet (an earlier open failed before asking); `null` — herdr reported no
+   * focused tab at all. The two are different: one is a retry, the other is nothing to restore to.
+   */
+  readonly previous: string | null | undefined;
+  /**
+   * Some open on this environment actually moved herdr's focus. Set only AFTER `tabFocus` resolves:
+   * a close restores `previous` to undo a focus that happened, so an open whose focus never landed
+   * must not buy one — that would yank the operator's view if they had moved on since.
+   */
+  readonly moved: boolean;
+}
+
 export function createFocusTranslator(
   ops: FocusOps,
   opts?: { readonly enabled?: boolean; readonly onError?: (message: string) => void },
@@ -46,9 +63,9 @@ export function createFocusTranslator(
    * real tab was lost and a pane was left focused, which is the one state that yields no recap.
    *
    * So: remember the operator's tab when the attach count for the environment goes 0→1, and restore it
-   * only when the count returns to 0. `previous` is null when herdr reported no focused tab at all.
+   * only when the count returns to 0. Field-level rules are on `AttachState`.
    */
-  const state = new Map<string, { readonly count: number; readonly previous: string | null }>();
+  const state = new Map<string, AttachState>();
   /**
    * Operation chain, keyed by environment for the same reason. Open does two herdr round-trips; without
    * serialization a fast open→close would let the restore run BEFORE the focus it is meant to undo,
@@ -72,16 +89,35 @@ export function createFocusTranslator(
     onAttachOpen(env, paneId) {
       if (!enabled) return;
       enqueue(env.id, async () => {
-        // Resolved BEFORE the count is touched: a failure here must not leave a phantom attach behind,
-        // which would suppress the restore for every attach that follows.
+        const before = state.get(env.id);
+        // Counted FIRST and unconditionally. `ws-attach.ts` registers the close handler synchronously
+        // right after the pty spawns, so every open here has exactly one close coming — an open that
+        // fails below still owes that decrement. Skipping the count on failure (the previous shape)
+        // let that close consume a DIFFERENT attach's count and restore the operator's tab while
+        // another web terminal was still open, which is the state this refcount exists to prevent.
+        state.set(env.id, {
+          count: (before?.count ?? 0) + 1,
+          previous: before?.previous,
+          moved: before?.moved ?? false,
+        });
+
         const target = await ops.tabIdOfPane(env, paneId);
-        const current = state.get(env.id);
-        if (current === undefined) {
-          state.set(env.id, { count: 1, previous: await ops.focusedTabId(env) });
-        } else {
-          state.set(env.id, { count: current.count + 1, previous: current.previous });
+        if (before?.previous === undefined) {
+          const previous = await ops.focusedTabId(env);
+          const pending = state.get(env.id);
+          if (pending !== undefined) state.set(env.id, { ...pending, previous });
+          if (previous === target) {
+            // Focus is already where this open would put it, so the pane never goes through
+            // focus-out and no recap follows. Same half-cycle as `previous === null`, and it
+            // self-perpetuates: a corral restart with a terminal open drops the state map, no close
+            // ever runs, and herdr sits on that pane's tab for every later attach on this
+            // environment. Said out loud rather than passing as a normal cycle.
+            onError(`${env.id}:${paneId} already had its own tab focused — this open blurs nothing, so no recap will follow`);
+          }
         }
         await ops.tabFocus(env, target);
+        const after = state.get(env.id);
+        if (after !== undefined) state.set(env.id, { ...after, moved: true });
       });
     },
 
@@ -94,11 +130,14 @@ export function createFocusTranslator(
         // Another terminal is still open on this environment: it holds the focus, so restoring now would
         // blur a pane the operator is actively watching.
         if (current.count > 1) {
-          state.set(env.id, { count: current.count - 1, previous: current.previous });
+          state.set(env.id, { ...current, count: current.count - 1 });
           return;
         }
         state.delete(env.id);
-        if (current.previous === null) {
+        // No open on this environment ever moved focus, so there is no cycle to close: restoring
+        // here would focus a tab corral never displaced.
+        if (!current.moved) return;
+        if (current.previous === null || current.previous === undefined) {
           // Half a cycle: focus went IN but there is nowhere to send it back to, so the pane stays
           // focused and will not write a recap until something else takes focus. Said out loud rather
           // than swallowed — an unexplained silent recap is the bug this whole feature exists to end.

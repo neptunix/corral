@@ -151,7 +151,11 @@ describe("focus translation", () => {
     expect(calls).toEqual(["tab-of-w2:p1", "tab-of-w2:p1", "w1:t1"]);
   });
 
-  it("does not count an attach whose tab could not be resolved", async () => {
+  // ws-attach registers the close handler synchronously after the pty spawns, so a failed open still
+  // has a close coming. If that open is not counted, its close spends the OTHER attach's count and the
+  // restore lands while a web terminal is still open — the failure the refcount exists to prevent.
+  // Asserting the intermediate state is the whole point: the final call list is identical either way.
+  it("holds the restore until the last close, even when an earlier open failed", async () => {
     const calls: string[] = [];
     let fail = true;
     const ops: FocusOps = {
@@ -160,16 +164,49 @@ describe("focus translation", () => {
       tabFocus: (_e, tabId) => { calls.push(tabId); return Promise.resolve(); },
     };
     const t = createFocusTranslator(ops, { enabled: true, onError: () => undefined });
-    t.onAttachOpen(env, "w2:p1");
+    t.onAttachOpen(env, "w2:p1"); // fails before it can resolve the pane's tab
     await settle();
     fail = false;
-    // A phantom attach would suppress the restore for this one too.
-    t.onAttachOpen(env, "w2:p2");
+    t.onAttachOpen(env, "w2:p2"); // succeeds — and still reads the operator's tab, unread until now
     await settle();
     t.onAttachClose(env, "w2:p1");
     await settle();
+    // p2's terminal is still open: nothing may be restored yet.
+    expect(calls).toEqual(["tab-of-w2:p2"]);
     t.onAttachClose(env, "w2:p2");
     await settle();
     expect(calls).toEqual(["tab-of-w2:p2", "w1:t1"]);
+  });
+
+  it("does not restore a cycle whose open-time focus never landed", async () => {
+    const attempts: string[] = [];
+    const ops: FocusOps = {
+      focusedTabId: () => Promise.resolve("w1:t1"),
+      tabIdOfPane: () => Promise.resolve("w2:t9"),
+      tabFocus: (_e, tabId) => { attempts.push(tabId); return Promise.reject(new Error("herdr down")); },
+    };
+    const t = createFocusTranslator(ops, { enabled: true, onError: () => undefined });
+    t.onAttachOpen(env, "w2:p9");
+    await settle();
+    t.onAttachClose(env, "w2:p9");
+    await settle();
+    // Focus never moved, so there is nothing to put back — and "putting back" would yank the operator's
+    // view to where it was at open time if they have moved on since.
+    expect(attempts).toEqual(["w2:t9"]);
+  });
+
+  it("says so when the pane's own tab was already focused, because that open blurs nothing", async () => {
+    const onError = vi.fn();
+    const ops: FocusOps = {
+      focusedTabId: () => Promise.resolve("w2:t9"), // the operator is already looking at this pane
+      tabIdOfPane: () => Promise.resolve("w2:t9"),
+      tabFocus: () => Promise.resolve(),
+    };
+    const t = createFocusTranslator(ops, { enabled: true, onError });
+    t.onAttachOpen(env, "w2:p9");
+    await settle();
+    // No focus-out reaches the pane, so no recap follows — the same dead end as "nothing to restore",
+    // and it must not read as a healthy cycle.
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining("blurs nothing"));
   });
 });

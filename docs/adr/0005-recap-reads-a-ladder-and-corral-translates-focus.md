@@ -115,8 +115,19 @@ remembers the operator's tab when an environment's attach count goes 0→1 and r
 returns to 0. Serialization per environment also keeps a fast open→close from restoring *before* the focus
 it undoes.
 
-`tab create` passes its focus flag **explicitly** instead of relying on herdr's undocumented default, so a
-spawned pane cannot be stranded in `unknown`. Unlike the attach path this one moves the operator's view
+The count is taken on every open, including one that then fails: the web-terminal handler registers its
+close synchronously after the pty spawns, so opens and closes pair 1:1 and an uncounted open leaves its
+close to spend someone else's — restoring while a terminal is still open. What the failed open does not
+buy is the restore itself: that is gated on a focus call having actually resolved, so a cycle that never
+happened is never undone. The two half-cycles that produce no recap — herdr had no focused tab, or it was
+already the pane's own tab — are logged rather than passing as normal.
+
+Spawn passes its focus flag **explicitly** instead of relying on herdr's undocumented default, so a
+spawned pane cannot be stranded in `unknown`. Both create calls carry it, not just `tab create`: when
+corral creates the workspace, herdr seeds a root tab and spawn *renames* that tab rather than creating
+one, so `workspace create` is the only focus decision that path makes — and it is the path taken by a
+spawn into a repo with no picked workspace, a resume onto a dead workspaceId, and the first restore of
+each workspace group. Unlike the attach path this one moves the operator's view
 and does **not** restore it — including on a spawn another Claude session requested over MCP. That is
 forced by the mechanism, not an oversight: at create time the pane holds a shell, and a focus-out
 delivered immediately would reach the shell and be discarded, leaving the Claude that starts moments later

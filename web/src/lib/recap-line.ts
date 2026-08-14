@@ -22,6 +22,19 @@ export function recapReason(status: RecapStatus | null): string {
 }
 
 /**
+ * True when the recap on screen is older than the last read of it. The cache keeps the last good text
+ * when a read fails and refreshes only the status (`server/recap.ts`), so any status other than `ok`
+ * means what is shown is NOT what the last sweep saw. Without this the failure only ever surfaces on
+ * sessions that never had a recap — a broken read on a session that did looks perfectly healthy, which
+ * is the same asymmetry `recapReason` exists to remove.
+ *
+ * `null` is not staleness: the pane has simply not been swept yet, so no text can be on screen either.
+ */
+export function isRecapStale(status: RecapStatus | null, hasText: boolean): boolean {
+  return hasText && status !== null && status !== "ok";
+}
+
+/**
  * One muted word naming the recap's provenance, in the same vocabulary as the MCP fleet row, plus the
  * difference that actually matters: only `away-summary` is Claude describing its own work.
  */

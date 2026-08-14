@@ -120,6 +120,16 @@ describe("workspaceCreate (herdr 0.7.1 nested shape)", () => {
   it("falls back to flat result.workspace_id with no root ids (older herdr → spawn creates a tab)", async () => {
     expect(await workspaceCreate(env, "/proj", "w", makeExec(JSON.stringify({ result: { workspace_id: "ws2" } })))).toEqual({ workspaceId: "ws2", rootTabId: undefined, rootPaneId: undefined });
   });
+
+  // The same exact-flag assertion as tabCreate, on purpose: when corral creates the workspace, spawn
+  // RENAMES the seeded root tab instead of calling tabCreate, so this call is the only focus decision
+  // that path ever makes. Two paths asserting the same rule cannot drift apart silently.
+  it("states the focus intent explicitly, and matches the switch", async () => {
+    await workspaceCreate(env, "/proj", "corral", makeExec(JSON.stringify({ result: { workspace_id: "ws2" } })));
+    const args = (makeExec as unknown as { lastArgs: readonly string[] }).lastArgs;
+    expect(args).toContain(FOCUS_TRANSLATION_ENABLED ? "--focus" : "--no-focus");
+    expect(args).not.toContain(FOCUS_TRANSLATION_ENABLED ? "--no-focus" : "--focus");
+  });
 });
 
 describe("listPanes", () => {

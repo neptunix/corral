@@ -10,7 +10,7 @@ import {
 import { contextLevelClass } from "../lib/level";
 import { formatDropInjection, formatPaste } from "../lib/paste";
 import { closeMessage } from "../lib/protocol";
-import { RECAP_SOURCE_LABEL, recapReason } from "../lib/recap-line";
+import { isRecapStale, RECAP_SOURCE_LABEL, recapReason } from "../lib/recap-line";
 import { sessionStateLabel } from "../lib/session-state";
 import { attachCommittedTextInput } from "../lib/text-input";
 import { isStale } from "../lib/time";
@@ -424,13 +424,21 @@ export function SessionModal({
               : <span className="text-muted-foreground/40">metrics not read yet</span>}
           </span>
           {recap !== null && recap !== "" ? (
-            <span className="truncate text-muted-foreground/80" title={recap}>
+            // A retained recap is still the best text there is, so it stays — but it must SAY when the
+            // last read failed, or a stale line is indistinguishable from a fresh one.
+            <span
+              className={`truncate ${isRecapStale(recapStatus, true) ? "text-muted-foreground/50" : "text-muted-foreground/80"}`}
+              title={isRecapStale(recapStatus, true) ? `${recap}\n\n${recapReason(recapStatus)} — showing the last one read` : recap}
+            >
               {recapSource !== null && (
                 <span className="text-muted-foreground/50" title={RECAP_SOURCE_LABEL[recapSource].hint}>
                   {RECAP_SOURCE_LABEL[recapSource].tag}{" "}
                 </span>
               )}
               {recap}
+              {isRecapStale(recapStatus, true) && (
+                <span className="text-muted-foreground/40"> · {recapReason(recapStatus)}</span>
+              )}
             </span>
           ) : (
             <span className="truncate text-muted-foreground/40">{recapReason(recapStatus)}</span>

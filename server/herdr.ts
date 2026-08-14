@@ -337,8 +337,13 @@ export async function tabCreate(
 export async function workspaceCreate(
   env: HerdrEnv, cwd: string, label: string, exec?: ExecFn,
 ): Promise<{ workspaceId: string; rootTabId: string | undefined; rootPaneId: string | undefined }> {
+  // Same explicit focus decision as `tabCreate`, and NOT redundant with it: when corral creates the
+  // workspace, herdr seeds a root tab and `spawn.ts` renames that tab instead of calling `tabCreate`,
+  // so this is the only focus flag those spawns ever see (spawn into a repo with no picked workspace,
+  // resume onto a dead workspaceId, and the first restore of each workspace group in fleet-restore).
+  const focusFlag = FOCUS_TRANSLATION_ENABLED ? "--focus" : "--no-focus";
   const out = await runHerdr(
-    env, ["workspace", "create", "--cwd", cwd, "--label", label],
+    env, ["workspace", "create", "--cwd", cwd, "--label", label, focusFlag],
     exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec },
   );
   const r = WorkspaceCreateSchema.parse(JSON.parse(out.trim())).result;

@@ -1,7 +1,7 @@
 import { RecapSourceSchema, RecapStatusSchema } from "@shared/schema";
 import { describe, expect, it } from "vitest";
 
-import { RECAP_SOURCE_LABEL, recapReason } from "../web/src/lib/recap-line.ts";
+import { isRecapStale, RECAP_SOURCE_LABEL, recapReason } from "../web/src/lib/recap-line.ts";
 
 describe("recapReason", () => {
   // Exhaustive over the wire enum plus `null`: a status added to the schema without words here would
@@ -17,6 +17,23 @@ describe("recapReason", () => {
 
   it("does not report a not-yet-swept pane as a failure", () => {
     expect(recapReason(null)).not.toBe(recapReason("read-error"));
+  });
+});
+
+describe("isRecapStale", () => {
+  // The cache keeps the last good text and refreshes only the status, so a failed read on a session
+  // that HAS a recap is the one case where the failure would otherwise never reach the operator.
+  it.each(RecapStatusSchema.options.filter((s) => s !== "ok"))("marks text stale on %s", (status) => {
+    expect(isRecapStale(status, true)).toBe(true);
+  });
+
+  it("leaves a healthy read alone", () => {
+    expect(isRecapStale("ok", true)).toBe(false);
+  });
+
+  it("is not staleness when there is no text to be stale, or no sweep yet", () => {
+    expect(isRecapStale("read-error", false)).toBe(false);
+    expect(isRecapStale(null, true)).toBe(false);
   });
 });
 
