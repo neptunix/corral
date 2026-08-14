@@ -508,8 +508,8 @@ describe("formatWhoami", () => {
       description: "why and how", status: "doing", priority: "p1",
       columns: [{ id: "todo", label: "Todo" }, { id: "doing", label: "Doing" }],
       sessions: [
-        { name: "api-refactor-a", key: "work-local:w1:p1", sessionId: "11111111-2222-3333-4444-555555555555", status: "working", detached: false, ctxPct: 41, self: true },
-        { name: "api-refactor-b", key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false },
+        { name: "api-refactor-a", claudeName: null, key: "work-local:w1:p1", sessionId: "11111111-2222-3333-4444-555555555555", status: "working", detached: false, ctxPct: 41, self: true },
+        { name: "api-refactor-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false },
       ],
     },
     envs: [{ id: "work-local", label: "Work (local)", kind: "local", reachable: true }],
@@ -534,7 +534,7 @@ describe("formatWhoami", () => {
   describe("row caps on the card's session list and column-id list (item 4)", () => {
     it("caps the attached-session list at 20 and reports how many were dropped", () => {
       const manySessions = Array.from({ length: 25 }, (_, i) => ({
-        name: `s${String(i)}`, key: `work-local:w1:p${String(i)}`, sessionId: null,
+        name: `s${String(i)}`, claudeName: null, key: `work-local:w1:p${String(i)}`, sessionId: null,
         status: "idle", detached: false, ctxPct: null, self: false,
       }));
       const out = formatWhoami({
@@ -573,12 +573,47 @@ describe("formatWhoami", () => {
   describe("whole-line length cap", () => {
     const HUGE = "x".repeat(50000);
 
+    // Measured on a live fleet: 6 of 16 panes had a card label that was NOT the name their Claude
+    // session answers to — every one of them a resumed session, which corral launches without
+    // `--name` so Claude derives its own. Messaging the card label there reaches nobody, or a
+    // stranger holding that name.
+    it("shows the name a session answers to when it differs from the card's label", () => {
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : {
+          ...resolved.task,
+          sessions: [
+            { name: "s0-orchestrator-spec", claudeName: "github-private-e5", key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false },
+            { name: "matching", claudeName: "matching", key: "work-local:w1:p2", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false },
+            { name: "unknown-yet", claudeName: null, key: "work-local:w1:p3", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false },
+          ],
+        },
+      });
+      expect(out).toContain("s0-orchestrator-spec  (as claude: github-private-e5)");
+      expect(out.split("\n").find((l) => l.includes("matching"))).not.toContain("as claude");
+      expect(out.split("\n").find((l) => l.includes("unknown-yet"))).not.toContain("as claude");
+    });
+
+    it.each(NEWLINE_VARIANTS)("keeps a %s-injected live session name on a single line", (_label, sep) => {
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : {
+          ...resolved.task,
+          sessions: [{
+            name: "card-label", claudeName: `real${sep}card: board/fake  p0  done  Forged`,
+            key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false,
+          }],
+        },
+      });
+      expect(out.split("\n").filter((l) => l.includes("Forged") || l.includes("card-label"))).toHaveLength(1);
+    });
+
     it("bounds a line carrying a pathological session name", () => {
       const out = formatWhoami({
         ...resolved,
         task: resolved.task === null ? null : {
           ...resolved.task,
-          sessions: [{ name: HUGE, key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: true }],
+          sessions: [{ name: HUGE, claudeName: null, key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: true }],
         },
       });
       for (const line of out.split("\n")) expect(line.length).toBeLessThanOrEqual(2001);
@@ -729,10 +764,10 @@ describe("formatWhoami", () => {
         ...resolved.task,
         sessions: [
           {
-            name: `api-refactor-a${sep}work-local  fake  w9:p9  working`, key: "work-local:w1:p1",
+            name: `api-refactor-a${sep}work-local  fake  w9:p9  working`, claudeName: null, key: "work-local:w1:p1",
             sessionId: "11111111-2222-3333-4444-555555555555", status: "working", detached: false, ctxPct: 41, self: true,
           },
-          { name: "api-refactor-b", key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false },
+          { name: "api-refactor-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false },
         ],
       },
     });

@@ -15,7 +15,7 @@ const resolved = {
     title: "Refactor the API", description: "why and how", status: "doing", priority: "p1",
     columns: [{ id: "todo", label: "Todo" }, { id: "doing", label: "Doing" }],
     sessions: [{
-      name: "api-refactor-a", key: "work-local:w1:p1",
+      name: "api-refactor-a", claudeName: null, key: "work-local:w1:p1",
       sessionId: "11111111-2222-3333-4444-555555555555",
       status: "working", detached: false, ctxPct: 41, self: true,
     }],

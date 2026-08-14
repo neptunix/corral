@@ -181,6 +181,7 @@ function cardSession(index: LiveIndex, link: SessionLink, selfRow: SessionRow): 
   const live = resolveLiveRow(link, index);
   return {
     name: link.name,
+    claudeName: live?.statusline?.session_name ?? null,
     key: `${link.env}:${link.paneId}`,
     sessionId: link.sessionId,
     status: live?.status ?? "detached",

@@ -438,7 +438,7 @@ describe("closeHandler", () => {
         ...bound,
         task: {
           ...boundTask,
-          sessions: [{ name: "alpha", key: "work-local:w1:p1", sessionId: null, status: "working", detached: false, ctxPct: 41, self: true }],
+          sessions: [{ name: "alpha", claudeName: null, key: "work-local:w1:p1", sessionId: null, status: "working", detached: false, ctxPct: 41, self: true }],
         },
       }),
       closeSession: async (a) => { calls.push(a.sessionId); },
@@ -463,8 +463,8 @@ describe("closeHandler", () => {
         task: {
           ...boundTask,
           sessions: [
-            { name: "alpha-old", key: "work-local:w1:p1", sessionId: SID_B, status: "idle", detached: true, ctxPct: null, self: false },
-            { name: "alpha", key: "work-local:w1:p1", sessionId: SID, status: "working", detached: false, ctxPct: 41, self: true },
+            { name: "alpha-old", claudeName: null, key: "work-local:w1:p1", sessionId: SID_B, status: "idle", detached: true, ctxPct: null, self: false },
+            { name: "alpha", claudeName: null, key: "work-local:w1:p1", sessionId: SID, status: "working", detached: false, ctxPct: 41, self: true },
           ],
         },
       }),
@@ -482,7 +482,7 @@ describe("closeHandler", () => {
         ...bound,
         task: {
           ...boundTask,
-          sessions: [{ name: "t-b", key: "work-local:w1:p2", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false }],
+          sessions: [{ name: "t-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false }],
         },
       }),
       closeSession: async (a) => { calls.push(`${a.env}:${a.paneId}`); },
@@ -499,7 +499,7 @@ describe("closeHandler", () => {
         ...bound,
         task: {
           ...boundTask,
-          sessions: [{ name: "t-b", key: "work-local:w1:p2", sessionId: SID_B, status: "working", detached: false, ctxPct: 10, self: false }],
+          sessions: [{ name: "t-b", claudeName: null, key: "work-local:w1:p2", sessionId: SID_B, status: "working", detached: false, ctxPct: 10, self: false }],
         },
       }),
       closeSession: async (a) => { sids.push(a.sessionId); },
@@ -528,7 +528,7 @@ describe("closeHandler", () => {
         ...bound,
         task: {
           ...boundTask,
-          sessions: [{ name: "t-b", key: "work-local:w1:p2", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false }],
+          sessions: [{ name: "t-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false }],
         },
       }),
       closeSession: async (a) => { calls.push(a.paneId); },

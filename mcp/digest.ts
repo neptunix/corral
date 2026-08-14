@@ -535,7 +535,12 @@ export function formatWhoami(w: WhoamiResolved): string {
       "sessions on this card:",
       ...shownSessions.map((cs) => {
         const ctx = cs.ctxPct === null ? "—" : `${String(Math.round(cs.ctxPct))}%`;
-        return `  ${cs.self ? "*" : " "} ${cs.name}  ${cs.key}  ${cs.status}  ctx ${ctx}`;
+        // The card's label and the name the session answers to are the same string only when corral
+        // launched it with `--name`; a resumed session derives its own. Shown only when they differ,
+        // because that is the case where messaging the card's label reaches the wrong session — or,
+        // worse, a stranger that happens to hold that name.
+        const claude = cs.claudeName === null || cs.claudeName === cs.name ? "" : `  (as claude: ${cs.claudeName})`;
+        return `  ${cs.self ? "*" : " "} ${cs.name}${claude}  ${cs.key}  ${cs.status}  ctx ${ctx}`;
       }),
     );
     if (sessionsDropped > 0) {

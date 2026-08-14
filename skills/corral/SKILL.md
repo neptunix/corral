@@ -45,10 +45,17 @@ the log from memory.
 ## Talking to another session
 
 Messaging between sessions belongs to the harness, not to corral: `SendMessage` sends, `ListAgents`
-discovers. corral supplies the address — **a session's name is what you message it by**, the name
-`corral_fleet` prints and `corral_spawn` *replies with*. Not the name you asked for: corral slugifies
-it and appends a disambiguating letter when it is taken, so `wm-stake-toggle` may land as
-`wm-stake-toggle-a`. Read the address off the reply.
+discovers. corral supplies the address — **a session's name is what you message it by** — but a card
+carries two names for a session, and only one of them is the address:
+
+- **The card's label** (`corral_whoami`'s session list, `corral_spawn`'s request) is the name corral
+  was *asked* for. It is not the address. corral slugifies it, appends a letter when it is taken, and
+  omits `--name` entirely when *resuming* a session — which then derives its own name from its
+  directory. On a real fleet this diverged on 6 of 16 panes.
+- **The name it answers to** is what `corral_fleet` prints, what `corral_spawn` *replies* with, and
+  what `corral_whoami` shows as `(as claude: …)` when the two differ. That is the address.
+
+When they differ, messaging the card's label reaches nobody — or a stranger who happens to hold it.
 
 **The fleet is wider than your reach.** corral spans every environment and every Claude account on
 the machine; messaging reaches your own account only. Two markers in a fleet row say where it stops:
@@ -140,10 +147,10 @@ Write it for a competent stranger who has the repo but not the last hour:
   wrong, which assumption is load-bearing and unverified.
 - **The next concrete action**, not a direction.
 - **Hazards** — what not to touch, and why.
-- **Who to ask** — your own session name, and the one question worth spending it on. The new session
-  can already see the name in `corral_whoami`'s card session list, but not that it may be used, nor
-  when. Omit this when you are handing off *because* you are closing: an unreachable name is a
-  dead end dressed as an offer.
+- **Who to ask** — your own session name, and the one question worth spending it on. Take it from
+  `corral_whoami`'s `you are:` line, not from the card's label for you: they are the same string only
+  when corral launched the session with it. Omit this when you are handing off *because* you are
+  closing: an unreachable name is a dead end dressed as an offer.
 
 Point at files, commits, and card fields rather than pasting them. A brief that reads like a title
 ("continue the auth work") wastes the spawn.
