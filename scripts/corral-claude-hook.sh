@@ -17,3 +17,23 @@ case "$event" in
   SessionStart|UserPromptSubmit) : ;;
   *) exit 0 ;;
 esac
+
+# Both branches require the skill: an un-primed session gets a raw signal with no explanation.
+skill_file="$CONFIG_DIR/skills/corral/SKILL.md"
+[ -f "$skill_file" ] || exit 0
+
+emit() {
+  jq -n -c --arg event "$event" --arg ctx "$1" \
+    '{hookSpecificOutput: {hookEventName: $event, additionalContext: $ctx}}'
+}
+
+case "$event" in
+  SessionStart)
+    block="$(awk '/<!-- ctx-signal:start -->/{flag=1; next} /<!-- ctx-signal:end -->/{flag=0} flag' "$skill_file")"
+    [ -z "$block" ] && exit 0
+    emit "$block"
+    ;;
+  UserPromptSubmit)
+    :
+    ;;
+esac
