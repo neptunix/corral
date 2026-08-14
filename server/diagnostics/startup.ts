@@ -167,7 +167,8 @@ export function configLoadCheck(line: ReportLine, now: number): Check {
   return {
     id: "config-loaded", key: checkKey("config-loaded", scope), scope,
     title: line.text, state: line.level === "ok" ? "ok" : "problem",
-    severity: "fatal", detail: line.detail ?? "", doc: null,
+    severity: "fatal", detail: line.detail ?? "",
+    doc: { anchor: "environments", title: "Environments" },
     class: "cheap", checkedAt: now, startupOkLine: true, haltsStartup: true,
   };
 }
@@ -183,7 +184,8 @@ export function socketChecks(
   const scope = { kind: "global" as const };
   const base = {
     scope, class: "cheap" as const, checkedAt: now, haltsStartup: false,
-    severity: "warning" as const, state: "problem" as const, startupOkLine: false, doc: null,
+    severity: "warning" as const, state: "problem" as const, startupOkLine: false,
+    doc: { anchor: "launching-corral", title: "Launching corral" },
   };
   if (socket === undefined) {
     return [{
@@ -211,7 +213,8 @@ export function configDirsChecks(envs: readonly HerdrEnv[], now: number): Check[
   const missing = envs.filter((e) => e.claudeConfigDirs.length === 0);
   const base = {
     class: "cheap" as const, checkedAt: now, haltsStartup: false,
-    severity: "warning" as const, doc: null,
+    severity: "warning" as const,
+    doc: { anchor: "environments", title: "Environments" },
   };
   // A warning, never fatal: live state is an enhancement, and refusing to boot over it would turn a
   // degraded board into no board.

@@ -32,7 +32,8 @@ and `jq` — **required** if you want the live Claude metrics (model / context %
 rate-limit windows). The metrics *capture* is optional; `jq` is not optional *for* it. Both
 helper scripts hard-depend on `jq` and are deliberately best-effort, so without it they write
 nothing and log nothing: the cards just show no metrics, which is indistinguishable from "no
-data yet". corral appends `--name` (and, when chosen, `--model` / `--remote-control`) to every
+data yet" — and corral's own self-diagnostics report a missing `jq` as a fatal verdict. corral
+appends `--name` (and, when chosen, `--model` / `--remote-control`) to every
 non-resume launch; this has only been verified against Claude Code 2.1.232 — an older CLI
 lacking one of these flags will fail the launch visibly in the pane. The cross-session messaging
 the corral skill describes was verified on that same build; per the Claude Code changelog it landed
@@ -265,6 +266,29 @@ pixel-mode wheel input — Chrome, Safari, trackpads, touch — and leaves Firef
 Stored per browser in `localStorage`, so a laptop and a phone keep independent values, and it applies to
 sessions opened after the change.
 
+### herdr's Claude integration
+
+```bash
+herdr integration install claude
+```
+
+installs herdr's own Claude Code hook, **once per machine** — not per config dir, not per
+session. It is what makes a Claude-launched pane's agent record carry `source: "herdr:claude"`
+and a live agent status (working / blocked / idle) alongside the Claude session UUID that record
+is contributed to; without it, a pane herdr owns is indistinguishable from an ordinary shell.
+
+`herdr integration status` reports one of `current`, `outdated`, or `not installed` **per Claude
+config dir** — run it after every herdr upgrade, the same way you'd check the [helper
+files](#upgrading) after a `git pull`, since the two can drift out of sync independently of each
+other.
+
+**What stops working without it: the attention feed never fires.** corral detects a session
+**blocking** or **finishing** entirely from herdr's own agent status — there is no second source
+for that state, and a remote environment has no local fallback to read it from instead. An
+environment with the integration missing or outdated still renders a board, still spawns
+sessions, and still shows a live terminal; its cards simply never transition, which looks exactly
+like a quiet fleet until you notice nothing has moved in hours.
+
 ## Launching corral
 
 **Launch from a normal terminal, never from inside a Claude Code session.** corral refuses to start
@@ -329,6 +353,16 @@ kill "$(ss -ltnp 2>/dev/null | awk -F'pid=' '/127.0.0.1:8787/{split($2,a,","); p
 # macOS
 kill "$(lsof -nP -iTCP:8787 -sTCP:LISTEN -t)"
 ```
+
+**`git pull` does not touch your installed copies.** `corral-status-capture.sh`,
+`corral-claude-hook.sh`, and `skills/corral/` are copied into `~/.claude*` — outside this
+checkout — by the per-config-dir install step (see [Installing the Claude helper
+files](#installing-the-claude-helper-files-per-config-dir)), so an upgrade that changes any of
+them leaves the installed copy running the old version until you re-copy it (`cp` locally,
+`scp` again for a remote config dir). Symlink them once instead and this stops being a step:
+`ln -s "$(pwd)/scripts/corral-claude-hook.sh" "$D/corral-claude-hook.sh"` makes the installed
+file follow the checkout across every future `git pull` — local only, since there is no `scp`
+equivalent of a symlink for a remote config dir.
 
 Install the theme only **after** upgrading to ≥ v0.3.2 — the theme-sync-on-mount fix landed
 there, so installing it against an older build means testing the old behaviour.
@@ -477,9 +511,11 @@ config dirs only (a remote box keeps whatever base is in its own copy). Once the
 place, set `"theme": "custom:corral"` in that dir's `settings.json` (or run `/theme` and pick
 `corral`). Edit `overrides` in the preset to taste; only `base` is machine-managed.
 
-## Claude context-pressure hook (optional)
+## Claude context-pressure hook
 
-corral can tell a session about its own context-window pressure before it asks — a
+**Recommended** — a session that cannot see its own context pressure has to guess when to hand
+off, and a late guess costs more than an early one. corral can tell a session about its own
+context-window pressure before it asks — a
 `UserPromptSubmit` hook injects a short `[corral] ctx {pct}% (notice|nudge|urgent)` signal once
 context crosses 30/40/60%, and a `SessionStart` hook primes the protocol for what to do about it
 once per session (and again after `/compact`). Both read the same
@@ -511,7 +547,7 @@ the copy command differs (`cp` vs `scp` + `ssh`). Into each config dir:
 | `statusline-command.sh` | `scripts/statusline-command.sh` | only if you have **no** statusline script of your own |
 | `themes/corral.json` | `themes/corral.json` | only for the optional theme |
 | `skills/corral/` | `skills/corral/` | recommended with the [MCP server](#mcp-server); only on the machine running corral |
-| `corral-claude-hook.sh` | `scripts/corral-claude-hook.sh` | optional — proactive context-pressure signal |
+| `corral-claude-hook.sh` | `scripts/corral-claude-hook.sh` | recommended — proactive context-pressure signal |
 
 **Local** (default `~/.claude`; repeat for each extra dir such as `~/.claude-work`):
 
@@ -519,7 +555,7 @@ the copy command differs (`cp` vs `scp` + `ssh`). Into each config dir:
 D=~/.claude
 cp scripts/corral-status-capture.sh "$D/corral-status-capture.sh"
 cp scripts/statusline-command.sh    "$D/statusline-command.sh"    # skip if you have your own
-cp scripts/corral-claude-hook.sh   "$D/corral-claude-hook.sh"    # optional — context-pressure hook
+cp scripts/corral-claude-hook.sh   "$D/corral-claude-hook.sh"    # recommended — context-pressure hook
 chmod +x "$D/corral-status-capture.sh" "$D/statusline-command.sh" "$D/corral-claude-hook.sh"
 mkdir -p "$D/themes" && cp themes/corral.json "$D/themes/corral.json"   # optional theme
 mkdir -p "$D/skills" && cp -R skills/corral "$D/skills/corral"          # recommended with the MCP server
@@ -537,7 +573,7 @@ the remote `scp` step below.
 H=my-ssh-host; D=/home/me/.claude
 scp scripts/corral-status-capture.sh "$H:$D/corral-status-capture.sh"
 scp scripts/statusline-command.sh    "$H:$D/statusline-command.sh"     # skip if it has its own
-scp scripts/corral-claude-hook.sh    "$H:$D/corral-claude-hook.sh"      # optional — context-pressure hook
+scp scripts/corral-claude-hook.sh    "$H:$D/corral-claude-hook.sh"      # recommended — context-pressure hook
 ssh "$H" "chmod +x $D/corral-status-capture.sh $D/statusline-command.sh $D/corral-claude-hook.sh && mkdir -p $D/themes"
 scp themes/corral.json "$H:$D/themes/corral.json"                      # optional theme
 ```
@@ -616,6 +652,12 @@ WebSocket attach: `WS_MAX_CONCURRENT` (3) · `WS_RATE_PER_WINDOW` (10) / `WS_RAT
 Zombie-tab reaper (closes the shell-only tab left when Claude exits; logs each reap as
 `zombie_reaped`): `ZOMBIE_REAP_ENABLED` (true) · `ZOMBIE_REAP_GRACE_MS` (180000 — clamped up at boot
 to a floor derived from `HERDR_DASH_POLL_MS`; to disable, use the flag, never a short grace).
+
+Self-diagnostics sweep: `DIAGNOSTICS_INTERVAL_MS` (60000 — set to `0` to turn the background sweep
+off entirely; `POST /api/diagnostics/refresh` still runs one on demand) · `DIAGNOSTICS_VERSION_TTL_MS`
+(600000, floor 1000 — how long a herdr/Claude version probe is cached before the sweep re-runs it).
+It also reads `$CORRAL_HOME/config.json` for `hooks.ctxThresholds` — see [Claude context-pressure
+hook](#claude-context-pressure-hook).
 
 [MCP server](#mcp-server): `CORRAL_URL` (defaults to `http://127.0.0.1:$HERDR_DASH_PORT` — read by
 the MCP process, see the note there) · `BRIEF_MAX_BYTES` (16384) · `BRIEF_CLEANUP_DELAY_MS` (600000
