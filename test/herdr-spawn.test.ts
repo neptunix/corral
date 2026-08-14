@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 
+import { FOCUS_TRANSLATION_ENABLED } from "../config.ts";
 import { ENVIRONMENTS, getEnv } from "../environments.ts";
 import type { ExecFn } from "../server/herdr.ts";
 import { paneRun, paneGet, tabCreate, tabFocus, focusedTabId, workspaceCreate, tabClose, tabRename, listPanes, listAllPanes } from "../server/herdr.ts";
@@ -70,11 +71,15 @@ describe("tabCreate (herdr 0.7.1 nested shape)", () => {
   // The focus flag is passed either way, never left to herdr's undocumented default: a pane that was
   // never focused sits in Claude's `unknown` state, which is NOT `blurred`, and could then never write a
   // recap however long the session runs.
-  it("states the focus intent explicitly", async () => {
+  it("states the focus intent explicitly, and matches the switch", async () => {
     const payload = JSON.stringify({ result: { tab_id: "t2", pane_id: "p2" } });
     await tabCreate(env, "ws1", "/proj", "my-task", makeExec(payload));
     const args = (makeExec as unknown as { lastArgs: readonly string[] }).lastArgs;
-    expect(args.filter((a) => a === "--focus" || a === "--no-focus")).toHaveLength(1);
+    // Asserting WHICH flag, not merely that one is present: an inverted flag is the failure that leaves
+    // every spawned pane in Claude's `unknown` focus state, unable to ever write a recap — and a test
+    // that accepts either value stays green through exactly that inversion.
+    expect(args).toContain(FOCUS_TRANSLATION_ENABLED ? "--focus" : "--no-focus");
+    expect(args).not.toContain(FOCUS_TRANSLATION_ENABLED ? "--no-focus" : "--focus");
   });
 });
 

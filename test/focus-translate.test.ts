@@ -60,14 +60,17 @@ describe("focus translation", () => {
     expect(calls).toEqual(["read", "focus w2:t9", "focus w1:t1"]);
   });
 
-  it("restores nothing when herdr reported no focused tab", async () => {
+  it("restores nothing when herdr reported no focused tab, and says so", async () => {
+    const onError = vi.fn();
     const { ops, calls } = makeOps({ focusedTabId: () => Promise.resolve(null) });
-    const t = createFocusTranslator(ops, { enabled: true });
+    const t = createFocusTranslator(ops, { enabled: true, onError });
     t.onAttachOpen(env, "w2:p9");
     await settle();
     t.onAttachClose(env, "w2:p9");
     await settle();
     expect(calls).toEqual(["focus w2:t9"]);
+    // Half a cycle leaves the pane focused and recap-less; it must not pass silently.
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining("nothing to restore"));
   });
 
   it("ignores a close with no recorded open", async () => {
@@ -102,22 +105,71 @@ describe("focus translation", () => {
     expect(calls).toEqual([]);
   });
 
-  it("tracks panes independently", async () => {
+  // herdr's focus is ONE slot per server, so overlapping attaches must not each restore what they
+  // individually displaced: the operator's tab is remembered once, on the first attach, and returned
+  // once, on the last. Restoring per pane instead loses that tab and strands a pane focused.
+  function makeTrackingOps(): { ops: FocusOps; calls: string[] } {
     const calls: string[] = [];
-    let current = "w1:t1";
+    let current = "w1:t1"; // the operator's own tab
     const ops: FocusOps = {
       focusedTabId: () => Promise.resolve(current),
       tabIdOfPane: (_e, paneId) => Promise.resolve(`tab-of-${paneId}`),
       tabFocus: (_e, tabId) => { calls.push(tabId); current = tabId; return Promise.resolve(); },
     };
+    return { ops, calls };
+  }
+
+  it("holds the operator's tab across overlapping attaches on different panes", async () => {
+    const { ops, calls } = makeTrackingOps();
     const t = createFocusTranslator(ops, { enabled: true });
     t.onAttachOpen(env, "w2:p1");
     await settle();
     t.onAttachOpen(env, "w2:p2");
     await settle();
+    t.onAttachClose(env, "w2:p1");
+    await settle();
+    // p2's terminal is still open, so nothing is restored yet — restoring here would blur a pane the
+    // operator is actively watching.
+    expect(calls).toEqual(["tab-of-w2:p1", "tab-of-w2:p2"]);
     t.onAttachClose(env, "w2:p2");
     await settle();
-    // p2's restore returns to p1's tab, not to p2's own — each pane restores what IT displaced.
-    expect(calls).toEqual(["tab-of-w2:p1", "tab-of-w2:p2", "tab-of-w2:p1"]);
+    expect(calls).toEqual(["tab-of-w2:p1", "tab-of-w2:p2", "w1:t1"]);
+  });
+
+  it("survives two attaches on the SAME pane", async () => {
+    const { ops, calls } = makeTrackingOps();
+    const t = createFocusTranslator(ops, { enabled: true });
+    t.onAttachOpen(env, "w2:p1");
+    await settle();
+    t.onAttachOpen(env, "w2:p1"); // second browser window on the same session
+    await settle();
+    t.onAttachClose(env, "w2:p1");
+    await settle();
+    t.onAttachClose(env, "w2:p1");
+    await settle();
+    // The operator's tab is restored exactly once, at the end — not overwritten by the pane's own tab.
+    expect(calls).toEqual(["tab-of-w2:p1", "tab-of-w2:p1", "w1:t1"]);
+  });
+
+  it("does not count an attach whose tab could not be resolved", async () => {
+    const calls: string[] = [];
+    let fail = true;
+    const ops: FocusOps = {
+      focusedTabId: () => Promise.resolve("w1:t1"),
+      tabIdOfPane: (_e, paneId) => (fail ? Promise.reject(new Error("pane get failed")) : Promise.resolve(`tab-of-${paneId}`)),
+      tabFocus: (_e, tabId) => { calls.push(tabId); return Promise.resolve(); },
+    };
+    const t = createFocusTranslator(ops, { enabled: true, onError: () => undefined });
+    t.onAttachOpen(env, "w2:p1");
+    await settle();
+    fail = false;
+    // A phantom attach would suppress the restore for this one too.
+    t.onAttachOpen(env, "w2:p2");
+    await settle();
+    t.onAttachClose(env, "w2:p1");
+    await settle();
+    t.onAttachClose(env, "w2:p2");
+    await settle();
+    expect(calls).toEqual(["tab-of-w2:p2", "w1:t1"]);
   });
 });

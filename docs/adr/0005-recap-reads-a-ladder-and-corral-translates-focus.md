@@ -83,14 +83,29 @@ Two properties shape the mechanism: herdr focuses exactly **one** tab at a time,
 everything else at once; and `blurred` is **sticky**, so focus needs no maintaining — each pane needs one
 focus-in/focus-out cycle, ever.
 
-corral runs that cycle on the operator's own action. Opening a session's web terminal saves the currently
-focused tab and focuses the session's tab; closing it focuses the saved tab again. The pane completes the
-cycle and is `blurred`; the operator's own herdr view ends exactly where it started. Calls are
-fire-and-forget and best-effort — the terminal never waits on herdr, and a failure is logged, not
-surfaced. Per-pane operations are serialized: a fast open→close could otherwise restore *before* the
-focus it undoes and leave the pane focused, the one state that yields no recap. `tab create` now passes
-its focus flag **explicitly** instead of relying on herdr's undocumented default, so a spawned pane
-cannot be stranded in `unknown`. `FOCUS_TRANSLATION_ENABLED=false` leaves herdr's focus strictly alone.
+Opening a session's web terminal focuses that session's tab; closing it focuses back the tab the operator
+had. The pane completes the cycle and is `blurred`; the operator's view ends exactly where it started.
+Calls are fire-and-forget and best-effort — the terminal never waits on herdr, and a failure is logged,
+not surfaced.
+
+**The saved tab and the operation chain are per ENVIRONMENT, not per pane**, because herdr's focus is a
+single slot per server. Keeping them per pane was wrong in both directions: a second attach on the same
+pane overwrote the saved tab with the pane's own, and two attaches on different panes each restored what
+*they* displaced — so the first close yanked focus off a terminal still open, and the last landed on a tab
+nobody was watching. Either way the operator's real tab was lost and a pane was left focused. So corral
+remembers the operator's tab when an environment's attach count goes 0→1 and restores it when the count
+returns to 0. Serialization per environment also keeps a fast open→close from restoring *before* the focus
+it undoes.
+
+`tab create` passes its focus flag **explicitly** instead of relying on herdr's undocumented default, so a
+spawned pane cannot be stranded in `unknown`. Unlike the attach path this one moves the operator's view
+and does **not** restore it — including on a spawn another Claude session requested over MCP. That is
+forced by the mechanism, not an oversight: at create time the pane holds a shell, and a focus-out
+delivered immediately would reach the shell and be discarded, leaving the Claude that starts moments later
+back at `unknown`. The tab must KEEP focus until a later focus event blurs it, and that event is what puts
+Claude in `blurred`.
+
+`FOCUS_TRANSLATION_ENABLED=false` leaves herdr's focus strictly alone.
 
 **4. The line states its reason instead of going blank, and never shifts the layout.** Both header rows
 render unconditionally; an empty recap prints why (`transcript not found`, `recap read failed`, `no
@@ -114,9 +129,19 @@ Labelling every rung, rather than only the fallbacks, follows from who reads the
 Claude session. An unlabelled quote must be *remembered* as a real summary, and a reader that forgets
 takes the operator's own prompt for the session's report on its own work.
 
-Focus moves only on an operator action, never on a background sweep, because corral cannot tell whether
-a herdr client is watching — the socket snapshot reports no client count — and a board sweep that
-yanked the view would be indistinguishable from a bug.
+Focus moves only where an action of the operator's or an agent's already does — opening a terminal,
+spawning a session — never on a background sweep, because corral cannot tell whether a herdr client is
+watching (the socket snapshot reports no client count) and a periodic yank of the view would be
+indistinguishable from a bug.
+
+**The top rung's own health is counted, not assumed.** The ladder fills the recap line for nearly every
+session, which means it also masks whether `away_summary` still arrives at all: focus translation could
+stop working entirely and every line would still read fine. So the sweep counts recaps by source and logs
+the summary whenever the away-summary count crosses zero in either direction. Without that, this PR would
+have removed the only symptom by which the original month-long silence became visible — and the evidence
+for the causal story is mechanism-level (herdr delivers the escape sequences, verified) rather than
+outcome-level (a record observed after a corral-driven cycle, not yet observed). If the causal story is
+wrong, the counter is what says so.
 
 The principle behind all of it: do not build observability on a signal produced by the user's attention
 when the product's whole purpose is to spare the user that attention.
@@ -134,5 +159,11 @@ when the product's whole purpose is to spare the user that attention.
   is a real summary", and the status exists precisely to keep read health separate from content.
 - **Storing recap history.** No material: 32 of the 60 transcripts that ever produced a record produced
   exactly one.
+- **Scanning older records on a rung whose newest payload is blank.** Measured over 1034 transcripts: the
+  newest record was blank only on `last-prompt` (10 files) — the bottom rung, with nothing to demote to —
+  and in none of them did an older usable record on the same rung exist. The extra scan would change no
+  outcome that has ever occurred.
+- **Restoring focus right after `tab create`.** It would look symmetric with the attach path and would
+  silently break the prime: the focus-out would land on the pane's shell before Claude starts.
 - **Leaving `tab create` on herdr's default.** The default is undocumented, and the cost of it being
   `--no-focus` is a session that can never write a recap at all — a silent, permanent loss.

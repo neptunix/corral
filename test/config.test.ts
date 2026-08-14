@@ -1,7 +1,8 @@
 import { describe, it, expect, afterEach } from "vitest";
 
 import {
-  ATTENTION_MIN_WORK_MS, BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, CORRAL_HOME, intFromEnv,
+  ATTENTION_MIN_WORK_MS, BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, CORRAL_HOME,
+  FOCUS_TRANSLATION_ENABLED, intFromEnv,
   LIST_TIMEOUT, RECAP_ENABLED, RECAP_INTERVAL_MS, RECAP_TAIL_BYTES,
   RECAP_READ_TIMEOUT_MS, RECAP_CONTENT_MAX,
   TAB_RENAME_ENABLED, ZOMBIE_REAP_GRACE_MS,
@@ -58,6 +59,12 @@ describe("TAB_RENAME_ENABLED", () => {
   it("defaults to true when the env var is unset", () => {
     // The test runner does not set TAB_RENAME_ENABLED, so the imported default must be true.
     expect(TAB_RENAME_ENABLED).toBe(true);
+  });
+});
+
+describe("FOCUS_TRANSLATION_ENABLED", () => {
+  it("defaults to true when the env var is unset", () => {
+    expect(FOCUS_TRANSLATION_ENABLED).toBe(true);
   });
 });
 

@@ -57,7 +57,12 @@ export const STATUSLINE_STALE_MS = intFromEnv("STATUSLINE_STALE_MS", 120000, { m
  *   focused tab — a full focus-in/out cycle for the pane, and the operator's own view ends where it
  *   started;
  * - `tab create` at spawn: an explicit focus flag, because a never-focused pane is `unknown`, not
- *   `blurred`, and could never produce a recap at all.
+ *   `blurred`, and could never produce a recap at all. This one MOVES the operator's view and does NOT
+ *   restore it, including on a spawn another Claude session requested over MCP. That is not an
+ *   oversight: at create time the pane holds a shell, not Claude, so a focus-out delivered right after
+ *   would reach the shell and be discarded — leaving Claude, which starts moments later, back at
+ *   `unknown`. The tab has to KEEP the focus until some later focus event blurs it (the next spawn, or
+ *   any session opened on the board), and that event is what puts Claude in `blurred`.
  *
  * Set FOCUS_TRANSLATION_ENABLED=false to leave herdr's focus strictly alone (spawns then create tabs
  * with `--no-focus`); the recap ladder in server/transcript.ts keeps working either way.
