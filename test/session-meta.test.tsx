@@ -1,15 +1,19 @@
 // @vitest-environment jsdom
 import type { StatuslineData } from "@shared/schema";
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionMeta } from "../web/src/components/SessionMeta";
 
 afterEach(cleanup);
 
+// SECONDS, not milliseconds: `isStale` multiplies this by 1000. Passing Date.now() here puts the
+// capture tens of thousands of years ahead, so the fresh-metrics path passes without being tested.
+const NOW_SEC = 1_776_000_000;
+
 function statusline(over: Partial<StatuslineData> = {}): StatuslineData {
   return {
-    v: 1, captured_at: Date.now(), session_id: "s1", session_name: null, name_source: null,
+    v: 1, captured_at: NOW_SEC, session_id: "s1", session_name: null, name_source: null,
     account: { uuid: null, email: null, org: null, tier: null },
     model: "Opus 5", model_id: null,
     ctx: { pct: 18, tokens: 185_000, window: null },
@@ -62,9 +66,48 @@ describe("SessionMeta", () => {
     expect(screen.getByText("recap not read yet")).toBeTruthy();
   });
 
+  // Asserted on the ELEMENT, not on a title the badge would not carry in this state either way —
+  // the earlier form stayed green with the null guard deleted, which is the defect it claimed to pin.
   it("drops the badge when there is no rung to name and nothing is wrong", () => {
     render(<SessionMeta statusline={statusline()} recap="some text" recapStatus="ok" recapSource={null} />);
-    expect(screen.queryByTitle(/Claude's own recap/)).toBeNull();
+    expect(screen.queryByTestId("recap-badge")).toBeNull();
     expect(screen.getByText("some text")).toBeTruthy();
+  });
+
+  // MetricChips moved here wholesale in this change and had nothing asserting a character of it:
+  // the whole metrics half could render blank without a test going red.
+  it("prints the captured metrics as one chip run", () => {
+    const { container } = render(<SessionMeta statusline={statusline()} recap={null} recapStatus={null} recapSource={null} />);
+    expect(container.textContent).toContain("Opus 5");
+    expect(container.textContent).toContain("ctx 18% (185K)");
+    expect(container.textContent).toContain("$10.25");
+    expect(container.textContent).toContain("+237/\u221236");
+  });
+
+  it("omits an uncaptured field rather than printing a dash for it", () => {
+    const { container } = render(
+      <SessionMeta
+        statusline={statusline({ cost: { usd: null, lines_added: null, lines_removed: null } })}
+        recap={null} recapStatus={null} recapSource={null}
+      />,
+    );
+    expect(container.textContent).toContain("Opus 5");
+    expect(container.textContent).not.toContain("$");
+    expect(container.textContent).not.toContain("\u2014");
+  });
+
+  it("dims an old capture and leaves a fresh one alone", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(NOW_SEC * 1000);
+      const fresh = render(<SessionMeta statusline={statusline()} recap={null} recapStatus={null} recapSource={null} />);
+      expect(fresh.container.querySelector(".opacity-50")).toBeNull();
+      cleanup();
+      vi.setSystemTime((NOW_SEC + 3600) * 1000);
+      const old = render(<SessionMeta statusline={statusline()} recap={null} recapStatus={null} recapSource={null} />);
+      expect(old.container.querySelector(".opacity-50")).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
