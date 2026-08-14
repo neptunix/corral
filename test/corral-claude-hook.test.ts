@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import path from "node:path";
-import { afterEach, describe, it, expect } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, it, expect } from "vitest";
 
 const SCRIPT = path.resolve(import.meta.dirname, "../scripts/corral-claude-hook.sh");
 
