@@ -467,6 +467,28 @@ config dirs only (a remote box keeps whatever base is in its own copy). Once the
 place, set `"theme": "custom:corral"` in that dir's `settings.json` (or run `/theme` and pick
 `corral`). Edit `overrides` in the preset to taste; only `base` is machine-managed.
 
+## Claude context-pressure hook (optional)
+
+corral can tell a session about its own context-window pressure before it asks — a
+`UserPromptSubmit` hook injects a short `[corral] ctx {pct}% (notice|nudge|urgent)` signal once
+context crosses 30/40/60%, and a `SessionStart` hook primes the protocol for what to do about it
+once per session (and again after `/compact`). Both read the same
+`corral-status/<session_id>.json` the statusline capture already writes — this hook reads the
+file `corral-status-capture.sh` writes, so that script must already be installed and wired into
+your statusline command (see above) — without it this hook silently does nothing (best-effort,
+same contract as the capture script).
+
+Thresholds are configurable in `~/.corral/config.json` (falls back to `30/40/60` if absent or
+malformed):
+
+```json
+{ "hooks": { "ctxThresholds": [30, 40, 60] } }
+```
+
+Requires `jq` and the `skills/corral/` skill installed in the same config dir (see the table
+below) — the hook reads its context-pressure protocol out of `SKILL.md` rather than duplicating
+the text.
+
 ## Installing the Claude helper files (per config dir)
 
 The statusline and theme pieces live **per Claude config dir** — every `~/.claude*` dir you
@@ -479,6 +501,7 @@ the copy command differs (`cp` vs `scp` + `ssh`). Into each config dir:
 | `statusline-command.sh` | `scripts/statusline-command.sh` | only if you have **no** statusline script of your own |
 | `themes/corral.json` | `themes/corral.json` | only for the optional theme |
 | `skills/corral/` | `skills/corral/` | recommended with the [MCP server](#mcp-server); only on the machine running corral |
+| `corral-claude-hook.sh` | `scripts/corral-claude-hook.sh` | optional — proactive context-pressure signal |
 
 **Local** (default `~/.claude`; repeat for each extra dir such as `~/.claude-work`):
 
@@ -486,11 +509,16 @@ the copy command differs (`cp` vs `scp` + `ssh`). Into each config dir:
 D=~/.claude
 cp scripts/corral-status-capture.sh "$D/corral-status-capture.sh"
 cp scripts/statusline-command.sh    "$D/statusline-command.sh"    # skip if you have your own
-chmod +x "$D/corral-status-capture.sh" "$D/statusline-command.sh"
+cp scripts/corral-claude-hook.sh   "$D/corral-claude-hook.sh"    # optional — context-pressure hook
+chmod +x "$D/corral-status-capture.sh" "$D/statusline-command.sh" "$D/corral-claude-hook.sh"
 mkdir -p "$D/themes" && cp themes/corral.json "$D/themes/corral.json"   # optional theme
 mkdir -p "$D/skills" && cp -R skills/corral "$D/skills/corral"          # recommended with the MCP server
 echo "corral-status/" >> "$D/.gitignore"    # if the config dir is version-controlled
 ```
+
+Locally, you can `ln -s "$(pwd)/scripts/corral-claude-hook.sh" "$D/corral-claude-hook.sh"`
+instead of `cp` if you don't want to re-copy after every `git pull` — there's no equivalent for
+the remote `scp` step below.
 
 **Remote** (over SSH — `H` is the environment's `sshHost`, `D` its config dir, e.g.
 `/home/me/.claude`):
@@ -499,7 +527,8 @@ echo "corral-status/" >> "$D/.gitignore"    # if the config dir is version-contr
 H=my-ssh-host; D=/home/me/.claude
 scp scripts/corral-status-capture.sh "$H:$D/corral-status-capture.sh"
 scp scripts/statusline-command.sh    "$H:$D/statusline-command.sh"     # skip if it has its own
-ssh "$H" "chmod +x $D/corral-status-capture.sh $D/statusline-command.sh && mkdir -p $D/themes"
+scp scripts/corral-claude-hook.sh    "$H:$D/corral-claude-hook.sh"      # optional — context-pressure hook
+ssh "$H" "chmod +x $D/corral-status-capture.sh $D/statusline-command.sh $D/corral-claude-hook.sh && mkdir -p $D/themes"
 scp themes/corral.json "$H:$D/themes/corral.json"                      # optional theme
 ```
 
@@ -510,6 +539,23 @@ the statusline at the script and — if you copied the theme — select it:
 {
   "statusLine": { "type": "command", "command": "/absolute/path/to/statusline-command.sh" },
   "theme": "custom:corral"
+}
+```
+
+If you installed the context-pressure hook, register it under both events in the same
+`settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "startup|resume|clear|compact",
+        "hooks": [{ "type": "command", "command": "/absolute/path/to/corral-claude-hook.sh" }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "/absolute/path/to/corral-claude-hook.sh" }] }
+    ]
+  }
 }
 ```
 

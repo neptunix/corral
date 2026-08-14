@@ -41,6 +41,20 @@ position before reading anything else.
 `corral_task_read` in the same turn you write, and edit around what it returned rather than retyping
 the log from memory.
 
+<!-- ctx-signal:start -->
+## Context pressure signal
+
+`[corral] ctx {pct}% (notice|nudge|urgent)` appears on prompts once session context crosses the
+configured thresholds (default 30/40/60%). Same number `corral_whoami` reports — corral hands it
+to you before you ask.
+
+- **notice:** drop a light, low-key mention into your normal reply — "context's at N%" in passing.
+- **nudge:** be more direct — context is climbing, and a handoff is available if there's work left.
+- **urgent:** say so plainly and offer the handoff now — don't wait for a natural pause.
+
+Handoff itself follows the procedure below — wait for the operator, never spawn unprompted.
+<!-- ctx-signal:end -->
+
 ## Handing off before context runs out
 
 Available, not obligatory — and never silent. `corral_whoami` reports this session's own context
