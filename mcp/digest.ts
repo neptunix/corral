@@ -178,9 +178,11 @@ export function formatFleet(input: {
   readonly env: string | null;
   readonly limit: number;
   readonly recapChars: number;
+  /** This session's own Claude account, for the cross-account marker. Null = unknown, so no marker. */
+  readonly selfAccount: string | null;
   readonly nowMs?: number;
 }): string {
-  const { snapshot, attention, boards, filter, env, limit, recapChars } = input;
+  const { snapshot, attention, boards, filter, env, limit, recapChars, selfAccount } = input;
   const nowMs = input.nowMs ?? Date.now();
 
   const unreachable = Object.entries(snapshot.envs)
@@ -202,7 +204,35 @@ export function formatFleet(input: {
     // tab, paneId, status, model, cardFor's ids) is left as-is and swept by `emit` below instead
     // of being reasoned about individually.
     const recap = r.recap === null || r.recap === "" ? "" : ` "${truncate(oneLine(r.recap), recapChars)}"`;
-    return `${r.env}  ${r.tab}  ${r.paneId}  ${r.status}  ${ctxCol}  ${model}${recap}${attCol}  ${cardFor(boards, r)}`;
+    // The session's own name, not the tab label: they coincide for a corral-spawned session (one
+    // string becomes both) but not for one started by hand or renamed since. The tab label is the
+    // fallback, mirroring formatWhoami's "you are:" line.
+    // "" counts as absent, not as a name: a captured-but-empty session_name would otherwise render a
+    // blank column exactly where the reader is told to find an address.
+    // Marked, not silent: the tab column this replaced is gone, so an unlabelled stand-in would leave
+    // no way to tell an address from a herdr label. "" counts as absent — a captured-but-empty name
+    // would otherwise render blank exactly where the reader is told to find an address.
+    const capturedName = r.statusline?.session_name;
+    const name = capturedName === null || capturedName === undefined || capturedName === ""
+      ? `${r.tab} (tab label, name not captured)`
+      : capturedName;
+    // Account is shown ONLY when it differs from this session's own — the fleet spans every Claude
+    // account on the machine, and the marked rows are exactly the ones outside this session's reach.
+    // Printing it on every row would cost a column that reads identically for the common case.
+    //
+    // Compared as the DISPLAY string, not the account uuid, so two accounts in one organization whose
+    // email is missing both read as `org` and go unmarked. That errs toward "try it": an unmarked
+    // unreachable row costs one send that answers "not reachable", whereas plumbing the uuid through
+    // the whoami schema costs a wider change than the miss is worth.
+    const account = r.statusline?.account?.email ?? r.statusline?.account?.org ?? null;
+    const acctCol = selfAccount === null || account === null || account === selfAccount
+      ? ""
+      : `  account: ${truncate(oneLine(account), IDENTITY_FIELD_MAX)}`;
+    // A session on another machine answers to its name only over Remote Control. Stated where it
+    // changes the answer — a remote env with rc explicitly off — and nowhere else: a local session
+    // is reachable regardless, and `null` is an unread registry, not a verified "off".
+    const rcCol = snapshot.envs[r.env]?.kind === "remote" && r.remoteControl === false ? "  rc: off" : "";
+    return `${r.env}  ${name}  ${r.paneId}  ${r.status}  ${ctxCol}  ${model}${recap}${attCol}${acctCol}${rcCol}  ${cardFor(boards, r)}`;
   });
 
   const parts: string[] = [];
@@ -437,8 +467,12 @@ export function formatSpawnReply(a: {
     adopted
       // The rejoin returns before the launch command is sent (server/spawn.ts), so the brief file is
       // never read. Saying otherwise would leave the operator believing a handoff was delivered.
-      ? "That session was already running, so it did not receive this brief — send the handoff to it yourself, or close it and spawn again."
-      : "It will read the brief and call corral_whoami on start.",
+      // The name above is the LINK's, and nothing ever named that session it: no launch command ran.
+      ? "That session was already running, so it did not receive this brief — send the handoff to it yourself, or close it and spawn again. corral did not name it: the name above is the card's label. Its address is in that pane's corral_fleet row."
+      // Not "its name is X": corral only guarantees the name is free ON THIS CARD, while Claude Code
+      // keeps names unique per MACHINE and appends a variant of its own when one is taken. The
+      // captured name is the answer, and it is one poll away.
+      : "It will read the brief and call corral_whoami on start. The name above is what corral asked for, not an address — to message it, take the name from its corral_fleet row.",
   ]);
 }
 
@@ -477,7 +511,10 @@ export function formatWhoami(w: WhoamiResolved): string {
   const cwd = truncate(oneLine(s.cwd), IDENTITY_FIELD_MAX);
   const account = s.account === null ? "—" : truncate(oneLine(s.account), IDENTITY_FIELD_MAX);
   const lines = [
-    `you are: ${s.sessionName ?? s.tabLabel}  (${s.status})`,
+    // The name, or an explicitly-labelled stand-in. A session reads this line to learn the address it
+    // hands to a peer, so an uncaptured name must not silently become the tab label — for a RESUMED
+    // session that label is the slugified card name, i.e. exactly the string that is not the address.
+    `you are: ${s.sessionName ?? `${s.tabLabel} (tab label, name not captured)`}  (${s.status})`,
     `env: ${s.envLabel} [${s.env}]   pane: ${s.paneId}   tab: ${s.tabLabel}   workspace: ${s.workspaceLabel}`,
     `session id: ${s.sessionId ?? "not registered yet"}`,
     `cwd: ${cwd}`,
@@ -510,7 +547,16 @@ export function formatWhoami(w: WhoamiResolved): string {
       "sessions on this card:",
       ...shownSessions.map((cs) => {
         const ctx = cs.ctxPct === null ? "—" : `${String(Math.round(cs.ctxPct))}%`;
-        return `  ${cs.self ? "*" : " "} ${cs.name}  ${cs.key}  ${cs.status}  ctx ${ctx}`;
+        // The card's label and the name the session answers to are the same string only when corral
+        // launched it with `--name`; a resumed session derives its own. Shown only when they differ,
+        // because that is the case where messaging the card's label reaches the wrong session — or,
+        // worse, a stranger that happens to hold that name.
+        // Three states, not two: matching (silent), diverged (show the real one), and NOT CAPTURED
+        // — which must not read as "matching", or the card's label gets handed out as an address.
+        const claude = cs.claudeName === cs.name
+          ? ""
+          : cs.claudeName === null ? "  (claude name not captured)" : `  (as claude: ${cs.claudeName})`;
+        return `  ${cs.self ? "*" : " "} ${cs.name}${claude}  ${cs.key}  ${cs.status}  ctx ${ctx}`;
       }),
     );
     if (sessionsDropped > 0) {

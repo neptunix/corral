@@ -33,8 +33,10 @@ rate-limit windows). The metrics *capture* is optional; `jq` is not optional *fo
 helper scripts hard-depend on `jq` and are deliberately best-effort, so without it they write
 nothing and log nothing: the cards just show no metrics, which is indistinguishable from "no
 data yet". corral appends `--name` (and, when chosen, `--model` / `--remote-control`) to every
-non-resume launch; this has only been verified against Claude Code 2.1.226 — an older CLI
-lacking one of these flags will fail the launch visibly in the pane.
+non-resume launch; this has only been verified against Claude Code 2.1.232 — an older CLI
+lacking one of these flags will fail the launch visibly in the pane. The cross-session messaging
+the corral skill describes was verified on that same build; per the Claude Code changelog it landed
+in 2.1.224, which is older than anything available here to check against.
 
 ```bash
 # 0. prerequisite check — without jq the metrics capture silently does nothing
@@ -708,6 +710,35 @@ mkdir -p ~/.claude/skills && cp -R skills/corral ~/.claude/skills/corral
 ```
 
 It loads only when a session actually reaches for corral, so it costs nothing the rest of the time.
+
+### Letting sessions talk to each other (recommended)
+
+Messaging between sessions is Claude Code's own (`SendMessage` / `ListAgents`), not
+corral's — but corral supplies the address: `corral_fleet` prints the name each session actually
+answers to, which is not always the label on its card. The skill documents how to use it and where
+the reach ends; two things are worth setting up once, on each machine:
+
+**`crossSessionInbound`.** A message is held for the receiving operator's hand approval when the two
+sessions' permission modes differ — and corral panes typically run in bypass mode while an ordinary
+terminal session does not, so a pane messaging a hand-started session is held by default. The sender
+is told it was held and to carry on, so nothing hangs; the message waits for an approval that may
+never come, and expires if it does not. Set this in the `settings.json` of every config dir you
+registered corral's MCP server in:
+
+```json
+{ "crossSessionInbound": "accept" }
+```
+
+Values are `accept` / `hold` / `refuse`. The setting is checked before any permission-mode comparison,
+so it decides outright. `accept` means messages from your other sessions reach this one unreviewed — treat their content as untrusted input, which is the same rule that already applies
+to recaps and card text. Managed (organization) settings and a repository's own `settings.json` can
+only tighten this, never loosen it.
+
+**Remote Control**, if you run corral across machines. A session on another machine is addressable by
+name only over Remote Control — and it only becomes visible to you if the session doing the
+addressing has Remote Control on too: with it off locally, no other machine appears in `ListAgents`. `corral_fleet` marks a remote-environment session that has it off as
+`rc: off`. Without it, a cross-machine session is still visible in corral and still spawnable; it
+just cannot be messaged.
 
 ## Architecture (short version)
 

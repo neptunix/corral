@@ -37,7 +37,7 @@ if (ctx === null) {
   registerSelfTool(server, identity);
   registerTaskTools(server, { client, identity });
   registerSessionTools(server, { client, identity });
-  registerFleetTool(server, client);
+  registerFleetTool(server, { client, identity });
 }
 
 await server.connect(new StdioServerTransport());
