@@ -21,6 +21,8 @@ esac
 # Both branches require the skill: an un-primed session gets a raw signal with no explanation.
 skill_file="$CONFIG_DIR/skills/corral/SKILL.md"
 [ -f "$skill_file" ] || exit 0
+block="$(awk '/<!-- ctx-signal:start -->/{flag=1; next} /<!-- ctx-signal:end -->/{flag=0} flag' "$skill_file")"
+[ -z "$block" ] && exit 0
 
 emit() {
   jq -n -c --arg event "$event" --arg ctx "$1" \
@@ -29,8 +31,6 @@ emit() {
 
 case "$event" in
   SessionStart)
-    block="$(awk '/<!-- ctx-signal:start -->/{flag=1; next} /<!-- ctx-signal:end -->/{flag=0} flag' "$skill_file")"
-    [ -z "$block" ] && exit 0
     emit "$block"
     ;;
   UserPromptSubmit)
@@ -48,6 +48,8 @@ case "$event" in
         then "\($t[0]) \($t[1]) \($t[2])"
         else "30 40 60" end
     ' "$thresholds_file" 2>/dev/null || echo "30 40 60")"
+    # jq on an EMPTY file exits 0 with no output at all (not an error), so the `|| echo` above
+    # never fires for that case specifically — this guard is what actually catches it.
     [ -z "$thresholds" ] && thresholds="30 40 60"
     # shellcheck disable=SC2086
     set -- $thresholds

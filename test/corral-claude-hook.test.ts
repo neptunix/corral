@@ -135,6 +135,19 @@ function additionalContext(stdout: string): string {
 }
 
 describe.skipIf(!hasJq())("corral-claude-hook.sh — UserPromptSubmit", () => {
+  it("exits 0 with no output when SKILL.md has no ctx-signal markers", () => {
+    const configDir = mkdtempSync(path.join(os.tmpdir(), "corral-hook-"));
+    dirs.push(configDir);
+    skillFixture(configDir, "# corral\n\nno markers here\n");
+    statusFixture(configDir, SID, 70);
+    const { stdout, status } = run(
+      JSON.stringify({ hook_event_name: "UserPromptSubmit", session_id: SID }),
+      { CLAUDE_CONFIG_DIR: configDir },
+    );
+    expect(status).toBe(0);
+    expect(stdout).toBe("");
+  });
+
   it("exits 0 with no output when session_id is missing", () => {
     const configDir = mkdtempSync(path.join(os.tmpdir(), "corral-hook-"));
     dirs.push(configDir);
