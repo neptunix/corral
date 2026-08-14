@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 
 import { ENVIRONMENTS, getEnv } from "../environments.ts";
 import type { ExecFn } from "../server/herdr.ts";
-import { paneRun, paneGet, tabCreate, workspaceCreate, tabClose, tabRename, listPanes, listAllPanes } from "../server/herdr.ts";
+import { paneRun, paneGet, tabCreate, tabFocus, focusedTabId, workspaceCreate, tabClose, tabRename, listPanes, listAllPanes } from "../server/herdr.ts";
 
 const env = ENVIRONMENTS[0]!;
 
@@ -65,6 +65,44 @@ describe("tabCreate (herdr 0.7.1 nested shape)", () => {
 
   it("throws when neither shape yields ids", async () => {
     await expect(tabCreate(env, "ws1", "/proj", "t", makeExec(JSON.stringify({ result: {} })))).rejects.toThrow(/tab create/);
+  });
+
+  // The focus flag is passed either way, never left to herdr's undocumented default: a pane that was
+  // never focused sits in Claude's `unknown` state, which is NOT `blurred`, and could then never write a
+  // recap however long the session runs.
+  it("states the focus intent explicitly", async () => {
+    const payload = JSON.stringify({ result: { tab_id: "t2", pane_id: "p2" } });
+    await tabCreate(env, "ws1", "/proj", "my-task", makeExec(payload));
+    const args = (makeExec as unknown as { lastArgs: readonly string[] }).lastArgs;
+    expect(args.filter((a) => a === "--focus" || a === "--no-focus")).toHaveLength(1);
+  });
+});
+
+describe("tabFocus / focusedTabId", () => {
+  // corral's only lever over a session's terminal focus state, and the one that revives away_summary:
+  // herdr delivers real focus-report sequences to the pane, with nothing written into the pane itself.
+  it("sends tab focus for the given tab", async () => {
+    const exec = makeExec("");
+    await tabFocus(env, "w1:t3", exec);
+    expect((makeExec as unknown as { lastArgs: readonly string[] }).lastArgs).toContain("focus");
+    expect((makeExec as unknown as { lastArgs: readonly string[] }).lastArgs).toContain("w1:t3");
+  });
+
+  it("reads the one focused tab out of tab list", async () => {
+    const payload = JSON.stringify({ result: { tabs: [
+      { tab_id: "w1:t1", label: "a", workspace_id: "w1", focused: false },
+      { tab_id: "w1:t2", label: "b", workspace_id: "w1", focused: true },
+    ] } });
+    expect(await focusedTabId(env, makeExec(payload))).toBe("w1:t2");
+  });
+
+  it("returns null when no tab reports focus — nothing to restore to is not an error", async () => {
+    const payload = JSON.stringify({ result: { tabs: [{ tab_id: "w1:t1", label: "a", workspace_id: "w1" }] } });
+    expect(await focusedTabId(env, makeExec(payload))).toBeNull();
+  });
+
+  it("returns null rather than throwing on an unparseable tab list", async () => {
+    expect(await focusedTabId(env, makeExec(JSON.stringify({ nope: true })))).toBeNull();
   });
 });
 

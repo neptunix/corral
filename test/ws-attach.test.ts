@@ -42,6 +42,7 @@ interface Harness {
   readonly port: number;
   readonly ptys: FakePty[];
   readonly auditPath: string;
+  readonly focusCalls: string[];
   close(): Promise<void>;
 }
 
@@ -58,15 +59,22 @@ async function start(overrides: Partial<AttachServerOptions> = {}): Promise<Harn
   await new Promise<void>((res) => { server.listen(0, "127.0.0.1", res); });
   const addr = server.address();
   const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+  // Recording stand-in, ALWAYS injected: the production default translator shells out to herdr, which a
+  // test must never do — and it makes the focus cycle observable here.
+  const focusCalls: string[] = [];
   attachWebSocketServer(server, {
     envs: [ENV],
     allowedOrigins: [`http://127.0.0.1:${String(port)}`, `http://localhost:${String(port)}`],
     spawn,
     auditLogPath: auditPath,
+    focus: {
+      onAttachOpen: (_e, paneId) => { focusCalls.push(`open ${paneId}`); },
+      onAttachClose: (_e, paneId) => { focusCalls.push(`close ${paneId}`); },
+    },
     ...overrides,
   });
   return {
-    port, ptys, auditPath,
+    port, ptys, auditPath, focusCalls,
     close: () => new Promise<void>((res) => { server.close(() => { res(); }); }),
   };
 }
@@ -146,6 +154,27 @@ describe("attachWebSocketServer (integration, injected fake pty)", () => {
     const audit = readFileSync(h.auditPath, "utf8");
     expect(audit).toContain("agent attach w1-1 --takeover");
     expect(audit).not.toContain("ls\\n"); // SEC-6: keystrokes never hit the audit log
+  });
+
+  // Opening the terminal focuses the pane's tab and closing it restores the previous one. That cycle is
+  // the whole point: only a pane that has been focused and then blurred can write an away_summary recap.
+  it("runs the focus cycle across the attach's open and close", async () => {
+    const h = await start();
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
+    await once(client, "open");
+    await waitFor(() => h.focusCalls.length === 1);
+    expect(h.focusCalls).toEqual(["open w1-1"]);
+
+    client.close();
+    await waitFor(() => h.focusCalls.length === 2);
+    expect(h.focusCalls).toEqual(["open w1-1", "close w1-1"]);
+  });
+
+  it("does not move focus when the pty fails to spawn", async () => {
+    const h = await start({ spawn: () => { throw new Error("no pty"); } });
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
+    await once(client, "close");
+    expect(h.focusCalls).toEqual([]);
   });
 
   it("rejects a disallowed Origin — no pty is spawned (SEC-1)", async () => {

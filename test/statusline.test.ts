@@ -87,7 +87,7 @@ describe("readStatusline — remote", () => {
 describe("aggregateAccounts", () => {
   const rowWith = (env: string, uuid: string, capturedAt: number, pct: number): SessionRow => ({
     env, paneId: "p", status: "working", agent: "a", cwd: "/c", tab: "t", workspace: "w",
-    sessionId: "sid", recap: null, recapAt: null, recapStatus: null,
+    sessionId: "sid", recap: null, recapAt: null, recapStatus: null, recapSource: null,
     statusline: { ...record, captured_at: capturedAt, account: { uuid, email: "a@b.c", org: "O", tier: "t" },
       rate: { five_hour: { used_percentage: pct, resets_at: 9 }, seven_day: null } },
     statuslineStatus: "ok",

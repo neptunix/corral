@@ -42,6 +42,28 @@ export const STATUSLINE_READ_TIMEOUT_MS = intFromEnv("STATUSLINE_READ_TIMEOUT_MS
 export const STATUSLINE_MAX_BYTES = intFromEnv("STATUSLINE_MAX_BYTES", 65536, { min: 1 });
 export const STATUSLINE_STALE_MS = intFromEnv("STATUSLINE_STALE_MS", 120000, { min: 1 });
 
+/**
+ * Focus translation: corral drives `herdr tab focus` so a Claude session's terminal focus state actually
+ * changes. This is what keeps the `away_summary` recap alive.
+ *
+ * Claude emits that recap only while its focus state is `blurred`, and that state is set ONLY by
+ * terminal focus-report sequences. On a host terminal that reports no focus at all, the only producer of
+ * those sequences is herdr itself — so once the operator moved from switching herdr tabs to watching the
+ * corral board, no session was ever blurred again and the source went silent (measured: last record
+ * 2026-07-31, zero across ~645 sessions after). corral had de-energized its own recap source.
+ *
+ * Two places translate focus, both derived from that mechanism:
+ * - opening/closing a session's web terminal: focus the session's tab, then restore the previously
+ *   focused tab — a full focus-in/out cycle for the pane, and the operator's own view ends where it
+ *   started;
+ * - `tab create` at spawn: an explicit focus flag, because a never-focused pane is `unknown`, not
+ *   `blurred`, and could never produce a recap at all.
+ *
+ * Set FOCUS_TRANSLATION_ENABLED=false to leave herdr's focus strictly alone (spawns then create tabs
+ * with `--no-focus`); the recap ladder in server/transcript.ts keeps working either way.
+ */
+export const FOCUS_TRANSLATION_ENABLED = process.env.FOCUS_TRANSLATION_ENABLED !== "false";
+
 // Tab rename: corral renames a herdr tab to its Claude session name (user-set names only). Rides the
 // statusline sweep, so it is effective only when STATUSLINE_ENABLED is also on.
 export const TAB_RENAME_ENABLED = process.env.TAB_RENAME_ENABLED !== "false";

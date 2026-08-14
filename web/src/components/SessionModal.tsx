@@ -1,4 +1,4 @@
-import type { RegistryStatus, StatuslineData } from "@shared/schema";
+import type { RecapSource, RecapStatus, RegistryStatus, StatuslineData } from "@shared/schema";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef, useState, type JSX } from "react";
@@ -10,6 +10,7 @@ import {
 import { contextLevelClass } from "../lib/level";
 import { formatDropInjection, formatPaste } from "../lib/paste";
 import { closeMessage } from "../lib/protocol";
+import { RECAP_SOURCE_LABEL, recapReason } from "../lib/recap-line";
 import { sessionStateLabel } from "../lib/session-state";
 import { attachCommittedTextInput } from "../lib/text-input";
 import { isStale } from "../lib/time";
@@ -37,6 +38,11 @@ interface Props {
   // herdr workspace label (≈ the repo). Shown in the header between the env and the session name; "" hides it.
   readonly workspace?: string;
   readonly recap?: string | null;
+  // Health of the recap read and which rung of the ladder produced `recap`. Without the pair an empty
+  // recap line is indistinguishable from a broken one — which is how the dead away_summary source hid
+  // for a month (docs/adr/0005).
+  readonly recapStatus?: RecapStatus | null;
+  readonly recapSource?: RecapSource | null;
   readonly statusline?: StatuslineData | null;
   // Enables drop-to-attach (upload + path injection). True for local envs only; remote needs SSH
   // byte transfer (v2), so the drop affordance is hidden there (the server also refuses remote uploads).
@@ -84,7 +90,8 @@ function MetricChips({ sl }: { readonly sl: StatuslineData }): JSX.Element {
 }
 
 export function SessionModal({
-  env, envLabel, paneId, awaitAgent = false, title = "", workspace = "", recap = null, statusline = null,
+  env, envLabel, paneId, awaitAgent = false, title = "", workspace = "", recap = null,
+  recapStatus = null, recapSource = null, statusline = null,
   canAttachFiles = false, status, claudeStatus, waitingFor, remoteControl, registryStatus, onClose,
 }: Props): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -405,22 +412,30 @@ export function SessionModal({
             title="Close (Esc)"
           >✕</button>
         </div>
-        {(recap !== null && recap !== "") || statusline !== null ? (
-          <div className="flex flex-col gap-0.5 px-4 py-1.5 border-b border-border shrink-0 text-[11px]">
-            {statusline !== null && (
-              <span className={`font-mono tabular-nums text-muted-foreground ${isStale(statusline.captured_at) ? "opacity-50" : ""}`}>
-                <MetricChips sl={statusline} />
-              </span>
-            )}
-            {recap !== null && recap !== "" && (
-              // Own line, always below the metric chips (never inline with the model) — a long recap
-              // then gets the full width to truncate against instead of competing for the model's row.
-              <span className="truncate text-muted-foreground/80" title={recap}>
-                {recap}
-              </span>
-            )}
-          </div>
-        ) : null}
+        {/* Both rows render UNCONDITIONALLY, each on its own line. The block used to appear only once
+            data had arrived, so the first statusline capture (and later the recap) inserted a row and
+            shoved the terminal down — a visible jump on every open. Reserving the space costs two muted
+            placeholders and makes the layout static. A long recap also gets the full width to truncate
+            against instead of competing for the model's row. */}
+        <div className="flex flex-col gap-0.5 px-4 py-1.5 border-b border-border shrink-0 text-[11px]">
+          <span className={`font-mono tabular-nums text-muted-foreground ${statusline !== null && isStale(statusline.captured_at) ? "opacity-50" : ""}`}>
+            {statusline !== null
+              ? <MetricChips sl={statusline} />
+              : <span className="text-muted-foreground/40">metrics not read yet</span>}
+          </span>
+          {recap !== null && recap !== "" ? (
+            <span className="truncate text-muted-foreground/80" title={recap}>
+              {recapSource !== null && (
+                <span className="text-muted-foreground/50" title={RECAP_SOURCE_LABEL[recapSource].hint}>
+                  {RECAP_SOURCE_LABEL[recapSource].tag}{" "}
+                </span>
+              )}
+              {recap}
+            </span>
+          ) : (
+            <span className="truncate text-muted-foreground/40">{recapReason(recapStatus)}</span>
+          )}
+        </div>
         <div ref={containerRef} className="flex-1 min-h-0 p-2" />
         {dragging && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-none">

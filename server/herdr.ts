@@ -5,7 +5,7 @@ import path from "node:path";
 import { quote } from "shell-quote";
 import { z } from "zod";
 
-import { LIST_TIMEOUT, READ_TIMEOUT } from "../config.ts";
+import { FOCUS_TRANSLATION_ENABLED, LIST_TIMEOUT, READ_TIMEOUT } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { parsePane } from "./parser.ts";
 
@@ -132,7 +132,10 @@ const WorkspaceListSchema = z.object({
   result: z.object({ workspaces: z.array(z.object({ workspace_id: z.string(), label: z.string() })).default([]) }).default({ workspaces: [] }),
 });
 const TabListSchema = z.object({
-  result: z.object({ tabs: z.array(z.object({ tab_id: z.string(), label: z.string(), workspace_id: z.string() })).default([]) }).default({ tabs: [] }),
+  // `focused` marks the ONE tab herdr currently has focused (there is never more than one). Defaulted
+  // rather than required: a herdr that omits the field must not make the whole env unreachable — focus
+  // translation then simply has nowhere to restore to.
+  result: z.object({ tabs: z.array(z.object({ tab_id: z.string(), label: z.string(), workspace_id: z.string(), focused: z.boolean().default(false) })).default([]) }).default({ tabs: [] }),
 });
 const AgentSessionSchema = z.object({
   source: z.string().optional(),
@@ -203,6 +206,7 @@ export async function listSessions(env: HerdrEnv, exec?: ExecFn): Promise<Sessio
       recap: null,
       recapAt: null,
       recapStatus: null,
+      recapSource: null,
       statusline: null,
       statuslineStatus: null,
       claudeStatus: null,
@@ -311,8 +315,14 @@ export async function paneGet(
 export async function tabCreate(
   env: HerdrEnv, workspaceId: string, cwd: string, label: string, exec?: ExecFn,
 ): Promise<{ tabId: string; paneId: string }> {
+  // The focus flag is passed EXPLICITLY, never left to herdr's (undocumented) default. A pane that was
+  // never focused sits in Claude's `unknown` focus state, which is NOT `blurred` — and only `blurred`
+  // produces an `away_summary`. So a spawn that skips focus makes the session permanently unable to ever
+  // write a recap, however long it then runs. Focusing a newly created tab is what any terminal does
+  // anyway; the next focus event (another spawn, or opening any session on the board) blurs it.
+  const focusFlag = FOCUS_TRANSLATION_ENABLED ? "--focus" : "--no-focus";
   const out = await runHerdr(
-    env, ["tab", "create", "--workspace", workspaceId, "--cwd", cwd, "--label", label],
+    env, ["tab", "create", "--workspace", workspaceId, "--cwd", cwd, "--label", label, focusFlag],
     exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec },
   );
   const r = TabCreateSchema.parse(JSON.parse(out.trim())).result;
@@ -426,6 +436,27 @@ export async function listAllPanes(env: HerdrEnv, exec?: ExecFn): Promise<PaneId
 export async function tabClose(env: HerdrEnv, tabId: string, exec?: ExecFn): Promise<void> {
   await runHerdr(env, ["tab", "close", tabId],
     exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec });
+}
+
+/**
+ * Focus a herdr tab. This is the ONLY lever corral has over a Claude session's terminal focus state,
+ * and it is what revives `away_summary`: herdr delivers real focus-report sequences (CSI I / CSI O) to
+ * the pane, so focusing tab X blurs whatever was focused before — measured to work with no herdr client
+ * attached at all, because focus is server state. Nothing is written into the pane, so this stays a
+ * control command of the same class as `tab rename` / `tab close`.
+ *
+ * See docs/adr/0005 for the mechanism and its gates.
+ */
+export async function tabFocus(env: HerdrEnv, tabId: string, exec?: ExecFn): Promise<void> {
+  await runHerdr(env, ["tab", "focus", tabId],
+    exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec });
+}
+
+/** The tab herdr currently has focused, or null when nothing reports focus (nothing to restore to). */
+export async function focusedTabId(env: HerdrEnv, exec?: ExecFn): Promise<string | null> {
+  const parsed = TabListSchema.safeParse(await herdrJson(env, ["tab", "list"], exec));
+  if (!parsed.success) return null;
+  return parsed.data.result.tabs.find((t) => t.focused)?.tab_id ?? null;
 }
 
 export async function tabRename(env: HerdrEnv, tabId: string, label: string, exec?: ExecFn): Promise<void> {

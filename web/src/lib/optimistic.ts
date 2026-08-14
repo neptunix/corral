@@ -18,8 +18,8 @@ export function overrideKey(s: { readonly sessionId: string | null; readonly env
 }
 
 function withOptimisticLive(s: EnrichedSessionLink, state: OptimisticState): EnrichedSessionLink {
-  // recap/recapAt/statusline placeholders: the optimistic overlay doesn't touch them; required only
-  // because LiveSessionData's schema defaults make them non-optional.
+  // recap/recapAt/recapStatus/recapSource/statusline placeholders: the optimistic overlay doesn't touch
+  // them; required only because LiveSessionData's schema defaults make them non-optional.
   //
   // The registry fields are deliberately NULLED rather than carried over. `registryStatus: null` is
   // what makes sessionStateLabel fall back to `status`, so the row reads "closing…"/"resuming…". A
@@ -27,8 +27,8 @@ function withOptimisticLive(s: EnrichedSessionLink, state: OptimisticState): Enr
   // the overlay would appear to do nothing at all.
   const registry = { claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null };
   const live = state === "closing"
-    ? { status: CLOSING_STATUS, model: null, ctxPct: null, detached: true, recap: null, recapAt: null, statusline: null, ...registry }
-    : { status: RESUMING_STATUS, model: null, ctxPct: null, detached: false, recap: null, recapAt: null, statusline: null, ...registry };
+    ? { status: CLOSING_STATUS, model: null, ctxPct: null, detached: true, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, ...registry }
+    : { status: RESUMING_STATUS, model: null, ctxPct: null, detached: false, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, ...registry };
   return { ...s, live };
 }
 

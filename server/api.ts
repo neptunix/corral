@@ -122,11 +122,12 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
           ? { status: live.status, model: live.statusline?.model ?? null,
               ctxPct: live.statusline?.ctx.pct !== null && live.statusline?.ctx.pct !== undefined
                 ? String(live.statusline.ctx.pct) : null,
-              detached: false, recap: live.recap, recapAt: live.recapAt, statusline: live.statusline,
+              detached: false, recap: live.recap, recapAt: live.recapAt,
+              recapStatus: live.recapStatus, recapSource: live.recapSource, statusline: live.statusline,
               claudeStatus: live.claudeStatus, waitingFor: live.waitingFor,
               remoteControl: live.remoteControl, registryStatus: live.registryStatus }
           : { status: "unknown", model: null, ctxPct: null, detached: true,
-              recap: null, recapAt: null, statusline: null,
+              recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null,
               claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null },
       };
     }),

@@ -91,7 +91,7 @@ const DOWN: EnvState = { reachable: false, error: "boom", kind: "local", label: 
 function row(env: string, sessionId: string | null, over?: Partial<SessionRow>): SessionRow {
   return {
     env, paneId: `p-${sessionId ?? "x"}`, status: "working", agent: "claude", cwd: "/repo",
-    tab: "my-tab", workspace: "acme:web", sessionId, recap: null, recapAt: null, recapStatus: null,
+    tab: "my-tab", workspace: "acme:web", sessionId, recap: null, recapAt: null, recapStatus: null, recapSource: null,
     statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null,
     remoteControl: null, registryStatus: null, ...over,
   };

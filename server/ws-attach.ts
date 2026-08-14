@@ -15,7 +15,8 @@ import {
   WS_RATE_WINDOW_MS,
 } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
-import { buildAttachSpec } from "./herdr.ts";
+import { createFocusTranslator, type FocusTranslator } from "./focus-translate.ts";
+import { buildAttachSpec, focusedTabId, paneGet, tabFocus } from "./herdr.ts";
 import { bridgePtyToWs, type PtyLike, type WsLike } from "./pty-bridge.ts";
 import { createSpawnLimiter, validateUpgrade } from "./ws-attach-guard.ts";
 
@@ -168,6 +169,9 @@ export interface AttachServerOptions {
   readonly limiter?: { tryReserve: () => boolean; release: () => void };
   readonly auditLogPath?: string;
   readonly now?: () => number;
+  // Test seam. Defaults to the real herdr-backed translator; opening the terminal focuses the pane's tab
+  // and closing it restores the tab that was focused before — see server/focus-translate.ts.
+  readonly focus?: FocusTranslator;
 }
 
 interface ConnectionCtx {
@@ -178,6 +182,7 @@ interface ConnectionCtx {
   readonly spawnPty: PtySpawnFn;
   readonly auditLogPath: string;
   readonly now: () => number;
+  readonly focus: FocusTranslator;
 }
 
 function onConnection(ctx: ConnectionCtx): void {
@@ -207,6 +212,12 @@ function onConnection(ctx: ConnectionCtx): void {
     event: "open", ts: new Date().toISOString(), env: ctx.env.id, paneId: ctx.paneId,
     origin: ctx.origin, resolvedCommand,
   });
+
+  // Focus in on open, back out on close: that cycle is what leaves the pane `blurred`, which is the only
+  // state in which Claude writes a recap. Deliberately NOT awaited — the operator's terminal must never
+  // wait on herdr, and a failure here is logged, not surfaced. Placed after the successful spawn so a
+  // failed attach does not move the operator's focus for nothing.
+  ctx.focus.onAttachOpen(ctx.env, ctx.paneId);
 
   const spawnedAt = ctx.now();
   let closeAudited = false;
@@ -250,7 +261,10 @@ function onConnection(ctx: ConnectionCtx): void {
   });
   // Wrapped, NOT passed by reference: ws hands its listener (code, reason), which would arrive as the
   // `probeFailed` argument and mark every operator-initiated close as a probe failure.
-  ctx.ws.on("close", () => { auditClose(false); });
+  ctx.ws.on("close", () => {
+    auditClose(false);
+    ctx.focus.onAttachClose(ctx.env, ctx.paneId);
+  });
 
   bridgePtyToWs(pty, ctx.ws, { graceMs: WS_KILL_GRACE_MS, heartbeatMs: WS_HEARTBEAT_MS });
 }
@@ -269,6 +283,11 @@ export function attachWebSocketServer(server: UpgradableServer, opts: AttachServ
     maxConcurrent: WS_MAX_CONCURRENT, ratePerWindow: WS_RATE_PER_WINDOW, windowMs: WS_RATE_WINDOW_MS, now,
   });
   const auditLogPath = opts.auditLogPath ?? ATTACH_AUDIT_LOG;
+  const focus = opts.focus ?? createFocusTranslator({
+    focusedTabId: (env) => focusedTabId(env),
+    tabIdOfPane: async (env, paneId) => (await paneGet(env, paneId)).tabId,
+    tabFocus: (env, tabId) => tabFocus(env, tabId),
+  });
 
   server.on("upgrade", (req, socket, head) => {
     const check = validateUpgrade(req.url ?? "", { origin: req.headers.origin }, opts.envs, opts.allowedOrigins);
@@ -298,7 +317,7 @@ export function attachWebSocketServer(server: UpgradableServer, opts: AttachServ
 
     const origin = req.headers.origin ?? "";
     wss.handleUpgrade(req, socket, head, (ws) => {
-      onConnection({ ws, env: check.env, paneId: check.paneId, origin, spawnPty, auditLogPath, now });
+      onConnection({ ws, env: check.env, paneId: check.paneId, origin, spawnPty, auditLogPath, now, focus });
     });
   });
 }

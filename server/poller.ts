@@ -1,4 +1,4 @@
-import type { AttentionMap, EnvState, RecapStatus, RegistryStatus, SessionRow, Snapshot, StatuslineData, StatuslineStatus } from "@shared/schema";
+import type { AttentionMap, EnvState, RecapSource, RecapStatus, RegistryStatus, SessionRow, Snapshot, StatuslineData, StatuslineStatus } from "@shared/schema";
 
 import { ATTENTION_MIN_WORK_MS, CHEAP_INTERVAL_MS, CLAUDE_REGISTRY_POLL_MS, RECAP_ENABLED, RECAP_INTERVAL_MS, STATUSLINE_ENABLED, SWEEP_INITIAL_DELAY_MS, TAB_RENAME_ENABLED } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
@@ -44,7 +44,7 @@ export function recordsEqual(a: RegistryRecord | null, b: RegistryRecord | null)
 }
 
 export type ListFn = (env: HerdrEnv) => Promise<SessionRow[]>;
-export type RecapFn = (env: HerdrEnv, sessionId: string) => Promise<{ recap: string | null; status: RecapStatus }>;
+export type RecapFn = (env: HerdrEnv, sessionId: string) => Promise<{ recap: string | null; status: RecapStatus; source: RecapSource | null }>;
 export type StatuslineFn = (env: HerdrEnv, sessionId: string) => Promise<{ data: StatuslineData | null; status: StatuslineStatus }>;
 
 export interface Poller {
@@ -160,9 +160,9 @@ export function createPoller(opts: {
         let merged: SessionRow = row;
         const rc = recapCache.get(key);
         if (rc !== null && row.sessionId !== null && rc.sessionId === row.sessionId) {
-          merged = { ...merged, recap: rc.recap, recapAt: rc.at, recapStatus: rc.status };
+          merged = { ...merged, recap: rc.recap, recapAt: rc.at, recapStatus: rc.status, recapSource: rc.source };
         } else if (row.sessionId === null) {
-          merged = { ...merged, recapStatus: "no-session-ref" };
+          merged = { ...merged, recapStatus: "no-session-ref", recapSource: null };
         }
         const sc = statuslineCache.get(key);
         if (sc !== null && row.sessionId !== null && sc.sessionId === row.sessionId) {
@@ -332,8 +332,8 @@ export function createPoller(opts: {
         const key = `${env.id}:${row.paneId}`;
         if (RECAP_ENABLED) {
           try {
-            const { recap, status } = await recapFn(env, row.sessionId);
-            recapCache.update(key, row.sessionId, recap, status);
+            const { recap, status, source } = await recapFn(env, row.sessionId);
+            recapCache.update(key, row.sessionId, recap, status, source);
             if (status === "ok") found++;
             else if (status === "not-found") notFound++;
             else if (status === "no-summary") noSummary++;
