@@ -9,6 +9,8 @@ import {
   slugifyBoardId,
   sortTasks,
 } from "@shared/board-schema.ts";
+import type { DiagnosticsSnapshot } from "@shared/diagnostics-schema";
+import { emptyDiagnostics } from "@shared/diagnostics-schema";
 import type { AttentionMap, PaneRead, SessionRow, Snapshot } from "@shared/schema";
 import { MoveTaskRequestSchema, UPLOAD_MAX_BYTES } from "@shared/schema";
 import { Hono } from "hono";
@@ -23,6 +25,7 @@ import {
 import type { HerdrEnv } from "../environments.ts";
 import { briefByteLength, cleanupBrief, composeBrief, START_COMMAND_FALLBACK, writeBrief } from "./brief.ts";
 import { syncClaudeThemeBase, ThemeModeSchema } from "./claude-theme.ts";
+import type { DiagnosticsStore } from "./diagnostics-store.ts";
 import type { FleetRestore } from "./fleet-restore.ts";
 import { closePane, listWorkspaces, paneIdentity, readPane, type ReadFn, UUID_RE } from "./herdr.ts";
 import { isLoopbackHost } from "./host-guard.ts";
@@ -54,6 +57,13 @@ const CLOSE_DEFER_MS = 150;
 // sessions". This does now cap a card holding 26 ATTACHED sessions, which the letter check did not —
 // intended, and the only reading of "cap" that survives named spawns.
 const SPAWN_CAP = 26;
+// Floor under POST /api/diagnostics/refresh: within this window the route answers from the store
+// without re-running. That route is the only one an unauthenticated caller can use to make the server
+// spawn processes on demand — the loopback bind is the whole access control, and a cross-origin POST is
+// a CORS-simple request the browser delivers even though the page cannot read the reply. The sweep
+// already serializes its work (one run at a time, never N queued), so this is not the primary defense;
+// it turns a request loop from N sweeps in sequence into a no-op.
+const REFRESH_MIN_INTERVAL_MS = 2000;
 
 export type SpawnFn = (opts: SpawnOpts) => Promise<SpawnResult>;
 
@@ -85,7 +95,7 @@ function buildUnassigned(storage: Storage | undefined, snapshot: Snapshot): Sess
     (s.sessionId === null || !assignedSessions.has(`${s.env}:${s.sessionId}`)));
 }
 
-function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, attention: AttentionMap): BoardState {
+function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, attention: AttentionMap, diagnostics: DiagnosticsSnapshot): BoardState {
   const index = buildLiveIndex(snapshot.sessions);
 
   const enrichedTasks: EnrichedTask[] = sortTasks(board.tasks).map((task) => ({
@@ -140,6 +150,10 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
     envs: snapshot.envs,
     attention,
     accounts: aggregateAccounts(snapshot.sessions),
+    // Set HERE, not only on the board-less payload: this function builds every board SSE frame and the
+    // `/api/state?board=…` response, which is the one path the web actually fetches. Omitted, the field
+    // would arrive as the schema's all-zero default — a green rail asserting health nobody measured.
+    diagnostics,
   };
 }
 
@@ -256,6 +270,11 @@ export function createApi(opts: {
   briefRoot?: string; // spawn-brief root (injectable so tests write to a scratch dir)
   briefCleanupDelayMs?: number; // injectable so the post-spawn brief unlink is testable without a real wait
   fleetRestore?: FleetRestore;
+  // Self-diagnostics. OPTIONAL, like every option above: a harness (or a build with the sweep off) that
+  // wires neither still serves frames, with an EMPTY snapshot — `answered: []`, which reads as "nothing
+  // has looked", never as "all clear" — and both diagnostics routes answer 503.
+  diagnostics?: DiagnosticsStore;
+  refreshDiagnostics?: () => Promise<void>;
 }): Hono {
   const read = opts.read ?? readPane;
   const listWs = opts.listWorkspaces ?? listWorkspaces;
@@ -274,6 +293,10 @@ export function createApi(opts: {
   // #4: coalesce sub-second /read bursts (each is a herdr/SSH round-trip). Success-only; keyed by the
   // CLAMPED lines so distinct line counts stay independent.
   const readCache = createTtlCache<PaneRead>({ ttlMs: READ_CACHE_TTL_MS });
+  const diagnosticsSnapshot = (): DiagnosticsSnapshot => opts.diagnostics?.snapshot() ?? emptyDiagnostics();
+  // When the last refresh FINISHED, per createApi instance. Measured from the end of the work so the
+  // floor spaces out sweeps rather than requests.
+  let lastRefreshAt = 0;
   const app = new Hono();
 
   // Anti-DNS-rebinding (SEC): the loopback bind is the only access control, but a rebound page becomes
@@ -310,7 +333,7 @@ export function createApi(opts: {
     if (boardId !== undefined && opts.storage !== undefined) {
       const board = opts.storage.getBoard(boardId);
       if (board === null) return c.json({ error: { code: "not_found" } }, 404);
-      return c.json(buildBoardState(board, opts.storage, opts.poller.getSnapshot(), opts.poller.getAttention()));
+      return c.json(buildBoardState(board, opts.storage, opts.poller.getSnapshot(), opts.poller.getAttention(), diagnosticsSnapshot()));
     }
     return c.json(opts.poller.getSnapshot());
   });
@@ -373,6 +396,33 @@ export function createApi(opts: {
   // attention gets its own read-only route.
   app.get("/api/attention", (c) => c.json(opts.poller.getAttention()));
 
+  // Read-only: the sweep publishes into the store on its own cadence, and this hands back whatever is
+  // there. 503 rather than an empty snapshot when nothing is wired — an all-zero rollup on this route
+  // would be indistinguishable from a clean bill of health.
+  app.get("/api/diagnostics", (c) =>
+    opts.diagnostics === undefined
+      ? c.json({ error: { code: "unavailable" } }, 503)
+      : c.json(opts.diagnostics.snapshot()));
+
+  // Operator "re-check now": awaits the run in flight, then runs once more with the version TTL
+  // bypassed, so the answer post-dates the request ("unchanged" and "not re-checked" must not look
+  // alike to someone verifying a fix). Throttled callers still get 200 with the current snapshot — they
+  // asked a question that has an answer; they just don't get to start the work again. See
+  // REFRESH_MIN_INTERVAL_MS.
+  app.post("/api/diagnostics/refresh", async (c) => {
+    const refresh = opts.refreshDiagnostics;
+    if (refresh === undefined) return c.json({ error: { code: "unavailable" } }, 503);
+    if (Date.now() - lastRefreshAt >= REFRESH_MIN_INTERVAL_MS) {
+      // Stamped twice on purpose. Before the await it shuts the window on requests that arrive WHILE the
+      // sweep runs — a client loop that never awaits would otherwise sail past a finish-only stamp and
+      // queue one sweep per request. After it, so the interval is measured from completion.
+      lastRefreshAt = Date.now();
+      await refresh();
+      lastRefreshAt = Date.now();
+    }
+    return c.json(diagnosticsSnapshot());
+  });
+
   app.get("/api/stream", (c) => {
     // Reverse proxies buffer responses by default (nginx's `proxy_buffering on`): they forward only
     // FULL buffers and hold the trailing partial one — which is exactly where an SSE frame's
@@ -392,9 +442,9 @@ export function createApi(opts: {
       function buildPayload(s: Snapshot): BoardState | GlobalState {
         if (boardId !== undefined && opts.storage !== undefined) {
           const board = opts.storage.getBoard(boardId);
-          if (board !== null) return buildBoardState(board, opts.storage, s, opts.poller.getAttention());
+          if (board !== null) return buildBoardState(board, opts.storage, s, opts.poller.getAttention(), diagnosticsSnapshot());
         }
-        return { unassigned: buildUnassigned(opts.storage, s), envs: s.envs, attention: opts.poller.getAttention(), accounts: aggregateAccounts(s.sessions) };
+        return { unassigned: buildUnassigned(opts.storage, s), envs: s.envs, attention: opts.poller.getAttention(), accounts: aggregateAccounts(s.sessions), diagnostics: diagnosticsSnapshot() };
       }
 
       const send = (s: Snapshot): void => {

@@ -108,6 +108,10 @@ void (async () => {
     allowedOrigins: WS_ALLOWED_ORIGINS,
     spawn,
     fleetRestore,
+    diagnostics,
+    // `sweep.refresh`, not `tick`: the operator's re-check must post-date the request, so it waits out
+    // the run in flight and then runs once more with the version TTL bypassed.
+    refreshDiagnostics: diagnosticsSweep.refresh,
   });
   app.use("/*", serveStatic({ root: "./web/dist" })); // built frontend (Task 13+); absent in dev — harmless
 

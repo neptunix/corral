@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
+import { DiagnosticsSnapshotSchema, emptyDiagnostics } from "./diagnostics-schema.ts";
 import { AccountUsageSchema, AttentionMapSchema, EnvStateSchema, RecapSourceSchema, RecapStatusSchema, RegistryStatusSchema, SessionRowSchema, StatuslineDataSchema } from "./schema.ts";
 
 export const ColumnTypeSchema = z.enum(["to-do", "in-progress", "closed"]);
@@ -110,6 +111,10 @@ export const GlobalStateSchema = z.object({
   envs: z.record(z.string(), EnvStateSchema),
   attention: AttentionMapSchema, // .default({}) so a frame lacking it still parses
   accounts: z.array(AccountUsageSchema).default([]), // rides both frame shapes like attention
+  // Rides both frame shapes: BoardStateSchema extends this one. `.default` keeps a frame without the
+  // field parsing, exactly as `attention` and `accounts` do. The default is a FUNCTION: a plain object
+  // would be handed out by reference to every frame that lacks the field.
+  diagnostics: DiagnosticsSnapshotSchema.default(emptyDiagnostics),
 });
 
 export const BoardStateSchema = GlobalStateSchema.extend({
