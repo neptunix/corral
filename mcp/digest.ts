@@ -468,11 +468,11 @@ export function formatSpawnReply(a: {
       // The rejoin returns before the launch command is sent (server/spawn.ts), so the brief file is
       // never read. Saying otherwise would leave the operator believing a handoff was delivered.
       // The name above is the LINK's, and nothing ever named that session it: no launch command ran.
-      ? "That session was already running, so it did not receive this brief — send the handoff to it yourself, or close it and spawn again. corral did not name it: the name above is the card's label, so read its real name from that pane's corral_fleet row before addressing it."
+      ? "That session was already running, so it did not receive this brief — send the handoff to it yourself, or close it and spawn again. corral did not name it: the name above is the card's label. Its address is in that pane's corral_fleet row."
       // Not "its name is X": corral only guarantees the name is free ON THIS CARD, while Claude Code
       // keeps names unique per MACHINE and appends a variant of its own when one is taken. The
       // captured name is the answer, and it is one poll away.
-      : "It will read the brief and call corral_whoami on start. The name above is what corral asked for — confirm the name it actually answers to in corral_fleet once its statusline is captured.",
+      : "It will read the brief and call corral_whoami on start. The name above is what corral asked for, not an address — to message it, take the name from its corral_fleet row.",
   ]);
 }
 
@@ -514,7 +514,7 @@ export function formatWhoami(w: WhoamiResolved): string {
     // The name, or an explicitly-labelled stand-in. A session reads this line to learn the address it
     // hands to a peer, so an uncaptured name must not silently become the tab label — for a RESUMED
     // session that label is the slugified card name, i.e. exactly the string that is not the address.
-    `you are: ${s.sessionName ?? `${s.tabLabel} (tab label — name not captured, not an address)`}  (${s.status})`,
+    `you are: ${s.sessionName ?? `${s.tabLabel} (tab label, name not captured)`}  (${s.status})`,
     `env: ${s.envLabel} [${s.env}]   pane: ${s.paneId}   tab: ${s.tabLabel}   workspace: ${s.workspaceLabel}`,
     `session id: ${s.sessionId ?? "not registered yet"}`,
     `cwd: ${cwd}`,

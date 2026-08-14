@@ -606,11 +606,16 @@ describe("formatWhoami", () => {
       expect(out.split("\n").find((l) => l.includes("unknown-yet"))).toContain("(claude name not captured)");
     });
 
-    it("labels the tab-label stand-in on the `you are:` line instead of passing it off as a name", () => {
-      const out = formatWhoami({ ...resolved, session: { ...resolved.session, sessionName: null } });
-      const line = out.split("\n").find((l) => l.startsWith("you are:"));
-      expect(line).toContain("tab label");
-      expect(line).toContain("not an address");
+    // The contract, not the wording: an uncaptured name must never render as a bare string a reader
+    // could hand to a peer as an address — the tab label has to arrive marked as one.
+    it("marks the tab-label stand-in on the `you are:` line instead of passing it off as a name", () => {
+      const captured = formatWhoami({ ...resolved, session: { ...resolved.session, sessionName: "real-name" } });
+      expect(captured.split("\n")[0]).toBe(`you are: real-name  (${resolved.session.status})`);
+
+      const standIn = formatWhoami({ ...resolved, session: { ...resolved.session, sessionName: null } });
+      const line = standIn.split("\n").find((l) => l.startsWith("you are:"));
+      expect(line).toContain(resolved.session.tabLabel);
+      expect(line).toContain("not captured");
     });
 
     it.each(NEWLINE_VARIANTS)("keeps a %s-injected live session name on a single line", (_label, sep) => {
