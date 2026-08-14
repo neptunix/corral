@@ -215,7 +215,11 @@ export function formatFleet(input: {
     const acctCol = selfAccount === null || account === null || account === selfAccount
       ? ""
       : `  account: ${truncate(oneLine(account), IDENTITY_FIELD_MAX)}`;
-    return `${r.env}  ${name}  ${r.paneId}  ${r.status}  ${ctxCol}  ${model}${recap}${attCol}${acctCol}  ${cardFor(boards, r)}`;
+    // A session on another machine answers to its name only over Remote Control. Stated where it
+    // changes the answer — a remote env with rc explicitly off — and nowhere else: a local session
+    // is reachable regardless, and `null` is an unread registry, not a verified "off".
+    const rcCol = snapshot.envs[r.env]?.kind === "remote" && r.remoteControl === false ? "  rc: off" : "";
+    return `${r.env}  ${name}  ${r.paneId}  ${r.status}  ${ctxCol}  ${model}${recap}${attCol}${acctCol}${rcCol}  ${cardFor(boards, r)}`;
   });
 
   const parts: string[] = [];

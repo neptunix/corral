@@ -190,6 +190,29 @@ describe("formatFleet", () => {
     expect(out).not.toContain("account:");
   });
 
+  // A session on another machine is reachable by name only over Remote Control, so `rc: off` is the
+  // difference between "message it" and "ask the operator". It is stated only where it changes the
+  // answer: on a local env every row is reachable anyway, and `null` means the registry could not be
+  // read — silence there beats asserting an "off" nobody verified.
+  it("marks a remote-environment session that has Remote Control off", () => {
+    const envs = { "work-remote": { reachable: true, kind: "remote" as const } };
+    const off = row({ env: "work-remote", paneId: "w2:p1", tab: "no-rc", remoteControl: false });
+    const on = row({ env: "work-remote", paneId: "w2:p2", tab: "with-rc", remoteControl: true });
+    const unknown = row({ env: "work-remote", paneId: "w2:p3", tab: "dunno", remoteControl: null });
+    const out = formatFleet({ ...base, snapshot: { envs, sessions: [off, on, unknown] }, filter: "all" });
+    const lineFor = (tab: string): string | undefined => out.split("\n").find((l) => l.includes(tab));
+    expect(lineFor("no-rc")).toContain("rc: off");
+    expect(lineFor("with-rc")).not.toContain("rc:");
+    expect(lineFor("dunno")).not.toContain("rc:");
+  });
+
+  it("says nothing about Remote Control for a local session, which is reachable regardless", () => {
+    const envs = { "work-local": { reachable: true, kind: "local" as const } };
+    const local = row({ paneId: "w1:p1", tab: "here", remoteControl: false });
+    const out = formatFleet({ ...base, snapshot: { envs, sessions: [local] }, filter: "all" });
+    expect(out).not.toContain("rc:");
+  });
+
   it.each(NEWLINE_VARIANTS)("keeps a %s-injected session name on a single line", (_label, sep) => {
     const sneaky = row({
       paneId: "w1:p7",
