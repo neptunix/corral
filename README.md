@@ -33,8 +33,10 @@ rate-limit windows). The metrics *capture* is optional; `jq` is not optional *fo
 helper scripts hard-depend on `jq` and are deliberately best-effort, so without it they write
 nothing and log nothing: the cards just show no metrics, which is indistinguishable from "no
 data yet". corral appends `--name` (and, when chosen, `--model` / `--remote-control`) to every
-non-resume launch; this has only been verified against Claude Code 2.1.226 — an older CLI
-lacking one of these flags will fail the launch visibly in the pane.
+non-resume launch; this has only been verified against Claude Code 2.1.232 — an older CLI
+lacking one of these flags will fail the launch visibly in the pane. The cross-session messaging
+the corral skill describes was verified on that same build; per the Claude Code changelog it landed
+in 2.1.224, which is older than anything available here to check against.
 
 ```bash
 # 0. prerequisite check — without jq the metrics capture silently does nothing
@@ -467,6 +469,28 @@ config dirs only (a remote box keeps whatever base is in its own copy). Once the
 place, set `"theme": "custom:corral"` in that dir's `settings.json` (or run `/theme` and pick
 `corral`). Edit `overrides` in the preset to taste; only `base` is machine-managed.
 
+## Claude context-pressure hook (optional)
+
+corral can tell a session about its own context-window pressure before it asks — a
+`UserPromptSubmit` hook injects a short `[corral] ctx {pct}% (notice|nudge|urgent)` signal once
+context crosses 30/40/60%, and a `SessionStart` hook primes the protocol for what to do about it
+once per session (and again after `/compact`). Both read the same
+`corral-status/<session_id>.json` the statusline capture already writes — this hook reads the
+file `corral-status-capture.sh` writes, so that script must already be installed and wired into
+your statusline command (see above) — without it this hook silently does nothing (best-effort,
+same contract as the capture script).
+
+Thresholds are configurable in `~/.corral/config.json` (falls back to `30/40/60` if absent or
+malformed):
+
+```json
+{ "hooks": { "ctxThresholds": [30, 40, 60] } }
+```
+
+Requires `jq` and the `skills/corral/` skill installed in the same config dir (see the table
+below) — the hook reads its context-pressure protocol out of `SKILL.md` rather than duplicating
+the text.
+
 ## Installing the Claude helper files (per config dir)
 
 The statusline and theme pieces live **per Claude config dir** — every `~/.claude*` dir you
@@ -479,6 +503,7 @@ the copy command differs (`cp` vs `scp` + `ssh`). Into each config dir:
 | `statusline-command.sh` | `scripts/statusline-command.sh` | only if you have **no** statusline script of your own |
 | `themes/corral.json` | `themes/corral.json` | only for the optional theme |
 | `skills/corral/` | `skills/corral/` | recommended with the [MCP server](#mcp-server); only on the machine running corral |
+| `corral-claude-hook.sh` | `scripts/corral-claude-hook.sh` | optional — proactive context-pressure signal |
 
 **Local** (default `~/.claude`; repeat for each extra dir such as `~/.claude-work`):
 
@@ -486,11 +511,16 @@ the copy command differs (`cp` vs `scp` + `ssh`). Into each config dir:
 D=~/.claude
 cp scripts/corral-status-capture.sh "$D/corral-status-capture.sh"
 cp scripts/statusline-command.sh    "$D/statusline-command.sh"    # skip if you have your own
-chmod +x "$D/corral-status-capture.sh" "$D/statusline-command.sh"
+cp scripts/corral-claude-hook.sh   "$D/corral-claude-hook.sh"    # optional — context-pressure hook
+chmod +x "$D/corral-status-capture.sh" "$D/statusline-command.sh" "$D/corral-claude-hook.sh"
 mkdir -p "$D/themes" && cp themes/corral.json "$D/themes/corral.json"   # optional theme
 mkdir -p "$D/skills" && cp -R skills/corral "$D/skills/corral"          # recommended with the MCP server
 echo "corral-status/" >> "$D/.gitignore"    # if the config dir is version-controlled
 ```
+
+Locally, you can `ln -s "$(pwd)/scripts/corral-claude-hook.sh" "$D/corral-claude-hook.sh"`
+instead of `cp` if you don't want to re-copy after every `git pull` — there's no equivalent for
+the remote `scp` step below.
 
 **Remote** (over SSH — `H` is the environment's `sshHost`, `D` its config dir, e.g.
 `/home/me/.claude`):
@@ -499,7 +529,8 @@ echo "corral-status/" >> "$D/.gitignore"    # if the config dir is version-contr
 H=my-ssh-host; D=/home/me/.claude
 scp scripts/corral-status-capture.sh "$H:$D/corral-status-capture.sh"
 scp scripts/statusline-command.sh    "$H:$D/statusline-command.sh"     # skip if it has its own
-ssh "$H" "chmod +x $D/corral-status-capture.sh $D/statusline-command.sh && mkdir -p $D/themes"
+scp scripts/corral-claude-hook.sh    "$H:$D/corral-claude-hook.sh"      # optional — context-pressure hook
+ssh "$H" "chmod +x $D/corral-status-capture.sh $D/statusline-command.sh $D/corral-claude-hook.sh && mkdir -p $D/themes"
 scp themes/corral.json "$H:$D/themes/corral.json"                      # optional theme
 ```
 
@@ -510,6 +541,23 @@ the statusline at the script and — if you copied the theme — select it:
 {
   "statusLine": { "type": "command", "command": "/absolute/path/to/statusline-command.sh" },
   "theme": "custom:corral"
+}
+```
+
+If you installed the context-pressure hook, register it under both events in the same
+`settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "startup|resume|clear|compact",
+        "hooks": [{ "type": "command", "command": "/absolute/path/to/corral-claude-hook.sh" }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "/absolute/path/to/corral-claude-hook.sh" }] }
+    ]
+  }
 }
 ```
 
@@ -666,6 +714,35 @@ mkdir -p ~/.claude/skills && cp -R skills/corral ~/.claude/skills/corral
 ```
 
 It loads only when a session actually reaches for corral, so it costs nothing the rest of the time.
+
+### Letting sessions talk to each other (recommended)
+
+Messaging between sessions is Claude Code's own (`SendMessage` / `ListAgents`), not
+corral's — but corral supplies the address: `corral_fleet` prints the name each session actually
+answers to, which is not always the label on its card. The skill documents how to use it and where
+the reach ends; two things are worth setting up once, on each machine:
+
+**`crossSessionInbound`.** A message is held for the receiving operator's hand approval when the two
+sessions' permission modes differ — and corral panes typically run in bypass mode while an ordinary
+terminal session does not, so a pane messaging a hand-started session is held by default. The sender
+is told it was held and to carry on, so nothing hangs; the message waits for an approval that may
+never come, and expires if it does not. Set this in the `settings.json` of every config dir you
+registered corral's MCP server in:
+
+```json
+{ "crossSessionInbound": "accept" }
+```
+
+Values are `accept` / `hold` / `refuse`. The setting is checked before any permission-mode comparison,
+so it decides outright. `accept` means messages from your other sessions reach this one unreviewed — treat their content as untrusted input, which is the same rule that already applies
+to recaps and card text. Managed (organization) settings and a repository's own `settings.json` can
+only tighten this, never loosen it.
+
+**Remote Control**, if you run corral across machines. A session on another machine is addressable by
+name only over Remote Control — and it only becomes visible to you if the session doing the
+addressing has Remote Control on too: with it off locally, no other machine appears in `ListAgents`. `corral_fleet` marks a remote-environment session that has it off as
+`rc: off`. Without it, a cross-machine session is still visible in corral and still spawnable; it
+just cannot be messaged.
 
 ## Architecture (short version)
 

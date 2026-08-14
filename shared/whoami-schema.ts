@@ -16,7 +16,19 @@ export const WhoamiEnvSchema = z.object({
 // One row per session attached to the card. `key` is `${env}:${paneId}` — the same format as the
 // attention-map key and the value `corral_session_close` accepts as a target.
 export const WhoamiCardSessionSchema = z.object({
+  /** The LINK's name — what the card is labelled with, i.e. the name corral was asked for. */
   name: z.string(),
+  /**
+   * The name the Claude session itself answers to, when the statusline has been captured. It is NOT
+   * always `name`: a resumed session is launched without `--name` and derives its own from the cwd,
+   * so the card can read `s0-orchestrator-spec` while the session is really `github-private-e5`.
+   * Null when unknown, which is not the same as "equal to name".
+   *
+   * Defaulted, not required: an MCP client talks to whatever corral server is already running, and a
+   * server predating this field would otherwise fail validation on EVERY card read rather than lose
+   * one informational string.
+   */
+  claudeName: z.string().nullable().default(null),
   key: z.string(),
   sessionId: z.string().nullable(),
   status: z.string(),

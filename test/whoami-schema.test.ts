@@ -32,6 +32,15 @@ describe("whoami schema", () => {
     expect(parsed.session.ctxPct).toBe(41);
   });
 
+  // An MCP client talks to whatever corral server happens to be running, which may predate this
+  // field. Requiring it would fail EVERY card read against an older server rather than lose one
+  // informational string — the fixture above deliberately omits it.
+  it("accepts a card session from a server that does not send claudeName yet", () => {
+    const parsed = WhoamiResponseSchema.parse(resolved);
+    if (!parsed.resolved) throw new Error("expected resolved");
+    expect(parsed.task?.sessions[0]?.claudeName).toBeNull();
+  });
+
   it("parses an unresolved payload carrying a reason and the env list", () => {
     const parsed = WhoamiResponseSchema.parse({
       resolved: false,

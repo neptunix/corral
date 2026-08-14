@@ -1,8 +1,10 @@
+import type { SessionRow, StatuslineData } from "@shared/schema";
 import type { WhoamiResponse } from "@shared/whoami-schema.ts";
 import { describe, expect, it } from "vitest";
 
 import type { CorralClient } from "../mcp/client.ts";
 import { CorralError } from "../mcp/client.ts";
+import type { Identity } from "../mcp/identity.ts";
 import { createIdentity } from "../mcp/identity.ts";
 import { fleetHandler } from "../mcp/tools/fleet.ts";
 import { whoamiHandler } from "../mcp/tools/self.ts";
@@ -36,6 +38,10 @@ function stub(over: Partial<CorralClient>): CorralClient {
   };
 }
 const ctx = { paneId: "w1:p1", socket: null, cwd: "/repo" };
+
+function fleetDeps(client: CorralClient): { client: CorralClient; identity: Identity } {
+  return { client, identity: createIdentity(client, ctx) };
+}
 
 describe("whoamiHandler", () => {
   it("renders identity and tells an unbound session how to bind", async () => {
@@ -118,7 +124,7 @@ describe("fleetHandler", () => {
         })),
       }),
     });
-    const out = await fleetHandler(client, {});
+    const out = await fleetHandler(fleetDeps(client), {});
     expect(out).toContain("more matched but were not shown");
     expect(out.toLowerCase()).toContain("untrusted");
   });
@@ -134,13 +140,64 @@ describe("fleetHandler", () => {
         })),
       }),
     });
-    const out = await fleetHandler(client, { limit: 9999 });
+    const out = await fleetHandler(fleetDeps(client), { limit: 9999 });
     expect(out).toContain("10 more matched"); // 60 sessions minus the 50 hard cap — proves the clamp
   });
 
   it("reports an unreachable corral as text", async () => {
     const client = stub({ state: async () => { throw new CorralError("unreachable", "corral is not reachable"); } });
-    expect(await fleetHandler(client, {})).toContain("not reachable");
+    expect(await fleetHandler(fleetDeps(client), {})).toContain("not reachable");
+  });
+
+  // The wiring itself: this session's own account has to travel from the whoami read into the
+  // rendered row. Asserting only the "no marker" case (below) would pass with the plumbing deleted.
+  it("carries this session's own account into the digest, marking only the rows that differ", async () => {
+    const statusline = (email: string): StatuslineData => ({
+      v: 1, captured_at: 0, session_id: "s1", session_name: null, name_source: null,
+      account: { uuid: null, email, org: null, tier: null },
+      model: null, model_id: null,
+      ctx: { pct: null, tokens: null, window: null },
+      cost: { usd: null, lines_added: null, lines_removed: null },
+      rate: { five_hour: null, seven_day: null },
+      effort: null, thinking: null, cc_version: null,
+    });
+    const stateRow = (paneId: string, tab: string, email: string): SessionRow => ({
+      env: "work-local", paneId, status: "idle", agent: "claude", cwd: "/r",
+      tab, workspace: "w", sessionId: null,
+      recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: statusline(email),
+      statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+    });
+    const client = stub({
+      whoami: async () => ({ ...resolved, session: { ...resolved.session, account: "me@example.com" } }),
+      state: async () => ({
+        envs: { "work-local": { reachable: true } },
+        sessions: [stateRow("w1:p1", "mine", "me@example.com"), stateRow("w1:p2", "theirs", "other@example.com")],
+      }),
+    });
+    const out = await fleetHandler(fleetDeps(client), {});
+    expect(out.split("\n").find((l) => l.includes("theirs"))).toContain("account: other@example.com");
+    expect(out.split("\n").find((l) => l.includes("mine"))).not.toContain("account:");
+  });
+
+  // The account marker is an extra, not a precondition: a session whose own pane corral cannot
+  // resolve still gets the digest. Before the catch, the identity read took the whole tool down —
+  // a strictly worse answer than the same rows without one marker.
+  it("still renders the digest when this session's own identity does not resolve", async () => {
+    const client = stub({
+      whoami: async () => ({ resolved: false, reason: "no live session at pane w1:p1", envs: [] }),
+      state: async () => ({
+        envs: { "work-local": { reachable: true } },
+        sessions: [{
+          env: "work-local", paneId: "w1:p1", status: "idle", agent: "claude", cwd: "/r",
+          tab: "solo", workspace: "w", sessionId: null,
+          recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null,
+          statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+        }],
+      }),
+    });
+    const out = await fleetHandler(fleetDeps(client), {});
+    expect(out).toContain("solo");
+    expect(out).not.toContain("account:");
   });
 });
 
@@ -159,7 +216,7 @@ describe("fleetHandler defaults and filters", () => {
 
   it("defaults filter to all — every status is included when the arg is omitted", async () => {
     const client = stub({ state: async () => mixed });
-    const out = await fleetHandler(client, {});
+    const out = await fleetHandler(fleetDeps(client), {});
     expect(out).toContain("w1:p1");
     expect(out).toContain("w1:p2");
     expect(out).toContain("w1:p3");
@@ -168,7 +225,7 @@ describe("fleetHandler defaults and filters", () => {
 
   it("filter=working returns only the working session", async () => {
     const client = stub({ state: async () => mixed });
-    const out = await fleetHandler(client, { filter: "working" });
+    const out = await fleetHandler(fleetDeps(client), { filter: "working" });
     expect(out).toContain("w1:p1");
     expect(out).not.toContain("w1:p2");
     expect(out).not.toContain("w1:p3");
@@ -177,7 +234,7 @@ describe("fleetHandler defaults and filters", () => {
 
   it("filter=idle returns idle and done sessions", async () => {
     const client = stub({ state: async () => mixed });
-    const out = await fleetHandler(client, { filter: "idle" });
+    const out = await fleetHandler(fleetDeps(client), { filter: "idle" });
     expect(out).not.toContain("w1:p1");
     expect(out).toContain("w1:p2");
     expect(out).not.toContain("w1:p3");
@@ -191,7 +248,7 @@ describe("fleetHandler defaults and filters", () => {
         "work-local:w1:p4": { state: "finished", since: Date.now(), sessionName: "s4", lastLines: "", captured: true },
       }),
     });
-    const out = await fleetHandler(client, { filter: "needs-attention" });
+    const out = await fleetHandler(fleetDeps(client), { filter: "needs-attention" });
     expect(out).not.toContain("w1:p1");
     expect(out).not.toContain("w1:p2");
     expect(out).toContain("w1:p3"); // live blocked
@@ -209,7 +266,7 @@ describe("fleetHandler defaults and filters", () => {
         })),
       }),
     });
-    const out = await fleetHandler(client, {});
+    const out = await fleetHandler(fleetDeps(client), {});
     expect(out).toContain("5 more matched"); // 25 sessions minus the default limit of 20
   });
 
@@ -225,7 +282,7 @@ describe("fleetHandler defaults and filters", () => {
         }],
       }),
     });
-    const out = await fleetHandler(client, {});
+    const out = await fleetHandler(fleetDeps(client), {});
     expect(out).toContain(`"${"x".repeat(160)}…"`);
     expect(out).not.toContain("x".repeat(161));
   });

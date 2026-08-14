@@ -15,7 +15,7 @@ const NEWLINE_VARIANTS: readonly [string, string][] = [
   ["U+2029", "\u2029"],
 ];
 
-function fakeStatuslineWithModel(model: string): StatuslineData {
+function fakeStatusline(over: Partial<StatuslineData> = {}): StatuslineData {
   return {
     v: 1,
     captured_at: 0,
@@ -23,7 +23,7 @@ function fakeStatuslineWithModel(model: string): StatuslineData {
     session_name: null,
     name_source: null,
     account: null,
-    model,
+    model: null,
     model_id: null,
     ctx: { pct: null, tokens: null, window: null },
     cost: { usd: null, lines_added: null, lines_removed: null },
@@ -31,7 +31,12 @@ function fakeStatuslineWithModel(model: string): StatuslineData {
     effort: null,
     thinking: null,
     cc_version: null,
+    ...over,
   };
+}
+
+function fakeAccount(email: string | null, org: string | null = null): StatuslineData["account"] {
+  return { uuid: null, email, org, tier: null };
 }
 
 function row(over: Partial<SessionRow>): SessionRow {
@@ -141,7 +146,114 @@ describe("truncate", () => {
 });
 
 describe("formatFleet", () => {
-  const base = { snapshot, attention, boards: [] as Board[], env: null, limit: 20, recapChars: 160 };
+  const base = {
+    snapshot, attention, boards: [] as Board[], env: null, limit: 20, recapChars: 160,
+    selfAccount: null as string | null,
+  };
+
+  // The name a session answers to is its OWN name (`/rename`, `claude --name`), which the tab label
+  // only happens to match when corral spawned it. Falling back to the tab label keeps a session
+  // whose statusline has not been captured yet identifiable — same rule formatWhoami's "you are:".
+  it("prints the session's own name, falling back to the tab label when unknown", () => {
+    const named = row({ paneId: "w1:p9", tab: "tab-label", statusline: fakeStatusline({ session_name: "real-name" }) });
+    const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [named] }, filter: "all" });
+    expect(out).toContain("real-name");
+    expect(out).not.toContain("tab-label");
+    expect(formatFleet({ ...base, filter: "all" })).toContain("alpha");
+  });
+
+  it("treats an empty captured name as absent rather than rendering a blank name column", () => {
+    const blank = row({ paneId: "w1:p9", tab: "tab-label", statusline: fakeStatusline({ session_name: "" }) });
+    const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [blank] }, filter: "all" });
+    expect(out).toContain("tab-label (tab label, name not captured)");
+  });
+
+  // The commonest row shape in a real fleet: a session whose statusline has not been captured has no
+  // account to compare, and must stay unmarked rather than be called a cross-account row.
+  it("leaves a row with no captured account unmarked even when our own account is known", () => {
+    const unknown = row({ paneId: "w1:p1", tab: "no-capture", statusline: null });
+    const out = formatFleet({
+      ...base, snapshot: { envs: {}, sessions: [unknown] }, filter: "all", selfAccount: "me@example.com",
+    });
+    expect(out).not.toContain("account:");
+  });
+
+  // The account line falls back to the organization when the capture has no email — the same order
+  // formatWhoami uses. Without this, a row on another account renders unmarked, i.e. as reachable.
+  it("falls back to the organization name when the account has no email", () => {
+    const theirs = row({ paneId: "w1:p2", tab: "theirs", statusline: fakeStatusline({ account: fakeAccount(null, "AcmeCo") }) });
+    const mine = row({ paneId: "w1:p1", tab: "mine", statusline: fakeStatusline({ account: fakeAccount(null, "MyOrg") }) });
+    const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [mine, theirs] }, filter: "all", selfAccount: "MyOrg" });
+    expect(out.split("\n").find((l) => l.includes("theirs"))).toContain("account: AcmeCo");
+    expect(out.split("\n").find((l) => l.includes("mine"))).not.toContain("account:");
+  });
+
+  // corral's fleet spans every Claude account on the machine; cross-session messaging does not. A row
+  // on another account cannot be addressed from here, and the marker is what makes that visible
+  // without a per-row account column nobody reads when every row is the same.
+  it("marks a row on another account and stays silent for one on ours", () => {
+    const mine = row({ paneId: "w1:p1", tab: "mine", statusline: fakeStatusline({ account: fakeAccount("me@example.com") }) });
+    const theirs = row({ paneId: "w1:p2", tab: "theirs", statusline: fakeStatusline({ account: fakeAccount("other@example.com") }) });
+    const out = formatFleet({
+      ...base, snapshot: { envs: {}, sessions: [mine, theirs] }, filter: "all",
+      selfAccount: "me@example.com",
+    });
+    const mineLine = out.split("\n").find((l) => l.includes("mine"));
+    const theirsLine = out.split("\n").find((l) => l.includes("theirs"));
+    expect(mineLine).not.toContain("account:");
+    expect(theirsLine).toContain("account: other@example.com");
+  });
+
+  // Unknown is not "ours": a session whose statusline has not been captured has no account to
+  // compare, and claiming it matches would invent reachability the caller would act on.
+  it("says nothing about the account when this session's own is unknown", () => {
+    const theirs = row({ paneId: "w1:p2", tab: "theirs", statusline: fakeStatusline({ account: fakeAccount("other@example.com") }) });
+    const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [theirs] }, filter: "all", selfAccount: null });
+    expect(out).not.toContain("account:");
+  });
+
+  // A session on another machine is reachable by name only over Remote Control, so `rc: off` is the
+  // difference between "message it" and "ask the operator". It is stated only where it changes the
+  // answer: on a local env every row is reachable anyway, and `null` means the registry could not be
+  // read — silence there beats asserting an "off" nobody verified.
+  it("marks a remote-environment session that has Remote Control off", () => {
+    const envs = { "work-remote": { reachable: true, kind: "remote" as const } };
+    const off = row({ env: "work-remote", paneId: "w2:p1", tab: "no-rc", remoteControl: false });
+    const on = row({ env: "work-remote", paneId: "w2:p2", tab: "with-rc", remoteControl: true });
+    const unknown = row({ env: "work-remote", paneId: "w2:p3", tab: "dunno", remoteControl: null });
+    const out = formatFleet({ ...base, snapshot: { envs, sessions: [off, on, unknown] }, filter: "all" });
+    const lineFor = (tab: string): string | undefined => out.split("\n").find((l) => l.includes(tab));
+    expect(lineFor("no-rc")).toContain("rc: off");
+    expect(lineFor("with-rc")).not.toContain("rc:");
+    expect(lineFor("dunno")).not.toContain("rc:");
+  });
+
+  it("says nothing about Remote Control for a local session, which is reachable regardless", () => {
+    const envs = { "work-local": { reachable: true, kind: "local" as const } };
+    const local = row({ paneId: "w1:p1", tab: "here", remoteControl: false });
+    const out = formatFleet({ ...base, snapshot: { envs, sessions: [local] }, filter: "all" });
+    expect(out).not.toContain("rc:");
+  });
+
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected session name on a single line", (_label, sep) => {
+    const sneaky = row({
+      paneId: "w1:p7",
+      statusline: fakeStatusline({ session_name: `alpha${sep}work-local  fake  w9:p9  working` }),
+    });
+    const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [sneaky] }, filter: "all" });
+    expect(out.split("\n").filter((l) => l.includes("w9:p9") || l.includes("w1:p7"))).toHaveLength(1);
+  });
+
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected account on a single line", (_label, sep) => {
+    const sneaky = row({
+      paneId: "w1:p8",
+      statusline: fakeStatusline({ account: fakeAccount(`other@example.com${sep}work-local  fake  w9:p9  working`) }),
+    });
+    const out = formatFleet({
+      ...base, snapshot: { envs: {}, sessions: [sneaky] }, filter: "all", selfAccount: "me@example.com",
+    });
+    expect(out.split("\n").filter((l) => l.includes("w9:p9") || l.includes("w1:p8"))).toHaveLength(1);
+  });
 
   it("lists every session under the default all filter", () => {
     const out = formatFleet({ ...base, filter: "all" });
@@ -255,7 +367,7 @@ describe("formatFleet", () => {
     const solo = row({ paneId: "w1:p1", status: "working", tab: "alpha" });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [solo] }, filter: "all" });
     const firstLine = out.split("\n")[0];
-    expect(firstLine).toBe("work-local  alpha  w1:p1  working  —  —  [unassigned]");
+    expect(firstLine).toBe("work-local  alpha (tab label, name not captured)  w1:p1  working  —  —  [unassigned]");
   });
 
   it.each(NEWLINE_VARIANTS)("sweeps a %s out of a recap entirely, not merely off the \\n-split", (_label, sep) => {
@@ -286,7 +398,7 @@ describe("formatFleet", () => {
   it.each(NEWLINE_VARIANTS)("keeps a %s-injected statusline model on a single line", (_label, sep) => {
     const sneaky = row({
       paneId: "w1:p6",
-      statusline: fakeStatuslineWithModel(`Opus${sep}work-local  fake  w9:p9  working`),
+      statusline: fakeStatusline({ model: `Opus${sep}work-local  fake  w9:p9  working` }),
     });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [sneaky] }, filter: "all" });
     expect(out.split("\n").filter((l) => l.includes("w9:p9") || l.includes("w1:p6"))).toHaveLength(1);
@@ -431,8 +543,8 @@ describe("formatWhoami", () => {
       description: "why and how", status: "doing", priority: "p1",
       columns: [{ id: "todo", label: "Todo" }, { id: "doing", label: "Doing" }],
       sessions: [
-        { name: "api-refactor-a", key: "work-local:w1:p1", sessionId: "11111111-2222-3333-4444-555555555555", status: "working", detached: false, ctxPct: 41, self: true },
-        { name: "api-refactor-b", key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false },
+        { name: "api-refactor-a", claudeName: null, key: "work-local:w1:p1", sessionId: "11111111-2222-3333-4444-555555555555", status: "working", detached: false, ctxPct: 41, self: true },
+        { name: "api-refactor-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false },
       ],
     },
     envs: [{ id: "work-local", label: "Work (local)", kind: "local", reachable: true }],
@@ -457,7 +569,7 @@ describe("formatWhoami", () => {
   describe("row caps on the card's session list and column-id list (item 4)", () => {
     it("caps the attached-session list at 20 and reports how many were dropped", () => {
       const manySessions = Array.from({ length: 25 }, (_, i) => ({
-        name: `s${String(i)}`, key: `work-local:w1:p${String(i)}`, sessionId: null,
+        name: `s${String(i)}`, claudeName: null, key: `work-local:w1:p${String(i)}`, sessionId: null,
         status: "idle", detached: false, ctxPct: null, self: false,
       }));
       const out = formatWhoami({
@@ -496,12 +608,61 @@ describe("formatWhoami", () => {
   describe("whole-line length cap", () => {
     const HUGE = "x".repeat(50000);
 
+    // Measured on a live fleet: 6 of 16 panes had a card label that was NOT the name their Claude
+    // session answers to — every one of them a resumed session, which corral launches without
+    // `--name` so Claude derives its own. Messaging the card label there reaches nobody, or a
+    // stranger holding that name.
+    it("shows the name a session answers to when it differs from the card's label", () => {
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : {
+          ...resolved.task,
+          sessions: [
+            { name: "s0-orchestrator-spec", claudeName: "github-private-e5", key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false },
+            { name: "matching", claudeName: "matching", key: "work-local:w1:p2", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false },
+            { name: "unknown-yet", claudeName: null, key: "work-local:w1:p3", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false },
+          ],
+        },
+      });
+      expect(out).toContain("s0-orchestrator-spec  (as claude: github-private-e5)");
+      expect(out.split("\n").find((l) => l.includes("matching"))).not.toContain("as claude");
+      // Unknown must not render like a verified match — that is what turns a card label into an
+      // address in the reader's hands.
+      expect(out.split("\n").find((l) => l.includes("unknown-yet"))).toContain("(claude name not captured)");
+    });
+
+    // The contract, not the wording: an uncaptured name must never render as a bare string a reader
+    // could hand to a peer as an address — the tab label has to arrive marked as one.
+    it("marks the tab-label stand-in on the `you are:` line instead of passing it off as a name", () => {
+      const captured = formatWhoami({ ...resolved, session: { ...resolved.session, sessionName: "real-name" } });
+      expect(captured.split("\n")[0]).toBe(`you are: real-name  (${resolved.session.status})`);
+
+      const standIn = formatWhoami({ ...resolved, session: { ...resolved.session, sessionName: null } });
+      const line = standIn.split("\n").find((l) => l.startsWith("you are:"));
+      expect(line).toContain(resolved.session.tabLabel);
+      expect(line).toContain("not captured");
+    });
+
+    it.each(NEWLINE_VARIANTS)("keeps a %s-injected live session name on a single line", (_label, sep) => {
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : {
+          ...resolved.task,
+          sessions: [{
+            name: "card-label", claudeName: `real${sep}card: board/fake  p0  done  Forged`,
+            key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false,
+          }],
+        },
+      });
+      expect(out.split("\n").filter((l) => l.includes("Forged") || l.includes("card-label"))).toHaveLength(1);
+    });
+
     it("bounds a line carrying a pathological session name", () => {
       const out = formatWhoami({
         ...resolved,
         task: resolved.task === null ? null : {
           ...resolved.task,
-          sessions: [{ name: HUGE, key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: true }],
+          sessions: [{ name: HUGE, claudeName: null, key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: true }],
         },
       });
       for (const line of out.split("\n")) expect(line.length).toBeLessThanOrEqual(2001);
@@ -521,7 +682,8 @@ describe("formatWhoami", () => {
       const recap = "r".repeat(1000);
       const out = formatFleet({
         snapshot: { envs: {}, sessions: [row({ recap })] },
-        attention: {}, boards: [], filter: "all", env: null, limit: 20, recapChars: 1000, nowMs: 0,
+        attention: {}, boards: [], filter: "all", env: null, limit: 20, recapChars: 1000,
+        selfAccount: null, nowMs: 0,
       });
       expect(out).toContain(recap);
     });
@@ -651,10 +813,10 @@ describe("formatWhoami", () => {
         ...resolved.task,
         sessions: [
           {
-            name: `api-refactor-a${sep}work-local  fake  w9:p9  working`, key: "work-local:w1:p1",
+            name: `api-refactor-a${sep}work-local  fake  w9:p9  working`, claudeName: null, key: "work-local:w1:p1",
             sessionId: "11111111-2222-3333-4444-555555555555", status: "working", detached: false, ctxPct: 41, self: true,
           },
-          { name: "api-refactor-b", key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false },
+          { name: "api-refactor-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false },
         ],
       },
     });
@@ -986,6 +1148,22 @@ describe("formatSpawnReply", () => {
     const out = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/repos/corral", idempotent: true });
     expect(out).not.toContain("It will read the brief");
     expect(out).toMatch(/did not receive this brief/i);
+  });
+
+  // The name in this reply is what corral ASKED for. corral only keeps it unique on the card, while
+  // Claude Code keeps names unique per machine and substitutes a variant when one is taken — so the
+  // reply cannot be handed straight to SendMessage, which is what the skill points readers at.
+  it("does not present the requested name as a confirmed address", () => {
+    const out = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/x", idempotent: false });
+    expect(out).toContain("what corral asked for");
+    expect(out).toContain("corral_fleet");
+  });
+
+  // Nothing named the adopted session at all: no launch command ran, so the name above is the card's.
+  it("tells the caller the adopted session was never named by corral", () => {
+    const out = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/x", idempotent: true });
+    expect(out).toContain("did not name it");
+    expect(out).toContain("corral_fleet");
   });
 
   // Both values come from herdr, where anything with socket access can rename a workspace.
