@@ -148,6 +148,7 @@ export async function resolveSelfViaPane(input: {
         recap: null,
         recapAt: null,
         recapStatus: null,
+        recapSource: null,
         statusline: null,
         statuslineStatus: null,
         claudeStatus: null,

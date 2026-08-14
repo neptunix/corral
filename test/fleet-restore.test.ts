@@ -25,7 +25,7 @@ function mirrorOf(envId: string, sessions: ReturnType<typeof mirrorSession>[], p
 function liveRow(envId: string, sessionId: string | null): SessionRow {
   return {
     env: envId, paneId: `p-${sessionId ?? "x"}`, status: "working", agent: "claude", cwd: "/pane-cwd",
-    tab: "t", workspace: "w", sessionId, recap: null, recapAt: null, recapStatus: null,
+    tab: "t", workspace: "w", sessionId, recap: null, recapAt: null, recapStatus: null, recapSource: null,
     statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null,
     remoteControl: null, registryStatus: null,
   };

@@ -43,7 +43,7 @@ describe("listSessions", () => {
       env: "work-local", paneId: "w1-1", status: "working", agent: "claude",
       cwd: "/x", tab: "jira", workspace: "demo-api",
       tabId: "w1:1", workspaceId: "w1", // stable ids carried through for close/resume (#1)
-      sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+      sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
     }]);
   });
 

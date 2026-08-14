@@ -1,7 +1,7 @@
 import { linkBindsSession } from "../server/session-binding.ts";
 import type { Board } from "../shared/board-schema.ts";
 import { closedColumnIds } from "../shared/board-schema.ts";
-import type { AttentionMap, SessionRow, Snapshot } from "../shared/schema.ts";
+import type { AttentionMap, RecapSource, SessionRow, Snapshot } from "../shared/schema.ts";
 import type { WhoamiResolved, WhoamiTask } from "../shared/whoami-schema.ts";
 
 // This module is the token/prompt-injection firewall between corral's stored state and whatever
@@ -169,6 +169,21 @@ function matches(filter: FleetFilter, r: SessionRow, attention: AttentionMap): b
   }
 }
 
+/**
+ * Names the recap's provenance in the fleet row. All three rungs are labelled, including the best one:
+ * an unlabelled quote would have to be REMEMBERED as "a real summary", and a reader that forgets reads
+ * the operator's own last prompt as the session's report on its own work.
+ */
+function recapLabel(source: RecapSource | null): string {
+  switch (source) {
+    case "away-summary": return "recap ";
+    case "ai-title": return "topic ";
+    case "last-prompt": return "prompt ";
+    // A cached recap from a corral that predates recapSource, or a payload without it.
+    case null: return "";
+  }
+}
+
 /** One bounded line per session. This is the token firewall: the caller never sees the raw snapshot. */
 export function formatFleet(input: {
   readonly snapshot: Snapshot;
@@ -203,7 +218,7 @@ export function formatFleet(input: {
     // the cap must be measured against the collapsed text. Every other field in this row (env,
     // tab, paneId, status, model, cardFor's ids) is left as-is and swept by `emit` below instead
     // of being reasoned about individually.
-    const recap = r.recap === null || r.recap === "" ? "" : ` "${truncate(oneLine(r.recap), recapChars)}"`;
+    const recap = r.recap === null || r.recap === "" ? "" : ` ${recapLabel(r.recapSource)}"${truncate(oneLine(r.recap), recapChars)}"`;
     // The session's own name, not the tab label: they coincide for a corral-spawned session (one
     // string becomes both) but not for one started by hand or renamed since. The tab label is the
     // fallback, mirroring formatWhoami's "you are:" line.

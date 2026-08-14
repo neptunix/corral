@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
-import { AccountUsageSchema, AttentionMapSchema, EnvStateSchema, RegistryStatusSchema, SessionRowSchema, StatuslineDataSchema } from "./schema.ts";
+import { AccountUsageSchema, AttentionMapSchema, EnvStateSchema, RecapSourceSchema, RecapStatusSchema, RegistryStatusSchema, SessionRowSchema, StatuslineDataSchema } from "./schema.ts";
 
 export const ColumnTypeSchema = z.enum(["to-do", "in-progress", "closed"]);
 
@@ -78,6 +78,11 @@ export const LiveSessionDataSchema = z.object({
   detached: z.boolean(),
   recap: z.string().nullable().default(null),
   recapAt: z.number().nullable().default(null),
+  // Health of the recap read and which ladder rung produced the text. Both are what let the UI print a
+  // REASON instead of an empty line — a board-linked session had neither, so for those the web could
+  // not tell "nothing to show" from "the read is broken".
+  recapStatus: RecapStatusSchema.nullable().default(null),
+  recapSource: RecapSourceSchema.nullable().default(null),
   statusline: StatuslineDataSchema.nullable().default(null),
   // Claude's own state, projected from SessionRow. This schema is a CLOSED field list built
   // field-by-field in server/api.ts — a new SessionRow field that is not added in BOTH places never

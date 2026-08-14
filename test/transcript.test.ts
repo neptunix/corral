@@ -271,11 +271,20 @@ describe("readRecap", () => {
     expect(recap).toBeNull();
   });
 
-  it("returns read-error when the exec for remote ssh throws", async () => {
-    const exec: ExecFn = vi.fn(() => Promise.reject(new Error("ssh fail")));
-    const { recap, status } = await readRecap(makeRemoteEnv(["/r/.claude"]), VALID_UUID, exec);
-    expect(["not-found", "read-error"]).toContain(status);
+  it("returns read-error when the remote tail read throws", async () => {
+    // The lookup must SUCCEED and only the tail fail, or findTranscript returns null and the function
+    // exits on not-found — leaving the read-error branch unexercised while the test still passes.
+    const found = `/r/.claude/projects/d/${VALID_UUID}.jsonl`;
+    const exec: ExecFn = vi.fn((_file: string, args: readonly string[]) => {
+      const sshCmd = args[args.length - 1] ?? "";
+      return sshCmd.includes("tail -c")
+        ? Promise.reject(new Error("ssh fail"))
+        : Promise.resolve({ stdout: found + "\n", stderr: "" });
+    });
+    const { recap, status, source } = await readRecap(makeRemoteEnv(["/r/.claude"]), VALID_UUID, exec);
+    expect(status).toBe("read-error");
     expect(recap).toBeNull();
+    expect(source).toBeNull();
   });
 
   it("caps recap content to RECAP_CONTENT_MAX chars", async () => {
@@ -299,6 +308,124 @@ describe("readRecap", () => {
     ]);
     const { recap } = await readRecap(makeLocalEnv([configDir]), VALID_UUID);
     expect(recap).toBe(content);
+  });
+
+  it("reports away-summary as the source on full success", async () => {
+    const configDir = makeTmpDir();
+    mkdirSync(path.join(configDir, "projects"), { recursive: true });
+    writeTranscript(configDir, VALID_UUID, [
+      '{"type":"system","subtype":"away_summary","content":"Working on recap capture."}',
+    ]);
+    const { source } = await readRecap(makeLocalEnv([configDir]), VALID_UUID);
+    expect(source).toBe("away-summary");
+  });
+
+  it("falls back to ai-title when there is no away_summary", async () => {
+    const configDir = makeTmpDir();
+    mkdirSync(path.join(configDir, "projects"), { recursive: true });
+    writeTranscript(configDir, VALID_UUID, [
+      '{"type":"last-prompt","lastPrompt":"fix the tests"}',
+      '{"type":"ai-title","aiTitle":"Reviving the recap source"}',
+    ]);
+    const { recap, status, source } = await readRecap(makeLocalEnv([configDir]), VALID_UUID);
+    expect(status).toBe("ok");
+    expect(recap).toBe("Reviving the recap source");
+    expect(source).toBe("ai-title");
+  });
+
+  it("falls back to last-prompt when there is neither away_summary nor ai-title", async () => {
+    const configDir = makeTmpDir();
+    mkdirSync(path.join(configDir, "projects"), { recursive: true });
+    writeTranscript(configDir, VALID_UUID, [
+      '{"type":"custom-title","customTitle":"recap-corral-a"}',
+      '{"type":"last-prompt","lastPrompt":"fix the tests"}',
+    ]);
+    const { recap, status, source } = await readRecap(makeLocalEnv([configDir]), VALID_UUID);
+    expect(status).toBe("ok");
+    expect(recap).toBe("fix the tests");
+    expect(source).toBe("last-prompt");
+  });
+
+  // Priority, NOT file position. `last-prompt` is rewritten every turn, so it is all but always the
+  // LAST candidate in the file — ordering by position would bury every away_summary that exists.
+  it("prefers away_summary over a later ai-title and last-prompt", async () => {
+    const configDir = makeTmpDir();
+    mkdirSync(path.join(configDir, "projects"), { recursive: true });
+    writeTranscript(configDir, VALID_UUID, [
+      '{"type":"system","subtype":"away_summary","content":"Real recap."}',
+      '{"type":"ai-title","aiTitle":"A topic"}',
+      '{"type":"last-prompt","lastPrompt":"a prompt"}',
+    ]);
+    const { recap, source } = await readRecap(makeLocalEnv([configDir]), VALID_UUID);
+    expect(recap).toBe("Real recap.");
+    expect(source).toBe("away-summary");
+  });
+
+  it("takes the LAST record of the winning rung", async () => {
+    const configDir = makeTmpDir();
+    mkdirSync(path.join(configDir, "projects"), { recursive: true });
+    writeTranscript(configDir, VALID_UUID, [
+      '{"type":"ai-title","aiTitle":"first topic"}',
+      '{"type":"ai-title","aiTitle":"second topic"}',
+    ]);
+    const { recap } = await readRecap(makeLocalEnv([configDir]), VALID_UUID);
+    expect(recap).toBe("second topic");
+  });
+
+  // An away_summary whose content is unusable is not a dead end: the ladder keeps descending. The old
+  // single-source read returned no-summary here and showed nothing.
+  it("descends past an away_summary with a non-string content", async () => {
+    const configDir = makeTmpDir();
+    mkdirSync(path.join(configDir, "projects"), { recursive: true });
+    writeTranscript(configDir, VALID_UUID, [
+      '{"type":"system","subtype":"away_summary","content":42}',
+      '{"type":"last-prompt","lastPrompt":"fix the tests"}',
+    ]);
+    const { recap, source } = await readRecap(makeLocalEnv([configDir]), VALID_UUID);
+    expect(recap).toBe("fix the tests");
+    expect(source).toBe("last-prompt");
+  });
+
+  it("descends past an empty-string rung", async () => {
+    const configDir = makeTmpDir();
+    mkdirSync(path.join(configDir, "projects"), { recursive: true });
+    writeTranscript(configDir, VALID_UUID, [
+      '{"type":"ai-title","aiTitle":"   "}',
+      '{"type":"last-prompt","lastPrompt":"fix the tests"}',
+    ]);
+    const { source } = await readRecap(makeLocalEnv([configDir]), VALID_UUID);
+    expect(source).toBe("last-prompt");
+  });
+
+  it("ignores custom-title — corral already shows the session name", async () => {
+    const configDir = makeTmpDir();
+    mkdirSync(path.join(configDir, "projects"), { recursive: true });
+    writeTranscript(configDir, VALID_UUID, [
+      '{"type":"custom-title","customTitle":"recap-corral-a"}',
+      '{"type":"agent-name","agentName":"recap-corral-a"}',
+    ]);
+    const { recap, status, source } = await readRecap(makeLocalEnv([configDir]), VALID_UUID);
+    expect(status).toBe("no-summary");
+    expect(recap).toBeNull();
+    expect(source).toBeNull();
+  });
+
+  it("caps a long last-prompt to RECAP_CONTENT_MAX chars", async () => {
+    const configDir = makeTmpDir();
+    mkdirSync(path.join(configDir, "projects"), { recursive: true });
+    const longPrompt = "y".repeat(RECAP_CONTENT_MAX + 500);
+    writeTranscript(configDir, VALID_UUID, [
+      `{"type":"last-prompt","lastPrompt":${JSON.stringify(longPrompt)}}`,
+    ]);
+    const { recap } = await readRecap(makeLocalEnv([configDir]), VALID_UUID);
+    expect(recap?.length).toBe(RECAP_CONTENT_MAX);
+  });
+
+  it("reports a null source when the ladder is dry", async () => {
+    const configDir = makeTmpDir();
+    mkdirSync(path.join(configDir, "projects"), { recursive: true });
+    const { source } = await readRecap(makeLocalEnv([configDir]), VALID_UUID);
+    expect(source).toBeNull();
   });
 });
 

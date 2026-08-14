@@ -1,4 +1,4 @@
-import type { RecapStatus } from "@shared/schema";
+import type { RecapSource, RecapStatus } from "@shared/schema";
 import { constants } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
 import path from "node:path";
@@ -164,31 +164,52 @@ export function lastRecord(
   return null;
 }
 
-const AWAY_SUMMARY_PRED = (r: Record<string, unknown>): boolean =>
-  r.type === "system" && r.subtype === "away_summary";
+/**
+ * The recap ladder, best rung first. Tried in THIS order — by priority, never by position in the file:
+ * `last-prompt` is rewritten on every turn, so it is all but always the last candidate present, and
+ * ordering by position would bury every `away_summary` that exists.
+ *
+ * Only `away_summary` is Claude summarizing its own work, and it is the rung corral cannot count on:
+ * it needs a terminal focus-out (which corral's board stopped producing) AND an account whose rate-limit
+ * status is exactly `allowed` (`docs/adr/0005`). Measured: 1.7% of transcripts, none after 2026-07-31.
+ * The two lower rungs are written independently of focus, of quota and of the operator's habits:
+ * `ai-title` on 23% of transcripts, `last-prompt` on 100%. That is why the ladder is the floor and the
+ * top rung is the bonus, not the reverse.
+ *
+ * `custom-title` / `agent-name` are deliberately NOT rungs — they hold the session name, which corral
+ * already shows as the tab label and in the statusline, so they would only echo it back.
+ */
+const RECAP_LADDER: readonly { readonly source: RecapSource; readonly field: string; readonly pred: (r: Record<string, unknown>) => boolean }[] = [
+  { source: "away-summary", field: "content", pred: (r) => r.type === "system" && r.subtype === "away_summary" },
+  { source: "ai-title", field: "aiTitle", pred: (r) => r.type === "ai-title" },
+  { source: "last-prompt", field: "lastPrompt", pred: (r) => r.type === "last-prompt" },
+];
 
 export async function readRecap(
   env: HerdrEnv,
   sessionId: string,
   exec?: ExecFn,
-): Promise<{ recap: string | null; status: RecapStatus }> {
+): Promise<{ recap: string | null; status: RecapStatus; source: RecapSource | null }> {
   const transcriptPath = await findTranscript(env, sessionId, exec);
-  if (transcriptPath === null) return { recap: null, status: "not-found" };
+  if (transcriptPath === null) return { recap: null, status: "not-found", source: null };
 
   let tail: string;
   try {
     tail = await readTail(env, transcriptPath, exec);
   } catch {
-    return { recap: null, status: "read-error" };
+    return { recap: null, status: "read-error", source: null };
   }
 
-  const record = lastRecord(tail, AWAY_SUMMARY_PRED);
-  if (record === null) return { recap: null, status: "no-summary" };
-
-  const content = typeof record.content === "string" ? record.content : null;
-  if (content === null) return { recap: null, status: "no-summary" };
-
-  return { recap: content.slice(0, RECAP_CONTENT_MAX), status: "ok" };
+  for (const rung of RECAP_LADDER) {
+    const record = lastRecord(tail, rung.pred);
+    if (record === null) continue;
+    const value = record[rung.field];
+    // A rung whose payload is missing, non-string or blank is not a dead end — keep descending. The
+    // single-source read this replaced reported no-summary here and showed nothing.
+    if (typeof value !== "string" || value.trim() === "") continue;
+    return { recap: value.slice(0, RECAP_CONTENT_MAX), status: "ok", source: rung.source };
+  }
+  return { recap: null, status: "no-summary", source: null };
 }
 
 // Authoritative cwd for `claude --resume <uuid>`: the working directory the session recorded in its

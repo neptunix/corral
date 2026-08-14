@@ -11,7 +11,7 @@ const A: HerdrEnv = { id: "a", label: "A", kind: "local", claudeConfigDirs: [], 
 const B: HerdrEnv = { id: "b", label: "B", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
 const row = (env: string, paneId: string): SessionRow => ({
   env, paneId, status: "working", agent: "claude", cwd: "/x", tab: "t", workspace: "w",
-  sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+  sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
 });
 
 describe("createPoller", () => {
@@ -117,7 +117,7 @@ describe("createPoller tab rename", () => {
     const rows = [{
       env: env.id, paneId: "p1", status: "working", agent: "claude", cwd: "/x",
       tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId: "11111111-2222-3333-4444-555555555555",
-      recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+      recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
     }];
     const statusline: StatuslineFn = () => Promise.resolve({
       data: {
@@ -135,7 +135,7 @@ describe("createPoller tab rename", () => {
     const p = createPoller({
       envs: [env],
       list: () => Promise.resolve(rows),
-      recap: () => Promise.resolve({ recap: null, status: "no-summary" }),
+      recap: () => Promise.resolve({ recap: null, status: "no-summary", source: null }),
       statusline,
       tabRename: (_e, tabId, label) => { calls.push({ tabId, label }); return Promise.resolve(); },
       tabRenameEnabled: true,
@@ -151,12 +151,12 @@ const OTHER_UUID = "b24be66a-9f6a-5ca9-c531-3857fc1ca5e9";
 
 function rowWithSession(env: string, paneId: string, sessionId: string): SessionRow {
   return { env, paneId, status: "working", agent: "claude", cwd: "/x", tab: "t", workspace: "w",
-    sessionId, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null };
+    sessionId, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null };
 }
 
 describe("createPoller — recap sweep", () => {
   it("recapFn is called for each pane with a sessionId", async () => {
-    const recap: RecapFn = vi.fn(() => Promise.resolve({ recap: "summary", status: "ok" as const }));
+    const recap: RecapFn = vi.fn(() => Promise.resolve({ recap: "summary", status: "ok" as const, source: "away-summary" as const }));
     const list: ListFn = (e) => Promise.resolve([rowWithSession(e.id, `${e.id}-1`, VALID_UUID)]);
     const p = createPoller({ envs: [A], list, recap, recapIntervalMs: 99999 });
     await p.pollOnce();
@@ -171,7 +171,7 @@ describe("createPoller — recap sweep", () => {
   });
 
   it("recap from cache is merged into SessionRow when sessionId matches", async () => {
-    const recap: RecapFn = vi.fn(() => Promise.resolve({ recap: "latest recap", status: "ok" as const }));
+    const recap: RecapFn = vi.fn(() => Promise.resolve({ recap: "latest recap", status: "ok" as const, source: "away-summary" as const }));
     const list: ListFn = (e) => Promise.resolve([rowWithSession(e.id, `${e.id}-1`, VALID_UUID)]);
     const p = createPoller({ envs: [A], list, recap, recapIntervalMs: 99999 });
     await p.pollOnce();
@@ -183,11 +183,26 @@ describe("createPoller — recap sweep", () => {
     expect(row?.recap).toBe("latest recap");
     expect(row?.recapStatus).toBe("ok");
     expect(typeof row?.recapAt).toBe("number");
+    // The source rides WITH the text through the cache. Unlike the board projection, this merge is not
+    // protected by the type checker: dropping the field here would compile, and every label — the header
+    // tag and the fleet row — would silently go back to unlabelled.
+    expect(row?.recapSource).toBe("away-summary");
+  });
+
+  it("a lower ladder rung reaches the row labelled as itself", async () => {
+    const recap: RecapFn = vi.fn(() => Promise.resolve({ recap: "fix the tests", status: "ok" as const, source: "last-prompt" as const }));
+    const list: ListFn = (e) => Promise.resolve([rowWithSession(e.id, `${e.id}-1`, VALID_UUID)]);
+    const p = createPoller({ envs: [A], list, recap, recapIntervalMs: 99999 });
+    await p.pollOnce();
+    p.start();
+    await new Promise((r) => setTimeout(r, 50));
+    p.stop();
+    expect(p.getSnapshot().sessions[0]?.recapSource).toBe("last-prompt");
   });
 
   it("recap is NOT merged when sessionId differs (stale cache)", async () => {
     let sessionId = VALID_UUID;
-    const recap: RecapFn = vi.fn(() => Promise.resolve({ recap: "stale", status: "ok" as const }));
+    const recap: RecapFn = vi.fn(() => Promise.resolve({ recap: "stale", status: "ok" as const, source: "away-summary" as const }));
     const listFn: ListFn = (e) => Promise.resolve([rowWithSession(e.id, `${e.id}-1`, sessionId)]);
     const p = createPoller({ envs: [A], list: listFn, recap, recapIntervalMs: 99999 });
 
@@ -211,7 +226,7 @@ describe("createPoller — recap sweep", () => {
   });
 
   it("panes without sessionId are skipped by the recap sweep", async () => {
-    const recap: RecapFn = vi.fn(() => Promise.resolve({ recap: "r", status: "ok" as const }));
+    const recap: RecapFn = vi.fn(() => Promise.resolve({ recap: "r", status: "ok" as const, source: "away-summary" as const }));
     const list: ListFn = (e) => Promise.resolve([row(e.id, `${e.id}-1`)]);
     const p = createPoller({ envs: [A], list, recap, recapIntervalMs: 99999 });
     await p.pollOnce();
@@ -221,23 +236,46 @@ describe("createPoller — recap sweep", () => {
     expect(recap).not.toHaveBeenCalled();
   });
 
-  it("does NOT log the recap_sweep summary on a clean sweep (errors == 0)", async () => {
+  // A clean sweep runs every recap interval forever, so repeating it in the log trains the operator to
+  // ignore the file. The ONE line that does get logged is the first observation of the top ladder rung:
+  // the ladder hides a dead `away_summary` source behind a full-looking recap line, so whether that rung
+  // answers has to be said out loud once, and again only when it changes (docs/adr/0005).
+  it("logs the recap_sweep summary once, then stays silent on repeat clean sweeps", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const recap: RecapFn = () => Promise.resolve({ recap: "summary", status: "ok" as const });
+    const recap: RecapFn = () => Promise.resolve({ recap: "summary", status: "ok" as const, source: "away-summary" as const });
     const list: ListFn = (e) => Promise.resolve([rowWithSession(e.id, `${e.id}-1`, VALID_UUID)]);
-    const p = createPoller({ envs: [A], list, recap, recapIntervalMs: 99999 });
+    const p = createPoller({ envs: [A], list, recap, recapIntervalMs: 15 });
     await p.pollOnce();
     p.start();
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 150)); // many intervals — only the first may log
     p.stop();
-    const sweepLogged = warnSpy.mock.calls.some((args) => typeof args[0] === "string" && args[0].includes("recap_sweep"));
+    const sweepLines = warnSpy.mock.calls.filter((args) => typeof args[0] === "string" && args[0].includes("recap_sweep"));
     warnSpy.mockRestore();
-    expect(sweepLogged).toBe(false);
+    expect(sweepLines).toHaveLength(1);
+    expect(String(sweepLines[0]?.[0])).toContain("\"away-summary\":1");
+  });
+
+  it("logs again when the away-summary rung stops answering", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let source: "away-summary" | "last-prompt" = "away-summary";
+    const recap: RecapFn = () => Promise.resolve({ recap: "text", status: "ok" as const, source });
+    const list: ListFn = (e) => Promise.resolve([rowWithSession(e.id, `${e.id}-1`, VALID_UUID)]);
+    const p = createPoller({ envs: [A], list, recap, recapIntervalMs: 15 });
+    await p.pollOnce();
+    p.start();
+    await new Promise((r) => setTimeout(r, 60));
+    source = "last-prompt"; // the top rung goes silent — the ladder covers for it in the UI
+    await new Promise((r) => setTimeout(r, 90));
+    p.stop();
+    const sweepLines = warnSpy.mock.calls.filter((args) => typeof args[0] === "string" && args[0].includes("recap_sweep"));
+    warnSpy.mockRestore();
+    expect(sweepLines).toHaveLength(2);
+    expect(String(sweepLines[1]?.[0])).toContain("\"last-prompt\":1");
   });
 
   it("logs the recap_sweep summary when a recap read fails (errors > 0)", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const recap: RecapFn = () => Promise.resolve({ recap: null, status: "read-error" as const });
+    const recap: RecapFn = () => Promise.resolve({ recap: null, status: "read-error" as const, source: null });
     const list: ListFn = (e) => Promise.resolve([rowWithSession(e.id, `${e.id}-1`, VALID_UUID)]);
     const p = createPoller({ envs: [A], list, recap, recapIntervalMs: 99999 });
     await p.pollOnce();
@@ -262,7 +300,7 @@ describe("createPoller — statusline sweep", () => {
       rate: { five_hour: null, seven_day: null }, effort: null, thinking: null, cc_version: null,
     };
     const statusline: StatuslineFn = () => Promise.resolve({ data: sl, status: "ok" as const });
-    const recap: RecapFn = () => Promise.resolve({ recap: null, status: "not-found" as const });
+    const recap: RecapFn = () => Promise.resolve({ recap: null, status: "not-found" as const, source: null });
     const list: ListFn = (e) => Promise.resolve([rowWithSession(e.id, `${e.id}-1`, "sid-1")]);
     const poller = createPoller({ envs: [A], list, recap, statusline, recapIntervalMs: 99999 });
     await poller.pollOnce();
@@ -278,7 +316,7 @@ const noop = (): void => {};
 const E: HerdrEnv = { id: "e1", label: "E1", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
 const mkRow = (status: string): SessionRow => ({
   env: "e1", paneId: "p", status, agent: "claude", cwd: "/x", tab: "t", workspace: "w",
-  sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+  sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
 });
 const NOOP_MAP: AttentionMap = {};
 
@@ -319,7 +357,7 @@ describe("createPoller initial sweep kick", () => {
   const liveRow: SessionRow = {
     env: A.id, paneId: "p1", status: "working", agent: "claude", cwd: "/x",
     tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId: SID,
-    recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+    recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
   };
   const userStatusline: StatuslineFn = () => Promise.resolve({
     data: {
@@ -340,7 +378,7 @@ describe("createPoller initial sweep kick", () => {
       const p = createPoller({
         envs: [A],
         list: () => Promise.resolve([liveRow]),
-        recap: () => Promise.resolve({ recap: null, status: "no-summary" }),
+        recap: () => Promise.resolve({ recap: null, status: "no-summary", source: null }),
         statusline: userStatusline,
         tabRename: (_e, tabId, label) => { calls.push({ tabId, label }); return Promise.resolve(); },
         tabRenameEnabled: true,
@@ -501,7 +539,7 @@ describe("createPoller — registry join", () => {
     const p = createPoller({
       envs: [A],
       list: () => Promise.resolve(rows),
-      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const, source: null }),
       statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
     });
     await p.pollOnce();
@@ -532,7 +570,7 @@ const sweepPoller = (over: {
   readRegistry: (env: HerdrEnv) => Promise<RegistryRead>;
 }) => createPoller({
   envs: [R],
-  recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+  recap: () => Promise.resolve({ recap: null, status: "not-found" as const, source: null }),
   statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
   ...over,
 });
@@ -562,7 +600,7 @@ describe("createPoller — the sweep is the backstop", () => {
     const p = createPoller({
       envs: [A],
       list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
-      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const, source: null }),
       statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
       readRegistry: () => { calls++; return Promise.resolve(ok([])); },
     });
@@ -810,7 +848,7 @@ describe("createPoller — the local registry interval", () => {
     const p = createPoller({
       envs: [A, R],
       list: (e) => Promise.resolve([rowWithSession(e.id, "p1", VALID_UUID)]),
-      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const, source: null }),
       statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
       readRegistry: (e) => { seen.push(e.id); return Promise.resolve(ok([{ sessionId: VALID_UUID, status: "busy" }])); },
       // Park the recurring sweep far away so only the interval fires after settleStart.
@@ -838,7 +876,7 @@ describe("createPoller — the local registry interval", () => {
     const p = createPoller({
       envs: [multiDir],
       list: () => Promise.resolve([rowWithSession(multiDir.id, "p1", VALID_UUID)]),
-      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const, source: null }),
       statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
       readRegistry: () => { calls++; return Promise.resolve(ok([{ sessionId: VALID_UUID, status: "busy" }])); },
       recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
@@ -865,7 +903,7 @@ describe("createPoller — the local registry interval", () => {
     const p = createPoller({
       envs: [A],
       list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
-      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const, source: null }),
       statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
       readRegistry: () => {
         calls++;
@@ -893,7 +931,7 @@ describe("createPoller — the local registry interval", () => {
     const p = createPoller({
       envs: [A],
       list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
-      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const, source: null }),
       statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
       readRegistry: () => Promise.resolve(ok([{ sessionId: VALID_UUID, status }])),
       recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
@@ -923,7 +961,7 @@ describe("createPoller — the local registry interval", () => {
     const p = createPoller({
       envs: [A],
       list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
-      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const, source: null }),
       statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
       readRegistry: () => Promise.resolve(ok([{ sessionId: VALID_UUID, status: "waiting", waitingFor }])),
       recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
@@ -986,7 +1024,7 @@ describe("createPoller — the local registry interval", () => {
     const p = createPoller({
       envs: [A],
       list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
-      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const, source: null }),
       statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
       readRegistry: () => Promise.resolve(read),
       recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
@@ -1011,7 +1049,7 @@ describe("createPoller — the local registry interval", () => {
     const p = createPoller({
       envs: [A],
       list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
-      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const, source: null }),
       statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
       readRegistry: () => { calls++; return Promise.reject(new Error("boom")); },
       recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,
@@ -1038,7 +1076,7 @@ describe("createPoller — the local registry interval", () => {
     const p = createPoller({
       envs: [A, B],
       list: (e) => Promise.resolve([rowWithSession(e.id, "p1", VALID_UUID)]),
-      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const, source: null }),
       statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
       readRegistry: (e) => {
         seen.push(e.id);
@@ -1067,7 +1105,7 @@ describe("createPoller — the local registry interval", () => {
     const p = createPoller({
       envs: [A],
       list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]),
-      recap: () => Promise.resolve({ recap: null, status: "not-found" as const }),
+      recap: () => Promise.resolve({ recap: null, status: "not-found" as const, source: null }),
       statusline: () => Promise.resolve({ data: null, status: "not-found" as const }),
       readRegistry: () => { calls++; return Promise.resolve(ok([])); },
       recapIntervalMs: 999_999, initialSweepDelayMs: 999_999,

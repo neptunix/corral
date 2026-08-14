@@ -11,7 +11,7 @@ import type { TransitionEvent } from "../server/transition.ts";
 const env: HerdrEnv = { id: "e", label: "E", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
 const row = (p: string, status: string): SessionRow => ({
   env: "e", paneId: p, status, agent: "claude", cwd: "/x", tab: "fs-" + p, workspace: "w",
-  sessionId: null, recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+  sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
 });
 const ev = (p: string, state: "blocked" | "finished"): TransitionEvent => ({ key: `e:${p}`, state, since: 100, row: row(p, state === "blocked" ? "blocked" : "done") });
 const mkdir = () => mkdtempSync(path.join(tmpdir(), "att-"));

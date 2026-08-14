@@ -7,7 +7,7 @@ import { resolveSelf } from "../server/whoami.ts";
 function row(env: string, paneId: string, cwd: string): SessionRow {
   return {
     env, paneId, status: "working", agent: "claude", cwd, tab: "t", workspace: "w",
-    sessionId: null, recap: null, recapAt: null, recapStatus: null,
+    sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null,
     statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
   };
 }

@@ -43,7 +43,7 @@ function row(over: Partial<SessionRow>): SessionRow {
   return {
     env: "work-local", paneId: "w1:p1", status: "working", agent: "claude", cwd: "/repo",
     tab: "api-refactor-a", workspace: "repo", sessionId: null,
-    recap: null, recapAt: null, recapStatus: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, ...over,
+    recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, ...over,
   };
 }
 
@@ -306,6 +306,31 @@ describe("formatFleet", () => {
   it("truncates recaps to recapChars", () => {
     const out = formatFleet({ ...base, filter: "all", recapChars: 20 });
     expect(out).not.toContain("x".repeat(21));
+  });
+
+  // A triaging session must not read the operator's own last prompt as the session's report on its own
+  // work, so every rung is named — including away-summary, whose quality is the whole point.
+  it.each([
+    ["away-summary" as const, "recap \"a real summary\""],
+    ["ai-title" as const, "topic \"a real summary\""],
+    ["last-prompt" as const, "prompt \"a real summary\""],
+  ])("names %s as the recap's source", (source, expected) => {
+    const labelled: Snapshot = {
+      envs: {},
+      sessions: [row({ paneId: "w5:p1", tab: "labelled", recap: "a real summary", recapSource: source })],
+    };
+    const out = formatFleet({ ...base, snapshot: labelled, filter: "all" });
+    expect(out).toContain(expected);
+  });
+
+  it("leaves a source-less recap unlabelled rather than guessing", () => {
+    const unlabelled: Snapshot = {
+      envs: {},
+      sessions: [row({ paneId: "w5:p2", tab: "unlabelled", recap: "a real summary", recapSource: null })],
+    };
+    const out = formatFleet({ ...base, snapshot: unlabelled, filter: "all" });
+    expect(out).toContain("\"a real summary\"");
+    expect(out).not.toMatch(/(recap|topic|prompt) "a real summary"/);
   });
 
   it("reports unreachable environments so an empty list is never mistaken for a quiet fleet", () => {

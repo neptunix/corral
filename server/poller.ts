@@ -1,4 +1,4 @@
-import type { AttentionMap, EnvState, RecapStatus, RegistryStatus, SessionRow, Snapshot, StatuslineData, StatuslineStatus } from "@shared/schema";
+import type { AttentionMap, EnvState, RecapSource, RecapStatus, RegistryStatus, SessionRow, Snapshot, StatuslineData, StatuslineStatus } from "@shared/schema";
 
 import { ATTENTION_MIN_WORK_MS, CHEAP_INTERVAL_MS, CLAUDE_REGISTRY_POLL_MS, RECAP_ENABLED, RECAP_INTERVAL_MS, STATUSLINE_ENABLED, SWEEP_INITIAL_DELAY_MS, TAB_RENAME_ENABLED } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
@@ -44,7 +44,7 @@ export function recordsEqual(a: RegistryRecord | null, b: RegistryRecord | null)
 }
 
 export type ListFn = (env: HerdrEnv) => Promise<SessionRow[]>;
-export type RecapFn = (env: HerdrEnv, sessionId: string) => Promise<{ recap: string | null; status: RecapStatus }>;
+export type RecapFn = (env: HerdrEnv, sessionId: string) => Promise<{ recap: string | null; status: RecapStatus; source: RecapSource | null }>;
 export type StatuslineFn = (env: HerdrEnv, sessionId: string) => Promise<{ data: StatuslineData | null; status: StatuslineStatus }>;
 
 export interface Poller {
@@ -116,6 +116,10 @@ export function createPoller(opts: {
   // every pass is a log flood that trains the operator to ignore the file.
   const warnedTruncated = new Set<string>();
   const warnedDegraded = new Set<string>();
+  // Per environment: did the LAST sweep read any `away_summary` recap? Logged only on a transition, so
+  // the operator learns when the top rung dies or comes back without a line every sweep. Absent = not
+  // swept yet, which is why the value is a boolean and the map's absence is the third state.
+  const awayRungAlive = new Map<string, boolean>();
   const subs = new Set<(s: Snapshot) => void>();
   let snapshot: Snapshot = { envs: {}, sessions: [] };
 
@@ -160,8 +164,10 @@ export function createPoller(opts: {
         let merged: SessionRow = row;
         const rc = recapCache.get(key);
         if (rc !== null && row.sessionId !== null && rc.sessionId === row.sessionId) {
-          merged = { ...merged, recap: rc.recap, recapAt: rc.at, recapStatus: rc.status };
+          merged = { ...merged, recap: rc.recap, recapAt: rc.at, recapStatus: rc.status, recapSource: rc.source };
         } else if (row.sessionId === null) {
+          // recap/recapSource are left as the row has them (null from every producer) — mirroring the
+          // statusline branch below, which also sets only its status.
           merged = { ...merged, recapStatus: "no-session-ref" };
         }
         const sc = statuslineCache.get(key);
@@ -300,6 +306,12 @@ export function createPoller(opts: {
       const rows = perEnv.get(env.id) ?? [];
       const t0 = Date.now();
       let found = 0, notFound = 0, noSummary = 0, errors = 0;
+      // Counted per ladder rung, not just `found`. The ladder fills the recap line for nearly every
+      // session, which means it also HIDES whether the top rung still works: `away_summary` is refused
+      // outright while the account's rate-limit status is not exactly `allowed` (docs/adr/0005), and
+      // every line would still read fine throughout. `away_summary: 0` sweep after sweep is the signal
+      // that the top rung is shut — and the day it reopens is a log line only if this is counted.
+      const bySource = new Map<RecapSource, number>();
 
       // Install-drift heuristic: warn once if panes have cwd but no sessionId. State the OBSERVATION
       // and both causes, never a single asserted cause. A missing integration is only one of them:
@@ -332,8 +344,9 @@ export function createPoller(opts: {
         const key = `${env.id}:${row.paneId}`;
         if (RECAP_ENABLED) {
           try {
-            const { recap, status } = await recapFn(env, row.sessionId);
-            recapCache.update(key, row.sessionId, recap, status);
+            const { recap, status, source } = await recapFn(env, row.sessionId);
+            recapCache.update(key, row.sessionId, recap, status, source);
+            if (source !== null) bySource.set(source, (bySource.get(source) ?? 0) + 1);
             if (status === "ok") found++;
             else if (status === "not-found") notFound++;
             else if (status === "no-summary") noSummary++;
@@ -370,13 +383,20 @@ export function createPoller(opts: {
         }
       }
 
-      // Only surface the sweep summary when something went wrong. A clean sweep runs on every
-      // recap interval, so logging it unconditionally floods the logs with uninteresting JSON.
-      if (errors > 0) {
+      // Only surface the sweep summary when something went wrong, or when the top ladder rung changed
+      // state. A clean sweep runs on every recap interval, so logging it unconditionally floods the logs
+      // with uninteresting JSON — but a silently dead `away_summary` source is exactly what went
+      // unnoticed for a month (docs/adr/0005), and the ladder now covers for it in the UI.
+      const awayNow = (bySource.get("away-summary") ?? 0) > 0;
+      const awayChanged = RECAP_ENABLED && rows.some((r) => r.sessionId !== null)
+        && awayRungAlive.get(env.id) !== awayNow;
+      if (awayChanged) awayRungAlive.set(env.id, awayNow);
+      if (errors > 0 || awayChanged) {
         console.warn(JSON.stringify({
           event: "recap_sweep", env: env.id,
           panes_with_session_id: rows.filter((r) => r.sessionId !== null).length,
           found, not_found: notFound, no_summary: noSummary, errors,
+          by_source: Object.fromEntries(bySource),
           ms: Date.now() - t0,
         }));
       }

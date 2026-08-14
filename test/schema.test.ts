@@ -24,7 +24,7 @@ describe("shared schema", () => {
         sessionId: "a13ad559-8e59-4b98-b420-2746ef0b94d8",
         recap: "Working on feat/recap-capture.",
         recapAt: 1751000000000,
-        recapStatus: "ok",
+        recapStatus: "ok", recapSource: null,
       }],
     };
     const parsed = SnapshotSchema.parse(snap);
@@ -37,7 +37,7 @@ describe("shared schema", () => {
   it("rejects an invalid recapStatus value", () => {
     const bad = {
       envs: {},
-      sessions: [{ env: "e", paneId: "p1", status: "idle", agent: "claude", cwd: "/", tab: "t", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: "invalid-status" }],
+      sessions: [{ env: "e", paneId: "p1", status: "idle", agent: "claude", cwd: "/", tab: "t", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: "invalid-status", recapSource: null }],
     };
     expect(SnapshotSchema.safeParse(bad).success).toBe(false);
   });

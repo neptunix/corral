@@ -12,7 +12,7 @@ function link(overrides: Partial<EnrichedSessionLink>): EnrichedSessionLink {
     env: "work-local", paneId: "w1:p0", tabId: "t1", tabLabel: "wm-84-canon-implement",
     workspaceId: "w1", workspaceLabel: "corral", name: "wm-84-canon-implement", cwdSnapshot: "/repo",
     sessionId: "551754cc-ee7b-4b9f-a6a8-aa599f6eb6e3",
-    live: { status: "idle", model: null, ctxPct: null, detached: false, recap: null, recapAt: null, statusline: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null },
+    live: { status: "idle", model: null, ctxPct: null, detached: false, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null },
     ...overrides,
   };
 }

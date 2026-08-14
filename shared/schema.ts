@@ -14,6 +14,17 @@ export const EnvStateSchema = z.object({
 
 export const RecapStatusSchema = z.enum(["ok", "no-session-ref", "not-found", "no-summary", "read-error"]);
 
+// WHICH transcript record the recap line came from. Separate from RecapStatus, which is the health of
+// the read: a successful read can still be showing the operator's own last prompt rather than a recap
+// the session wrote about itself, and collapsing the two would make "ok" mean both.
+//
+// `away-summary` is the only rung Claude writes ABOUT ITS OWN WORK — and the only one that can go silent:
+// it needs a terminal focus-out plus an account at exactly `allowed` rate-limit status (docs/adr/0005).
+// `ai-title` is the topic Claude generates for the session; `last-prompt` is what the
+// operator asked for, not what came of it. Ordered by descending quality, which is the order readRecap
+// tries them in.
+export const RecapSourceSchema = z.enum(["away-summary", "ai-title", "last-prompt"]);
+
 export const RateWindowSchema = z.object({
   used_percentage: z.number(),
   resets_at: z.number(),
@@ -85,6 +96,7 @@ export const SessionRowSchema = z.object({
   recap: z.string().nullable().default(null),
   recapAt: z.number().nullable().default(null),
   recapStatus: RecapStatusSchema.nullable().default(null),
+  recapSource: RecapSourceSchema.nullable().default(null),
   statusline: StatuslineDataSchema.nullable().default(null),
   statuslineStatus: StatuslineStatusSchema.nullable().default(null),
   // Claude's OWN session state, from <claude-config-dir>/sessions/<pid>.json. Exactly ONE writer per
@@ -167,6 +179,7 @@ export const FleetRestoreReportSchema = z.object({
 
 export type EnvState = z.infer<typeof EnvStateSchema>;
 export type RecapStatus = z.infer<typeof RecapStatusSchema>;
+export type RecapSource = z.infer<typeof RecapSourceSchema>;
 export type SessionRow = z.infer<typeof SessionRowSchema>;
 export type Snapshot = z.infer<typeof SnapshotSchema>;
 export type PaneRead = z.infer<typeof PaneReadSchema>;
