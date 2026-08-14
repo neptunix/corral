@@ -91,16 +91,29 @@ function remoteDirChecks(envId: string, dir: string, now: number): Check[] {
 }
 
 /**
- * First occurrence wins. `configDirsChecks` is called by BOTH `buildStartupChecks` (the launch report
- * needs the row) and `envChecks` (the panel's per-environment set needs it), so composing the two
- * yields one duplicate `claude-config-dirs` key. `key` is the panel's React key and stage 2's
- * auto-expand signature key, so a duplicate is a rendering bug rather than a cosmetic one.
+ * The one id this module composes twice BY DESIGN. `configDirsChecks` is called by both
+ * `buildStartupChecks` (the launch report needs the row) and `envChecks` (the panel's per-environment
+ * set needs it); both are the right owners of their own output, so the reconciliation belongs here, in
+ * the module that composes them.
  */
-function dedupeByKey(checks: readonly Check[]): Check[] {
+const EXPECTED_DUPLICATE_IDS: ReadonlySet<string> = new Set(["claude-config-dirs"]);
+
+/**
+ * Drops a repeat of an EXPECTED duplicate id only — first occurrence wins, which keeps the startup
+ * row, the same one the launch report printed.
+ *
+ * Deliberately not a general dedupe: `key` is the panel's React key and stage 2's auto-expand
+ * signature key, so a NEW producer colliding with an existing row is a bug, and a blanket
+ * first-wins filter would absorb it silently AND leave the duplicate-key test below unable to fail.
+ * Everything not named above falls through untouched, so any other collision still surfaces.
+ */
+function dropExpectedDuplicates(checks: readonly Check[]): Check[] {
   const seen = new Set<string>();
   const out: Check[] = [];
   for (const c of checks) {
-    if (seen.has(c.key)) continue;
+    // Equal keys imply equal ids (`checkKey` builds the key FROM the id), so testing the incoming
+    // row's id is the same test as "the row already kept under this key has that id".
+    if (seen.has(c.key) && EXPECTED_DUPLICATE_IDS.has(c.id)) continue;
     seen.add(c.key);
     out.push(c);
   }
@@ -145,7 +158,7 @@ function cheapChecks(input: ComposeInput): Check[] {
   }
   checks.push(ctxThresholdsCheck(deps, input.corralHome));
   checks.push(...envReachableChecks(input.snapshot.envs, now));
-  return dedupeByKey(checks);
+  return dropExpectedDuplicates(checks);
 }
 
 /**
@@ -234,20 +247,38 @@ export function createDiagnosticsSweep(opts: SweepOpts): DiagnosticsSweep {
     }
   };
 
+  /** The LAST link of the run chain, or null when nothing is running. Never two live links. */
   let inFlight: Promise<void> | null = null;
-  const begin = (p: Promise<void>): Promise<void> => {
-    inFlight = p.finally(() => { inFlight = null; });
-    return inFlight;
+
+  /**
+   * Appends one run to the chain and publishes it as the new tail, both in the SAME synchronous step.
+   * That indivisibility is the whole guard: an `await` between reading the tail and appending to it
+   * lets two callers that both observed the old tail each start a run, and then two `runOnce` bodies
+   * spawn duplicate `herdr`/`claude` probes, race each other's `publish`, and clobber one another's
+   * `lastError`. Awaiting `inFlight` and only then starting had exactly that window — two Rechecks
+   * landing on one in-flight run both resumed past their await and both started.
+   *
+   * The tail is cleared only by the link that still OWNS it: an orphaned link settling must not null a
+   * field that now points at a later run, which would re-open the same window for a third caller.
+   *
+   * Chaining with `.then` is safe only because `runOnce` is total — a rejecting body would poison the
+   * tail and every run queued behind it would be skipped.
+   */
+  const chain = (body: () => Promise<void>): Promise<void> => {
+    const link: Promise<void> = (inFlight ?? Promise.resolve()).then(body).finally(() => {
+      if (inFlight === link) inFlight = null;
+    });
+    inFlight = link;
+    return link;
   };
 
-  // Timer path: collapse onto whatever is already running. Cheap, and the next tick is 60 s away.
-  const tick = (): Promise<void> => inFlight ?? begin(runOnce(false));
+  // Timer path: collapse onto whatever is already running rather than queueing behind it. Cheap, and
+  // the next tick is 60 s away.
+  const tick = (): Promise<void> => inFlight ?? chain(() => runOnce(false));
 
-  // Recheck path: let the in-flight run finish, then run again, ignoring the version TTL.
-  const refresh = async (): Promise<void> => {
-    if (inFlight !== null) await inFlight;
-    await begin(runOnce(true));
-  };
+  // Recheck path: always queue a run of its own, behind anything already in flight, with the version
+  // TTL bypassed — so the answer it returns post-dates the request instead of predating it.
+  const refresh = (): Promise<void> => chain(() => runOnce(true));
 
   return {
     tick,

@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 
 import type { HerdrEnv } from "../environments.ts";
 import { createNodeDeps } from "../server/diagnostics/deps.ts";
+import type { DiagnosticsStore } from "../server/diagnostics-store.ts";
 import { createDiagnosticsStore } from "../server/diagnostics-store.ts";
 import { createDiagnosticsSweep, type SweepOpts } from "../server/diagnostics-sweep.ts";
 
@@ -14,6 +15,43 @@ const remote = (id: string): HerdrEnv => ({
   claudeConfigDirs: ["/far/.claude"], spawnCommand: "claude", repos: {},
 });
 const snapshot = (envs: Snapshot["envs"]): Snapshot => ({ envs, sessions: [] });
+
+/**
+ * Counts sweep BODIES, entry and exit, and reports whether two were ever inside at once.
+ *
+ * The instrument is the sweep's own injected collaborators, at the two points a body provably passes
+ * exactly once: `poller.getSnapshot()` at the top, and `store.setLastError()` as its last act on both
+ * the success and the failure path. Counting `run` calls instead cannot do this — `versionChecks`
+ * fires its three probes through one `Promise.all`, so one lone body already looks like three — and
+ * counting probe ROUNDS is weaker: a variant that stamped the version TTL before awaiting the probes
+ * would run two fully concurrent bodies and still leave the round count at 1.
+ */
+function bodyCounter(): {
+  readonly store: DiagnosticsStore;
+  readonly poller: { getSnapshot: () => Snapshot };
+  readonly counts: { entered: number; overlap: boolean };
+} {
+  const inner = createDiagnosticsStore({ selfVersion: null });
+  const counts = { entered: 0, overlap: false };
+  let active = 0;
+  return {
+    counts,
+    poller: {
+      getSnapshot: () => {
+        counts.entered += 1;
+        active += 1;
+        if (active > 1) counts.overlap = true;
+        return snapshot({ work: { reachable: true } });
+      },
+    },
+    store: {
+      put: (cls, checks) => { inner.put(cls, checks); },
+      patchSelf: (patch) => { inner.patchSelf(patch); },
+      setLastError: (message) => { active -= 1; inner.setLastError(message); },
+      snapshot: () => inner.snapshot(),
+    },
+  };
+}
 
 const opts = (over: Partial<SweepOpts>): SweepOpts => ({
   store: createDiagnosticsStore({ selfVersion: "0.0.0" }),
@@ -148,26 +186,60 @@ describe("createDiagnosticsSweep", () => {
   });
 
   it("does not run two ticks concurrently", async () => {
-    // Counts PROBE ROUNDS, not concurrent `run` calls: versionChecks fires its three probes through
-    // one Promise.all inside a single tick (server/diagnostics/versions.ts), so a concurrency counter
-    // over `run` reports an overlap for one lone tick and can say nothing about two. One round from
-    // two simultaneous ticks is the property — the mirror image of the refresh test's two.
     // eslint-disable-next-line @typescript-eslint/no-empty-function
     let release = (): void => {};
     const gate = new Promise<void>((r) => { release = r; });
-    const probes: string[] = [];
+    const { store, poller, counts } = bodyCounter();
     const sweep = createDiagnosticsSweep(opts({
-      run: async (bin, args) => {
-        const cmd = [bin, ...args].join(" ");
-        if (cmd === "herdr --version") probes.push(cmd);
-        await gate;
-        return null;
-      },
+      store, poller,
+      run: async () => { await gate; return null; },
     }));
     const first = sweep.tick();
     const second = sweep.tick(); // must collapse onto the run already in flight, not start a second
     release();
     await Promise.all([first, second]);
-    expect(probes).toHaveLength(1);
+    expect(counts.entered).toBe(1);
+    expect(counts.overlap).toBe(false);
+  });
+
+  it("serializes two Rechecks that land on a run already in flight", async () => {
+    // The re-entrancy case: both Rechecks observe the SAME in-flight tick. An implementation that
+    // awaits the tail and only then starts lets both resume past that await and both start, so two
+    // sweep bodies run at once — duplicate herdr/claude spawns, two `publish` calls racing on the
+    // store, and either one's `lastError` clobbered by the other.
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    let release = (): void => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const { store, poller, counts } = bodyCounter();
+    const sweep = createDiagnosticsSweep(opts({
+      store, poller,
+      run: async () => { await gate; return null; },
+    }));
+    const ticked = sweep.tick();
+    const first = sweep.refresh();
+    const second = sweep.refresh();
+    release();
+    await Promise.all([ticked, first, second]);
+    // All three ran: a Recheck that collapsed onto the tick would answer with a verdict predating the
+    // request, which is the bug on the other side of this one.
+    expect(counts.entered).toBe(3);
+    expect(counts.overlap).toBe(false);
+  });
+
+  it("drops only the by-design duplicate — any other key collision stays visible", async () => {
+    const store = createDiagnosticsStore({ selfVersion: null });
+    // A hand-written environments.json can name the same config dir twice, and then the per-dir
+    // producers legitimately emit the same key twice. That collision must NOT be absorbed here: only
+    // `claude-config-dirs` is, because two prior producers each own a copy of that row by design.
+    const sweep = createDiagnosticsSweep(opts({
+      store,
+      envs: [{ ...local("work"), claudeConfigDirs: ["/h/.claude", "/h/.claude"] }],
+    }));
+    await sweep.tick();
+    const rows = store.snapshot().checks;
+    expect(rows.filter((c) => c.id === "claude-config-dirs")).toHaveLength(1);
+    const themeKeys = rows.filter((c) => c.id === "theme-installed").map((c) => c.key);
+    expect(themeKeys).toHaveLength(2); // a blanket first-wins dedupe would silently leave 1
+    expect(new Set(themeKeys).size).toBe(1);
   });
 });
