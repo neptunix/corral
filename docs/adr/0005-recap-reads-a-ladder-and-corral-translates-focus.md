@@ -10,12 +10,23 @@ establishes when that record is written — every gate must hold at once:
 |---|---|
 | Terminal focus state | `blurred` |
 | Since the last turn ended | ≥180 s (remote-config constant; matches the measured 185 s median) |
+| Since the last request, against the prompt-cache TTL | < 90 % of it — otherwise "cache stale" |
+| **Account rate-limit status** | **exactly `allowed`** — `allowed_warning` is refused |
 | Real user messages in the session | ≥3 |
 | New user messages since the previous summary | ≥2 |
 | A turn running | no |
+| Draft text in the input box | none |
+| Background agents/workflows pending in that session | none |
 | Recaps enabled (`/config` → "Session recap") | yes (the default) |
 
-Two consequences dominate everything below:
+The rate-limit gate is the one that matters in practice, and it was found by observation, not by reading:
+a session started with `--debug-file` logged `[awaySummary] skipped: at or near rate limit` — at the exact
+second corral drove its blur, and twice more while it stayed blurred. It compares `=== "allowed"`, while
+sibling features in the same binary accept `startsWith("allowed")`; a `allowed_warning` account is
+therefore refused a recap although every other gate passes. Measured on two accounts, including one whose
+weekly window sat at 56 %, so the threshold is not a high-utilisation edge case.
+
+Two more consequences dominate everything below:
 
 - **The focus state starts at `unknown` and is set ONLY by terminal focus-report escape sequences**
   (`\x1B[?1004h`, CSI I, CSI O). `unknown` is not `blurred`. A pane nothing ever focused can never reach
@@ -32,6 +43,10 @@ is internal to herdr: the host terminal never loses focus and reports nothing. S
 focus-out for a Claude pane on that machine is herdr itself, driven by a tab switch — and the operator's
 move from switching herdr tabs to watching the corral board removed the last producer. **corral
 de-energized its own recap source.**
+
+That is a necessary condition, not the whole cause. With focus restored by the mechanism below, the recap
+still does not appear while the account is in the near-limit state — so the July cliff has two
+explanations stacked, and only one of them is corral's to fix.
 
 Measured across every local Claude config directory:
 
@@ -79,9 +94,12 @@ headless server with no client at all, without one. Focus is server state. Nothi
 pane, so this is a control command of the same class as `tab rename` / `tab close` that corral already
 issues.
 
-Two properties shape the mechanism: herdr focuses exactly **one** tab at a time, so focusing X blurs
-everything else at once; and `blurred` is **sticky**, so focus needs no maintaining — each pane needs one
-focus-in/focus-out cycle, ever.
+Three properties shape the mechanism. herdr focuses exactly **one** tab at a time, so focusing X blurs
+everything else at once. `blurred` is **sticky**, so focus needs no maintaining — each pane needs one
+focus-in/focus-out cycle, ever. And the generation attempt **repeats while the pane stays blurred** rather
+than firing once on the event: a `--debug-file` session logged three attempts inside 100 s of one
+corral-driven blur. Together these mean corral does not need to chase a timing window — a pane blurred once
+keeps trying, so the recap appears on its own the moment the account's rate-limit gate opens.
 
 Opening a session's web terminal focuses that session's tab; closing it focuses back the tab the operator
 had. The pane completes the cycle and is `blurred`; the operator's view ends exactly where it started.
@@ -121,9 +139,20 @@ The ladder and the focus translation are not alternatives; they fix different ha
 Focus translation restores a *real* summary only where the §Context gates hold. It cannot help a session
 with fewer than 3 operator messages (an autonomous session handed one brief never qualifies, however
 long it works), a session that is currently working (the ≥180 s idle gate needs quiet), or the first
-three minutes after the terminal closes. The ladder is therefore the floor: it covers the autonomous,
-the busy and the never-opened, and depends on neither herdr nor focus nor the operator's habits. Focus
-translation raises quality where a conversation happened; the ladder guarantees the line is never blank.
+three minutes after the terminal closes. **And it yields nothing at all while the account sits in the
+near-limit state** — which, for an operator running a fleet, is most of the time. That gate is outside
+corral entirely: corral can neither read it nor influence it.
+
+The ladder is therefore the floor, and not a stopgap: it covers the autonomous, the busy, the
+never-opened and the rate-limited, and depends on neither herdr nor focus nor the operator's habits nor
+the account's quota. Focus translation raises quality where a conversation happened *and* the gate is
+open; the ladder guarantees the line is never blank.
+
+Focus translation still ships enabled, even with a currently-zero yield, because the mechanism itself is
+verified end to end: corral's blur reaches Claude and starts the attempt (observed in the subject's own
+debug log, to the second). It costs two herdr calls per terminal open/close and returns the operator's
+view where it was. Disabling a working mechanism because an external gate is shut would only guarantee
+that nothing happens when that gate opens.
 
 Labelling every rung, rather than only the fallbacks, follows from who reads the fleet row: a triaging
 Claude session. An unlabelled quote must be *remembered* as a real summary, and a reader that forgets
@@ -135,13 +164,19 @@ watching (the socket snapshot reports no client count) and a periodic yank of th
 indistinguishable from a bug.
 
 **The top rung's own health is counted, not assumed.** The ladder fills the recap line for nearly every
-session, which means it also masks whether `away_summary` still arrives at all: focus translation could
-stop working entirely and every line would still read fine. So the sweep counts recaps by source and logs
+session, which means it also masks whether `away_summary` still arrives at all: the rate-limit gate could
+stay shut for weeks and every line would still read fine. So the sweep counts recaps by source and logs
 the summary whenever the away-summary count crosses zero in either direction. Without that, this PR would
-have removed the only symptom by which the original month-long silence became visible — and the evidence
-for the causal story is mechanism-level (herdr delivers the escape sequences, verified) rather than
-outcome-level (a record observed after a corral-driven cycle, not yet observed). If the causal story is
-wrong, the counter is what says so.
+have removed the only symptom by which the original month-long silence became visible. With it, the day
+the gate opens is a log line rather than a coincidence someone notices.
+
+The chain is verified link by link, which is why the remaining zero is attributable rather than mysterious:
+herdr delivers CSI I / CSI O on a CLI-driven focus (isolated probe, herdr 0.8.0); the pane's Claude
+receives it and starts an attempt (its debug log, at the second of corral's blur); the attempt is refused
+by the rate-limit gate. Five earlier experiments each failed for a *different* reason — blur too early,
+blur while the driving script counted as that session's background work, blur after the prompt cache had
+gone stale, and twice the gate — which is what made the cause look elusive until the subject was asked to
+report it itself.
 
 The principle behind all of it: do not build observability on a signal produced by the user's attention
 when the product's whole purpose is to spare the user that attention.
@@ -151,6 +186,13 @@ when the product's whole purpose is to spare the user that attention.
 - **Writing focus-report bytes into the pane.** corral holds a real pty while the terminal is attached,
   so it could inject CSI O directly. Rejected: writing into another agent's pane is exactly what
   ADR-0002 closes off, and `herdr tab focus` reaches the same state through a supported control command.
+- **Chasing the generation's timing window from corral.** An earlier reading of the gate concluded the blur
+  had to land in a narrow band after the last request, which would have required a sweep that hunts idle
+  sessions and drives focus at them. The subject's own log disproved it: the attempt repeats while the pane
+  stays blurred, so one cycle is enough and corral needs no clock.
+- **Disabling focus translation because the recap still does not appear.** The gate that refuses it is the
+  account's rate-limit status, not anything corral does; the corral half is verified to work. Shutting it
+  off would only ensure nothing happens when the gate opens.
 - **A background focus sweep to keep the fleet blurred.** Unnecessary — `blurred` is sticky, one cycle
   per pane suffices — and it would move the operator's view with no action of theirs to explain it.
 - **`custom-title` / `agent-name` as ladder rungs.** They carry the session name corral already shows

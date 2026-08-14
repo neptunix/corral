@@ -169,11 +169,12 @@ export function lastRecord(
  * `last-prompt` is rewritten on every turn, so it is all but always the last candidate present, and
  * ordering by position would bury every `away_summary` that exists.
  *
- * Only `away_summary` is Claude summarizing its own work, and it is emitted only while the terminal
- * reports focus-out — which corral's own board stopped producing (design doc
- * `docs/adr/0005`; measured: 1.7% of transcripts, none after
- * 2026-07-31). The two lower rungs are written independently of focus: `ai-title` on 23% of
- * transcripts, `last-prompt` on 100%.
+ * Only `away_summary` is Claude summarizing its own work, and it is the rung corral cannot count on:
+ * it needs a terminal focus-out (which corral's board stopped producing) AND an account whose rate-limit
+ * status is exactly `allowed` (`docs/adr/0005`). Measured: 1.7% of transcripts, none after 2026-07-31.
+ * The two lower rungs are written independently of focus, of quota and of the operator's habits:
+ * `ai-title` on 23% of transcripts, `last-prompt` on 100%. That is why the ladder is the floor and the
+ * top rung is the bonus, not the reverse.
  *
  * `custom-title` / `agent-name` are deliberately NOT rungs — they hold the session name, which corral
  * already shows as the tab label and in the statusline, so they would only echo it back.

@@ -549,8 +549,9 @@ must run ≥10 min for its finish to count) · `CORRAL_HOME` (`~/.corral`) ·
 `$CORRAL_HOME` — see Architecture for why this must be a fresh directory) ·
 `RECAP_ENABLED` (true) · `STATUSLINE_ENABLED` (true) · `FOCUS_TRANSLATION_ENABLED` (true — corral
 focuses a session's herdr tab when you open its terminal and restores the previously focused tab when
-you close it, so the pane goes through a real focus-out and Claude can write its own recap again; set
-to `false` to leave herdr's focus untouched) · `CORRAL_ALLOW_UNDER_CLAUDE` (unset — set to
+you close it, so the pane goes through a real focus-out and Claude *can* write its own recap again. Note
+that Claude also refuses to write one unless the account's rate-limit status is exactly `allowed`, which
+corral cannot see or change — see `docs/adr/0005`; set to `false` to leave herdr's focus untouched) · `CORRAL_ALLOW_UNDER_CLAUDE` (unset — set to
 exactly `1` to start anyway from inside a Claude Code session; see Launching corral).
 
 WebSocket attach: `WS_MAX_CONCURRENT` (3) · `WS_RATE_PER_WINDOW` (10) / `WS_RATE_WINDOW_MS`

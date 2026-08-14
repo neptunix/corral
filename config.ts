@@ -64,6 +64,14 @@ export const STATUSLINE_STALE_MS = intFromEnv("STATUSLINE_STALE_MS", 120000, { m
  *   `unknown`. The tab has to KEEP the focus until some later focus event blurs it (the next spawn, or
  *   any session opened on the board), and that event is what puts Claude in `blurred`.
  *
+ * MEASURED LIMIT: restoring focus is necessary but not sufficient. Claude also refuses to generate the
+ * recap unless the account's rate-limit status is exactly `allowed` — a near-limit account logs
+ * `[awaySummary] skipped: at or near rate limit` and writes nothing, however correct the focus cycle
+ * (observed at the second of a corral-driven blur, on two accounts, one at 56 % of its weekly window).
+ * corral can neither read nor influence that, which is why the ladder is the floor and this is the
+ * quality bonus. The attempt repeats while the pane stays blurred, so no timing chase is needed: the
+ * recap appears by itself once the gate opens, and `by_source` in the recap sweep is what reports it.
+ *
  * Set FOCUS_TRANSLATION_ENABLED=false to leave herdr's focus strictly alone (spawns then create tabs
  * with `--no-focus`); the recap ladder in server/transcript.ts keeps working either way.
  */

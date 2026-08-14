@@ -307,9 +307,10 @@ export function createPoller(opts: {
       const t0 = Date.now();
       let found = 0, notFound = 0, noSummary = 0, errors = 0;
       // Counted per ladder rung, not just `found`. The ladder fills the recap line for nearly every
-      // session, which means it also HIDES whether the top rung still works: focus translation could
-      // stop producing `away_summary` entirely and every line would still read fine. `away_summary: 0`
-      // sweep after sweep is the signal that it has broken again, and it exists only if counted.
+      // session, which means it also HIDES whether the top rung still works: `away_summary` is refused
+      // outright while the account's rate-limit status is not exactly `allowed` (docs/adr/0005), and
+      // every line would still read fine throughout. `away_summary: 0` sweep after sweep is the signal
+      // that the top rung is shut — and the day it reopens is a log line only if this is counted.
       const bySource = new Map<RecapSource, number>();
 
       // Install-drift heuristic: warn once if panes have cwd but no sessionId. State the OBSERVATION

@@ -18,8 +18,8 @@ export const RecapStatusSchema = z.enum(["ok", "no-session-ref", "not-found", "n
 // the read: a successful read can still be showing the operator's own last prompt rather than a recap
 // the session wrote about itself, and collapsing the two would make "ok" mean both.
 //
-// `away-summary` is the only rung Claude writes ABOUT ITS OWN WORK — and it requires a terminal
-// focus-out, which corral's own board stopped producing (see docs/adr/0005).
+// `away-summary` is the only rung Claude writes ABOUT ITS OWN WORK — and the only one that can go silent:
+// it needs a terminal focus-out plus an account at exactly `allowed` rate-limit status (docs/adr/0005).
 // `ai-title` is the topic Claude generates for the session; `last-prompt` is what the
 // operator asked for, not what came of it. Ordered by descending quality, which is the order readRecap
 // tries them in.
