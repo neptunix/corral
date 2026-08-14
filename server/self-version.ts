@@ -6,6 +6,11 @@ import { z } from "zod";
  * Resolved from this module's own location, so it is the package.json of the checkout the server runs
  * from — not the cwd's, which a launch from elsewhere would find instead. `import.meta.dirname` is
  * available from Node 20.11, which is also `engines.node`.
+ *
+ * `package.json`'s `version` field is the SINGLE source for `SelfInfo.version`, and nothing verifies it
+ * against the release tags — bump it in the same commit as the tag, or the diagnostics panel reports a
+ * build the operator is not running (and, once `SelfInfo.latest` is wired, a permanent false "update
+ * available").
  */
 export const PACKAGE_JSON_PATH = path.join(import.meta.dirname, "..", "package.json");
 

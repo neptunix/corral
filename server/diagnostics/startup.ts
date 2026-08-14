@@ -147,13 +147,19 @@ export function binaryChecks(
     }];
   }
   // One row per missing binary, all under the SAME id — the id is the subject; the key carries the
-  // binary. `title` is the short claim, `detail` the consequence + PATH + remedy — they must not
-  // overlap, or the report prints the same sentence twice.
+  // binary.
+  //
+  // The whole sentence goes in `title`, with an EMPTY `detail`, deliberately: the startup report must
+  // print exactly the lines it printed before this module existed, and `formatReport` renders a
+  // non-empty `detail` as a second, indented continuation line. Splitting this into
+  // `missingBinaryTitle` + `missingBinaryDetail` would gain the launch report a line. The two halves
+  // stay exported for the panel — making that split is stage 2's call, once the rail has a renderer of
+  // its own that is not bound by startup parity.
   return missing.map((m) => ({
     ...base, id: "bin-on-path", key: checkKey("bin-on-path", scope, m.bin),
-    title: missingBinaryTitle(m),
+    title: missingBinaryMessage(m, pathEnv),
     state: "problem" as const, severity: "fatal" as const, startupOkLine: false,
-    detail: missingBinaryDetail(m, pathEnv),
+    detail: "",
   }));
 }
 

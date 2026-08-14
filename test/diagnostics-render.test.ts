@@ -2,6 +2,9 @@ import type { Check } from "@shared/diagnostics-schema";
 import { describe, it, expect } from "vitest";
 
 import { haltsLaunch, toReportLines } from "../server/diagnostics/render.ts";
+import {
+  binaryChecks, missingBinaryDetail, missingBinaryTitle,
+} from "../server/diagnostics/startup.ts";
 
 const check = (over: Partial<Check>): Check => ({
   id: "x", key: "x", title: "X", state: "ok", severity: "info", detail: "",
@@ -55,6 +58,26 @@ describe("toReportLines — the mark comes from haltsStartup, not severity", () 
     expect(withDetail?.detail).toBe("PATH: /bin");
     const [without] = toReportLines([check({ state: "problem", detail: "" })]);
     expect(without).not.toHaveProperty("detail");
+  });
+});
+
+describe("binaryChecks — the missing-binary line stays ONE startup line", () => {
+  const missing = [{ bin: "herdr", envIds: ["a", "b"] }];
+
+  it("puts the whole sentence in title and leaves detail empty", () => {
+    const [check] = binaryChecks([], missing, "/usr/bin:/bin", 1);
+    // A non-empty detail renders as a second, indented continuation line (preflight.ts formatReport),
+    // so the launch report would gain a line it never printed before this module existed.
+    expect(check?.detail).toBe("");
+    expect(check?.title).toContain(missingBinaryTitle(missing[0]!));
+    expect(check?.title).toContain(missingBinaryDetail(missing[0]!, "/usr/bin:/bin"));
+  });
+
+  it("renders as a single ⚠ line with no continuation", () => {
+    const lines = toReportLines(binaryChecks([], missing, "/usr/bin:/bin", 1));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.level).toBe("warning"); // fatal severity, haltsStartup false — the server boots
+    expect(lines[0]).not.toHaveProperty("detail");
   });
 });
 

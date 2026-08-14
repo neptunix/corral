@@ -60,8 +60,13 @@ export interface DiagnosticsSweep {
  * The ids, severities and doc anchors mirror the producers deliberately. `enumerateChecks()` includes
  * a remote environment, so Task 14's anchor guard reaches these rows too: a wrong anchor here fails
  * that guard rather than shipping a dead README link.
+ *
+ * Exported for the drift guard in `test/diagnostics-sweep.test.ts`, which runs the local producers for
+ * one dir and requires their id set to equal this list's. TypeScript cannot see the relationship, so
+ * without that test a per-dir check added to a producer would just stop appearing for every remote
+ * environment — a silent absence in the surface with the least visibility.
  */
-const REMOTE_DIR_SUBJECTS: readonly {
+export const REMOTE_DIR_SUBJECTS: readonly {
   readonly id: string;
   readonly label: string;
   readonly severity: CheckSeverity;
