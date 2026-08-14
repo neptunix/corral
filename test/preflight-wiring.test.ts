@@ -112,7 +112,7 @@ describe("the config check cannot go inert again", () => {
     // A static `import { ENVIRONMENTS }` anywhere in the graph evaluates environments.ts before the
     // startup body runs, making the config try/catch unreachable — and it compiles and lints clean.
     const offenders = serverSources().filter((f) =>
-      /^import\s+\{[^}]*\}\s+from\s+"\.\.\/environments\.ts"/m.test(read(path.join("server", f))),
+      /^import\s+\{[^}]*\}\s+from\s+"(?:\.\.\/)+environments\.ts"/m.test(read(path.join("server", f))),
     );
     expect(offenders).toEqual([]);
   });
