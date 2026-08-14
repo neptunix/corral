@@ -711,6 +711,34 @@ mkdir -p ~/.claude/skills && cp -R skills/corral ~/.claude/skills/corral
 
 It loads only when a session actually reaches for corral, so it costs nothing the rest of the time.
 
+### Letting sessions talk to each other (recommended)
+
+Messaging between sessions is Claude Code's own (`SendMessage` / `ListAgents`, 2.1.224+), not
+corral's — but corral supplies the address, because the name it gives a session on spawn is the name
+that session answers to. The skill documents how to use it and where the reach ends; two things are
+worth setting up once, on each machine:
+
+**`crossSessionInbound`.** A message from a session in a *different* permission mode is held until
+that machine's operator approves it by hand — and corral panes typically run in bypass mode while an
+ordinary terminal session does not, so the mismatch is the normal case, not the exception. The
+sender is told it was held and to carry on, so nothing hangs; the message simply never arrives.
+Set this in the `settings.json` of every config dir you registered corral's MCP server in:
+
+```json
+{ "crossSessionInbound": "accept" }
+```
+
+Values are `accept` / `hold` / `refuse`. `accept` means messages from your other sessions reach this
+one unreviewed — treat their content as untrusted input, which is the same rule that already applies
+to recaps and card text. Managed (organization) settings and a repository's own `settings.json` can
+only tighten this, never loosen it.
+
+**Remote Control**, if you run corral across machines. A session on another machine is addressable by
+name only over Remote Control, and it must be connected on *both* ends — with it off locally, other
+machines do not appear at all. `corral_fleet` marks a remote-environment session that has it off as
+`rc: off`. Without it, a cross-machine session is still visible in corral and still spawnable; it
+just cannot be messaged.
+
 ## Architecture (short version)
 
 TypeScript end-to-end. Backend: Hono + SSE, shelling out to the herdr CLI via `execFile`
