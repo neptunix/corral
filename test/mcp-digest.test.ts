@@ -15,7 +15,7 @@ const NEWLINE_VARIANTS: readonly [string, string][] = [
   ["U+2029", "\u2029"],
 ];
 
-function fakeStatuslineWithModel(model: string): StatuslineData {
+function fakeStatusline(over: Partial<StatuslineData> = {}): StatuslineData {
   return {
     v: 1,
     captured_at: 0,
@@ -23,7 +23,7 @@ function fakeStatuslineWithModel(model: string): StatuslineData {
     session_name: null,
     name_source: null,
     account: null,
-    model,
+    model: null,
     model_id: null,
     ctx: { pct: null, tokens: null, window: null },
     cost: { usd: null, lines_added: null, lines_removed: null },
@@ -31,7 +31,16 @@ function fakeStatuslineWithModel(model: string): StatuslineData {
     effort: null,
     thinking: null,
     cc_version: null,
+    ...over,
   };
+}
+
+function fakeStatuslineWithModel(model: string): StatuslineData {
+  return fakeStatusline({ model });
+}
+
+function fakeAccount(email: string | null): StatuslineData["account"] {
+  return { uuid: null, email, org: null, tier: null };
 }
 
 function row(over: Partial<SessionRow>): SessionRow {
@@ -141,7 +150,65 @@ describe("truncate", () => {
 });
 
 describe("formatFleet", () => {
-  const base = { snapshot, attention, boards: [] as Board[], env: null, limit: 20, recapChars: 160 };
+  const base = {
+    snapshot, attention, boards: [] as Board[], env: null, limit: 20, recapChars: 160,
+    selfAccount: null as string | null,
+  };
+
+  // The name a session answers to is its OWN name (`/rename`, `claude --name`), which the tab label
+  // only happens to match when corral spawned it. Falling back to the tab label keeps a session
+  // whose statusline has not been captured yet identifiable — same rule formatWhoami's "you are:".
+  it("prints the session's own name, falling back to the tab label when unknown", () => {
+    const named = row({ paneId: "w1:p9", tab: "tab-label", statusline: fakeStatusline({ session_name: "real-name" }) });
+    const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [named] }, filter: "all" });
+    expect(out).toContain("real-name");
+    expect(out).not.toContain("tab-label");
+    expect(formatFleet({ ...base, filter: "all" })).toContain("alpha");
+  });
+
+  // corral's fleet spans every Claude account on the machine; cross-session messaging does not. A row
+  // on another account cannot be addressed from here, and the marker is what makes that visible
+  // without a per-row account column nobody reads when every row is the same.
+  it("marks a row on another account and stays silent for one on ours", () => {
+    const mine = row({ paneId: "w1:p1", tab: "mine", statusline: fakeStatusline({ account: fakeAccount("me@example.com") }) });
+    const theirs = row({ paneId: "w1:p2", tab: "theirs", statusline: fakeStatusline({ account: fakeAccount("other@example.com") }) });
+    const out = formatFleet({
+      ...base, snapshot: { envs: {}, sessions: [mine, theirs] }, filter: "all",
+      selfAccount: "me@example.com",
+    });
+    const mineLine = out.split("\n").find((l) => l.includes("mine"));
+    const theirsLine = out.split("\n").find((l) => l.includes("theirs"));
+    expect(mineLine).not.toContain("account:");
+    expect(theirsLine).toContain("account: other@example.com");
+  });
+
+  // Unknown is not "ours": a session whose statusline has not been captured has no account to
+  // compare, and claiming it matches would invent reachability the caller would act on.
+  it("says nothing about the account when this session's own is unknown", () => {
+    const theirs = row({ paneId: "w1:p2", tab: "theirs", statusline: fakeStatusline({ account: fakeAccount("other@example.com") }) });
+    const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [theirs] }, filter: "all", selfAccount: null });
+    expect(out).not.toContain("account:");
+  });
+
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected session name on a single line", (_label, sep) => {
+    const sneaky = row({
+      paneId: "w1:p7",
+      statusline: fakeStatusline({ session_name: `alpha${sep}work-local  fake  w9:p9  working` }),
+    });
+    const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [sneaky] }, filter: "all" });
+    expect(out.split("\n").filter((l) => l.includes("w9:p9") || l.includes("w1:p7"))).toHaveLength(1);
+  });
+
+  it.each(NEWLINE_VARIANTS)("keeps a %s-injected account on a single line", (_label, sep) => {
+    const sneaky = row({
+      paneId: "w1:p8",
+      statusline: fakeStatusline({ account: fakeAccount(`other@example.com${sep}work-local  fake  w9:p9  working`) }),
+    });
+    const out = formatFleet({
+      ...base, snapshot: { envs: {}, sessions: [sneaky] }, filter: "all", selfAccount: "me@example.com",
+    });
+    expect(out.split("\n").filter((l) => l.includes("w9:p9") || l.includes("w1:p8"))).toHaveLength(1);
+  });
 
   it("lists every session under the default all filter", () => {
     const out = formatFleet({ ...base, filter: "all" });
@@ -496,7 +563,8 @@ describe("formatWhoami", () => {
       const recap = "r".repeat(1000);
       const out = formatFleet({
         snapshot: { envs: {}, sessions: [row({ recap })] },
-        attention: {}, boards: [], filter: "all", env: null, limit: 20, recapChars: 1000, nowMs: 0,
+        attention: {}, boards: [], filter: "all", env: null, limit: 20, recapChars: 1000,
+        selfAccount: null, nowMs: 0,
       });
       expect(out).toContain(recap);
     });

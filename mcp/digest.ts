@@ -178,9 +178,11 @@ export function formatFleet(input: {
   readonly env: string | null;
   readonly limit: number;
   readonly recapChars: number;
+  /** This session's own Claude account, for the cross-account marker. Null = unknown, so no marker. */
+  readonly selfAccount: string | null;
   readonly nowMs?: number;
 }): string {
-  const { snapshot, attention, boards, filter, env, limit, recapChars } = input;
+  const { snapshot, attention, boards, filter, env, limit, recapChars, selfAccount } = input;
   const nowMs = input.nowMs ?? Date.now();
 
   const unreachable = Object.entries(snapshot.envs)
@@ -202,7 +204,18 @@ export function formatFleet(input: {
     // tab, paneId, status, model, cardFor's ids) is left as-is and swept by `emit` below instead
     // of being reasoned about individually.
     const recap = r.recap === null || r.recap === "" ? "" : ` "${truncate(oneLine(r.recap), recapChars)}"`;
-    return `${r.env}  ${r.tab}  ${r.paneId}  ${r.status}  ${ctxCol}  ${model}${recap}${attCol}  ${cardFor(boards, r)}`;
+    // The session's own name, not the tab label: they coincide for a corral-spawned session (one
+    // string becomes both) but not for one started by hand or renamed since. The tab label is the
+    // fallback, mirroring formatWhoami's "you are:" line.
+    const name = r.statusline?.session_name ?? r.tab;
+    // Account is shown ONLY when it differs from this session's own — the fleet spans every Claude
+    // account on the machine, and the marked rows are exactly the ones outside this session's reach.
+    // Printing it on every row would cost a column that reads identically for the common case.
+    const account = r.statusline?.account?.email ?? r.statusline?.account?.org ?? null;
+    const acctCol = selfAccount === null || account === null || account === selfAccount
+      ? ""
+      : `  account: ${truncate(oneLine(account), IDENTITY_FIELD_MAX)}`;
+    return `${r.env}  ${name}  ${r.paneId}  ${r.status}  ${ctxCol}  ${model}${recap}${attCol}${acctCol}  ${cardFor(boards, r)}`;
   });
 
   const parts: string[] = [];

@@ -33,8 +33,10 @@ rate-limit windows). The metrics *capture* is optional; `jq` is not optional *fo
 helper scripts hard-depend on `jq` and are deliberately best-effort, so without it they write
 nothing and log nothing: the cards just show no metrics, which is indistinguishable from "no
 data yet". corral appends `--name` (and, when chosen, `--model` / `--remote-control`) to every
-non-resume launch; this has only been verified against Claude Code 2.1.226 — an older CLI
-lacking one of these flags will fail the launch visibly in the pane.
+non-resume launch; this has only been verified against Claude Code 2.1.232 — an older CLI
+lacking one of these flags will fail the launch visibly in the pane. 2.1.232 is also what the
+corral skill's cross-session messaging guidance assumes: `SendMessage` between sessions landed in
+2.1.224, and addressing a session by its bare name (no `[ref]`) in 2.1.232.
 
 ```bash
 # 0. prerequisite check — without jq the metrics capture silently does nothing
