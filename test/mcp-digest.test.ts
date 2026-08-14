@@ -165,7 +165,17 @@ describe("formatFleet", () => {
   it("treats an empty captured name as absent rather than rendering a blank name column", () => {
     const blank = row({ paneId: "w1:p9", tab: "tab-label", statusline: fakeStatusline({ session_name: "" }) });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [blank] }, filter: "all" });
-    expect(out).toContain("tab-label");
+    expect(out).toContain("tab-label (tab label, name not captured)");
+  });
+
+  // The commonest row shape in a real fleet: a session whose statusline has not been captured has no
+  // account to compare, and must stay unmarked rather than be called a cross-account row.
+  it("leaves a row with no captured account unmarked even when our own account is known", () => {
+    const unknown = row({ paneId: "w1:p1", tab: "no-capture", statusline: null });
+    const out = formatFleet({
+      ...base, snapshot: { envs: {}, sessions: [unknown] }, filter: "all", selfAccount: "me@example.com",
+    });
+    expect(out).not.toContain("account:");
   });
 
   // The account line falls back to the organization when the capture has no email — the same order
@@ -332,7 +342,7 @@ describe("formatFleet", () => {
     const solo = row({ paneId: "w1:p1", status: "working", tab: "alpha" });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [solo] }, filter: "all" });
     const firstLine = out.split("\n")[0];
-    expect(firstLine).toBe("work-local  alpha  w1:p1  working  —  —  [unassigned]");
+    expect(firstLine).toBe("work-local  alpha (tab label, name not captured)  w1:p1  working  —  —  [unassigned]");
   });
 
   it.each(NEWLINE_VARIANTS)("sweeps a %s out of a recap entirely, not merely off the \\n-split", (_label, sep) => {

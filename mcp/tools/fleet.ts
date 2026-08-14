@@ -33,7 +33,13 @@ export function fleetHandler(deps: FleetDeps, args: FleetArgs): Promise<string> 
       client.boards(),
       // Best-effort: the fleet digest must render even when this session cannot resolve its own
       // identity (a pane corral has not registered yet). Unknown simply drops the account marker.
-      deps.identity.load().then((me) => me.session.account).catch(() => null),
+      //
+      // Re-read when the cached answer has no account. identity caches the FIRST whoami, and the
+      // mandated first call often lands before this pane's statusline exists — caching that null
+      // would silence the cross-account marker for the rest of the process.
+      deps.identity.load()
+        .then(async (me) => me.session.account ?? (await deps.identity.load(true)).session.account)
+        .catch(() => null),
     ]);
     return formatFleet({
       snapshot,
