@@ -34,9 +34,9 @@ helper scripts hard-depend on `jq` and are deliberately best-effort, so without 
 nothing and log nothing: the cards just show no metrics, which is indistinguishable from "no
 data yet". corral appends `--name` (and, when chosen, `--model` / `--remote-control`) to every
 non-resume launch; this has only been verified against Claude Code 2.1.232 — an older CLI
-lacking one of these flags will fail the launch visibly in the pane. 2.1.232 is also what the
-corral skill's cross-session messaging guidance assumes: `SendMessage` between sessions landed in
-2.1.224, and addressing a session by its bare name (no `[ref]`) in 2.1.232.
+lacking one of these flags will fail the launch visibly in the pane. The cross-session messaging
+the corral skill describes was verified on that same build; per the Claude Code changelog it landed
+in 2.1.224, which is older than anything available here to check against.
 
 ```bash
 # 0. prerequisite check — without jq the metrics capture silently does nothing
@@ -713,7 +713,7 @@ It loads only when a session actually reaches for corral, so it costs nothing th
 
 ### Letting sessions talk to each other (recommended)
 
-Messaging between sessions is Claude Code's own (`SendMessage` / `ListAgents`, 2.1.224+), not
+Messaging between sessions is Claude Code's own (`SendMessage` / `ListAgents`), not
 corral's — but corral supplies the address, because the name it gives a session on spawn is the name
 that session answers to. The skill documents how to use it and where the reach ends; two things are
 worth setting up once, on each machine:

@@ -1,3 +1,4 @@
+import type { SessionRow, StatuslineData } from "@shared/schema";
 import type { WhoamiResponse } from "@shared/whoami-schema.ts";
 import { describe, expect, it } from "vitest";
 
@@ -146,6 +147,36 @@ describe("fleetHandler", () => {
   it("reports an unreachable corral as text", async () => {
     const client = stub({ state: async () => { throw new CorralError("unreachable", "corral is not reachable"); } });
     expect(await fleetHandler(fleetDeps(client), {})).toContain("not reachable");
+  });
+
+  // The wiring itself: this session's own account has to travel from the whoami read into the
+  // rendered row. Asserting only the "no marker" case (below) would pass with the plumbing deleted.
+  it("carries this session's own account into the digest, marking only the rows that differ", async () => {
+    const statusline = (email: string): StatuslineData => ({
+      v: 1, captured_at: 0, session_id: "s1", session_name: null, name_source: null,
+      account: { uuid: null, email, org: null, tier: null },
+      model: null, model_id: null,
+      ctx: { pct: null, tokens: null, window: null },
+      cost: { usd: null, lines_added: null, lines_removed: null },
+      rate: { five_hour: null, seven_day: null },
+      effort: null, thinking: null, cc_version: null,
+    });
+    const stateRow = (paneId: string, tab: string, email: string): SessionRow => ({
+      env: "work-local", paneId, status: "idle", agent: "claude", cwd: "/r",
+      tab, workspace: "w", sessionId: null,
+      recap: null, recapAt: null, recapStatus: null, statusline: statusline(email),
+      statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+    });
+    const client = stub({
+      whoami: async () => ({ ...resolved, session: { ...resolved.session, account: "me@example.com" } }),
+      state: async () => ({
+        envs: { "work-local": { reachable: true } },
+        sessions: [stateRow("w1:p1", "mine", "me@example.com"), stateRow("w1:p2", "theirs", "other@example.com")],
+      }),
+    });
+    const out = await fleetHandler(fleetDeps(client), {});
+    expect(out.split("\n").find((l) => l.includes("theirs"))).toContain("account: other@example.com");
+    expect(out.split("\n").find((l) => l.includes("mine"))).not.toContain("account:");
   });
 
   // The account marker is an extra, not a precondition: a session whose own pane corral cannot

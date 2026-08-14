@@ -35,12 +35,8 @@ function fakeStatusline(over: Partial<StatuslineData> = {}): StatuslineData {
   };
 }
 
-function fakeStatuslineWithModel(model: string): StatuslineData {
-  return fakeStatusline({ model });
-}
-
-function fakeAccount(email: string | null): StatuslineData["account"] {
-  return { uuid: null, email, org: null, tier: null };
+function fakeAccount(email: string | null, org: string | null = null): StatuslineData["account"] {
+  return { uuid: null, email, org, tier: null };
 }
 
 function row(over: Partial<SessionRow>): SessionRow {
@@ -164,6 +160,22 @@ describe("formatFleet", () => {
     expect(out).toContain("real-name");
     expect(out).not.toContain("tab-label");
     expect(formatFleet({ ...base, filter: "all" })).toContain("alpha");
+  });
+
+  it("treats an empty captured name as absent rather than rendering a blank name column", () => {
+    const blank = row({ paneId: "w1:p9", tab: "tab-label", statusline: fakeStatusline({ session_name: "" }) });
+    const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [blank] }, filter: "all" });
+    expect(out).toContain("tab-label");
+  });
+
+  // The account line falls back to the organization when the capture has no email — the same order
+  // formatWhoami uses. Without this, a row on another account renders unmarked, i.e. as reachable.
+  it("falls back to the organization name when the account has no email", () => {
+    const theirs = row({ paneId: "w1:p2", tab: "theirs", statusline: fakeStatusline({ account: fakeAccount(null, "AcmeCo") }) });
+    const mine = row({ paneId: "w1:p1", tab: "mine", statusline: fakeStatusline({ account: fakeAccount(null, "MyOrg") }) });
+    const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [mine, theirs] }, filter: "all", selfAccount: "MyOrg" });
+    expect(out.split("\n").find((l) => l.includes("theirs"))).toContain("account: AcmeCo");
+    expect(out.split("\n").find((l) => l.includes("mine"))).not.toContain("account:");
   });
 
   // corral's fleet spans every Claude account on the machine; cross-session messaging does not. A row
@@ -351,7 +363,7 @@ describe("formatFleet", () => {
   it.each(NEWLINE_VARIANTS)("keeps a %s-injected statusline model on a single line", (_label, sep) => {
     const sneaky = row({
       paneId: "w1:p6",
-      statusline: fakeStatuslineWithModel(`Opus${sep}work-local  fake  w9:p9  working`),
+      statusline: fakeStatusline({ model: `Opus${sep}work-local  fake  w9:p9  working` }),
     });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [sneaky] }, filter: "all" });
     expect(out.split("\n").filter((l) => l.includes("w9:p9") || l.includes("w1:p6"))).toHaveLength(1);

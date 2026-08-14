@@ -45,9 +45,10 @@ the log from memory.
 ## Talking to another session
 
 Messaging between sessions belongs to the harness, not to corral: `SendMessage` sends, `ListAgents`
-discovers. corral supplies the address — **a session's name is what you message it by**, the same
-string `corral_fleet` prints and `corral_spawn` was given. Needs Claude Code ≥ 2.1.232, where a bare
-name delivers without a `[ref]`.
+discovers. corral supplies the address — **a session's name is what you message it by**, the name
+`corral_fleet` prints and `corral_spawn` *replies with*. Not the name you asked for: corral slugifies
+it and appends a disambiguating letter when it is taken, so `wm-stake-toggle` may land as
+`wm-stake-toggle-a`. Read the address off the reply.
 
 **The fleet is wider than your reach.** corral spans every environment and every Claude account on
 the machine; messaging reaches your own account only. Two markers in a fleet row say where it stops:
@@ -110,8 +111,10 @@ compose the text and let this procedure carry it. Once they agree:
    worktree checkout stays visible. Pass `repo` only to send it to a *different* project: it then
    lands in that repository's workspace, at its root, and a name that is not configured for the
    target environment comes back refused with the list of ones that are.
-   Pass `name`, and pass the WHOLE name — corral uses your string verbatim as the Claude session
-   name, the tab label and the card's label, and adds no prefix of its own. Write it as
+   Pass `name`, and pass the WHOLE name — corral uses your string as the Claude session name, the tab
+   label and the card's label, and adds no prefix of its own (it does slugify it, and appends a
+   letter when that name is already taken, so the reply — not your request — carries the name the new
+   session actually answers to). Write it as
    `{slug}-{name}`: `{slug}` a very short label for the card, `{name}` two to four words for what the
    new session does (`wm-stake-rc-toggle-ui`, `confluence-registry-watcher`). **Reuse the slug of your
    own session name** when you have one, so a card's sessions cluster. Lowercase ASCII letters,

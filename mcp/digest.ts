@@ -207,10 +207,18 @@ export function formatFleet(input: {
     // The session's own name, not the tab label: they coincide for a corral-spawned session (one
     // string becomes both) but not for one started by hand or renamed since. The tab label is the
     // fallback, mirroring formatWhoami's "you are:" line.
-    const name = r.statusline?.session_name ?? r.tab;
+    // "" counts as absent, not as a name: a captured-but-empty session_name would otherwise render a
+    // blank column exactly where the reader is told to find an address.
+    const capturedName = r.statusline?.session_name;
+    const name = capturedName === null || capturedName === undefined || capturedName === "" ? r.tab : capturedName;
     // Account is shown ONLY when it differs from this session's own — the fleet spans every Claude
     // account on the machine, and the marked rows are exactly the ones outside this session's reach.
     // Printing it on every row would cost a column that reads identically for the common case.
+    //
+    // Compared as the DISPLAY string, not the account uuid, so two accounts in one organization whose
+    // email is missing both read as `org` and go unmarked. That errs toward "try it": an unmarked
+    // unreachable row costs one send that answers "not reachable", whereas plumbing the uuid through
+    // the whoami schema costs a wider change than the miss is worth.
     const account = r.statusline?.account?.email ?? r.statusline?.account?.org ?? null;
     const acctCol = selfAccount === null || account === null || account === selfAccount
       ? ""
