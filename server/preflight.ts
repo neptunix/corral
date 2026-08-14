@@ -1,84 +1,15 @@
-import { accessSync, constants, statSync } from "node:fs";
-import path from "node:path";
-
 import { ENV_CONFIG_PATH } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
+import { isExecutableFile, resolveOnPath } from "./diagnostics/deps.ts";
+import type { ReportLine } from "./diagnostics/render.ts";
+import { haltsLaunch, toReportLines } from "./diagnostics/render.ts";
+import type { BuildReportInput } from "./diagnostics/startup.ts";
+import { buildStartupChecks, findMissingBinaries } from "./diagnostics/startup.ts";
 
-/**
- * Startup check that the binaries corral will actually exec are resolvable FROM THE SERVER PROCESS.
- *
- * Why this exists: `buildExec`/`buildAttachSpec` hand a BARE command name (`herdr`, `ssh`) to
- * execFile and node-pty, so resolution falls to whatever PATH the server happened to inherit. A
- * server started from a non-interactive shell (`bash -c`, cron, systemd, an agent, a pane that never
- * sourced a profile) does not get `~/.local/bin` — and then corral looks entirely healthy while
- * nothing works: the board renders from stored data, every card is frozen, and attach dies instantly
- * with `execvp(3) failed.: No such file or directory` inside the terminal modal. Nothing names the
- * binary and nothing names PATH. Worse, the operator's own shell resolves it fine, so the tell lives
- * only in the SERVER's environment — which is why this check must run here and report that PATH.
- *
- * The failure is diagnosed but invisible: pollEnv already records `{ reachable: false, error }` per
- * env, and that state already reaches the client on the wire — the web just never renders it. Until
- * it does, this startup line is the only thing that says the word `herdr` out loud.
- */
-export interface MissingBinary {
-  readonly bin: string;
-  readonly envIds: readonly string[];
-}
-
-/** True when `p` is a regular file the current process may execute. */
-export function isExecutableFile(p: string): boolean {
-  try {
-    if (!statSync(p).isFile()) return false;
-    accessSync(p, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Resolve a bare command name against PATH: each entry is tried in order and the first executable
- * wins. Empty PATH entries are skipped rather than treated as the cwd — resolution must not depend on
- * where the server was started. `isExecutable` is injected so the walk is testable without a
- * filesystem (`isExecutableFile` above has its own filesystem-backed tests).
- *
- * There is no verbatim branch for a name containing a separator: the only names reaching here are the
- * literals `findMissingBinaries` produces, and neither contains one. Add it back alongside whatever
- * makes a path-bearing name possible — a configurable local `herdrBin` would.
- */
-export function resolveOnPath(
-  bin: string,
-  pathEnv: string,
-  isExecutable: (p: string) => boolean,
-): string | null {
-  for (const dir of pathEnv.split(path.delimiter)) {
-    if (dir === "") continue;
-    const candidate = path.join(dir, bin);
-    if (isExecutable(candidate)) return candidate;
-  }
-  return null;
-}
-
-/**
- * Which binaries the configured environments need locally, and which of those do not resolve.
- * `local` needs `herdr` on this machine; `remote` needs `ssh` here — its `herdrBin` runs on the far
- * side and cannot be checked without a round trip, so it is deliberately out of scope.
- */
-export function findMissingBinaries(
-  envs: readonly HerdrEnv[],
-  resolve: (bin: string) => string | null,
-): MissingBinary[] {
-  const needed = new Map<string, string[]>();
-  for (const env of envs) {
-    const bin = env.kind === "remote" ? "ssh" : "herdr";
-    const ids = needed.get(bin);
-    if (ids === undefined) needed.set(bin, [env.id]);
-    else ids.push(env.id);
-  }
-  return [...needed.entries()]
-    .filter(([bin]) => resolve(bin) === null)
-    .map(([bin, envIds]) => ({ bin, envIds }));
-}
+export type { ReportLine } from "./diagnostics/render.ts";
+export type { MissingBinary } from "./diagnostics/startup.ts";
+export { findMissingBinaries, missingBinaryMessage } from "./diagnostics/startup.ts";
+export { isExecutableFile, resolveOnPath } from "./diagnostics/deps.ts";
 
 /**
  * Floor for the zombie reaper's grace window (ZOMBIE_REAP_GRACE_MS), clamped UP at startup so a
@@ -90,47 +21,6 @@ export function findMissingBinaries(
  * round's candidates), so a single stale sighting cannot reap a live pane. A stopped poll loop is a
  * separate case, handled by the tick-gap rail in zombie-reaper.ts.
  */
-/** True when `p` is a directory. Sibling of isExecutableFile; same synchronous, injectable shape. */
-export function isDirectory(p: string): boolean {
-  try { return statSync(p).isDirectory(); } catch { return false; }
-}
-
-export interface RegistryPreflight {
-  readonly envId: string;
-  readonly state: "ok" | "no-config-dirs" | "unreadable";
-  readonly detail: string;
-}
-
-/**
- * Whether corral can see Claude's session registry per environment. Local dirs are stat'd; a remote
- * one cannot be checked without an SSH round trip at startup — which would hang the launch on an
- * unreachable box — so only the knowable half is reported: an empty `claudeConfigDirs`, which is what
- * makes live session state not function on that environment at all.
- */
-export function checkRegistryDirs(
-  envs: readonly HerdrEnv[],
-  isDir: (p: string) => boolean,
-): RegistryPreflight[] {
-  return envs.map((env) => {
-    if (env.claudeConfigDirs.length === 0) {
-      return {
-        envId: env.id, state: "no-config-dirs" as const,
-        detail: 'no "claudeConfigDirs" — live session state and Remote Control do not function here',
-      };
-    }
-    if (env.kind === "remote") {
-      return { envId: env.id, state: "ok" as const, detail: "remote — readability is checked on the first sweep" };
-    }
-    const missing = env.claudeConfigDirs.filter((d) => !isDir(path.join(d, "sessions")));
-    return missing.length === 0
-      ? { envId: env.id, state: "ok" as const, detail: "" }
-      : {
-          envId: env.id, state: "unreadable" as const,
-          detail: `no sessions/ directory under ${String(missing.length)} of ${String(env.claudeConfigDirs.length)} config dir(s) — normal if Claude has never run there; live state stays empty until it does`,
-        };
-  });
-}
-
 export function resolveReapGrace(
   configuredMs: number,
   pollMs: number,
@@ -148,124 +38,9 @@ export function resolveReapGrace(
   };
 }
 
-export interface ReportLine {
-  readonly level: "ok" | "warning" | "fatal";
-  readonly text: string;
-  readonly detail?: string;
-}
-
-export interface BuildReportInput {
-  readonly env: NodeJS.ProcessEnv;
-  /** null when the config failed to load — nothing is known about the environments. */
-  readonly envs: readonly HerdrEnv[] | null;
-  readonly configLine: ReportLine;
-  readonly missing: readonly MissingBinary[];
-  readonly pathEnv: string;
-  /** Absent = not checked (the config failed to load). */
-  readonly registry?: readonly RegistryPreflight[];
-}
-
-const UNDER_CLAUDE_FATAL =
-  "corral passes its whole environment to every child process, so every herdr call and every " +
-  "live-terminal attach would carry this Claude session's variables.";
-
-const UNDER_CLAUDE_FIX =
-  "fix: prefix the launch — CORRAL_ALLOW_UNDER_CLAUDE=1 npm run dev   (or npm start)\n" +
-  "     or launch corral from a terminal outside Claude Code";
-
-function unpinnedLocalIds(envs: readonly HerdrEnv[]): string[] {
-  return envs.filter((e) => e.kind === "local" && e.socket === undefined).map((e) => e.id);
-}
-
-/** An empty socket path behaves exactly like an unset one — herdr.ts passes the value straight through. */
-const socketOf = (env: NodeJS.ProcessEnv): string | undefined =>
-  env.HERDR_SOCKET_PATH === undefined || env.HERDR_SOCKET_PATH === "" ? undefined : env.HERDR_SOCKET_PATH;
-
-function launchLines(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[] | null): ReportLine[] {
-  // Presence is the signal, whatever the value: `CLAUDECODE= npm run dev` would otherwise be a silent
-  // escape, and the only sanctioned one announces itself on every start.
-  if (env.CLAUDECODE === undefined) {
-    return [{ level: "ok", text: "not running under Claude Code" }];
-  }
-
-  // Exact match, not presence: CORRAL_ALLOW_UNDER_CLAUDE=0 must not disable the guard.
-  const overridden = env.CORRAL_ALLOW_UNDER_CLAUDE === "1";
-  const unpinned = envs === null ? [] : unpinnedLocalIds(envs);
-  // Only assert the wrong-fleet consequence when it is actually reachable: CLAUDECODE is set for every
-  // Claude process tree, including headless runs that inherit no socket at all.
-  const consequence =
-    socketOf(env) !== undefined && unpinned.length > 0
-      ? `\n\nHERDR_SOCKET_PATH is set here, and environment(s) ${unpinned.join(", ")} have no ` +
-        `explicit "socket" — they would follow this pane's herdr, not the one you meant.`
-      : "";
-
-  const lines: ReportLine[] = [{
-    level: overridden ? "warning" : "fatal",
-    text: "launched from inside a Claude Code session",
-    detail: `${UNDER_CLAUDE_FATAL}${consequence}${overridden ? "" : `\n\n${UNDER_CLAUDE_FIX}`}`,
-  }];
-  // Repeated on every start, not just once: the likeliest way this guard dies is the operator
-  // exporting the override into a shell profile and ceasing to notice.
-  if (overridden) {
-    lines.push({ level: "warning", text: "CORRAL_ALLOW_UNDER_CLAUDE=1 — the under-Claude guard is disabled" });
-  }
-  return lines;
-}
-
-/** Which binaries the configured envs actually make corral exec — the same split findMissingBinaries uses. */
-function neededBinaries(envs: readonly HerdrEnv[]): string[] {
-  return [...new Set(envs.map((e) => (e.kind === "remote" ? "ssh" : "herdr")))];
-}
-
-function socketLines(env: NodeJS.ProcessEnv, envs: readonly HerdrEnv[]): ReportLine[] {
-  const unpinned = unpinnedLocalIds(envs);
-  if (unpinned.length === 0) return [];
-  const ids = unpinned.join(", ");
-  const socket = socketOf(env);
-  return socket === undefined
-    ? [{
-        level: "warning",
-        text: `HERDR_SOCKET_PATH is unset — environment(s) ${ids} inherit the ambient socket`,
-        detail:
-          "They may return no sessions or route to the wrong herdr instance. Launch from the " +
-          "intended herdr context or set HERDR_SOCKET_PATH.",
-      }]
-    : [{
-        level: "warning",
-        text: `environment(s) ${ids} unpinned — they will use HERDR_SOCKET_PATH from this shell`,
-        detail: `HERDR_SOCKET_PATH=${socket}`,
-      }];
-}
-
 export function buildReport(input: BuildReportInput): { lines: readonly ReportLine[]; fatal: boolean } {
-  const lines: ReportLine[] = [...launchLines(input.env, input.envs), input.configLine];
-
-  if (input.envs !== null) {
-    // Missing binaries are a WARNING, never fatal: refusing to boot would turn a degraded deployment
-    // into a dead one.
-    if (input.missing.length === 0) {
-      // Name only what was actually looked up — an all-local config never searches for ssh, and a
-      // green line claiming otherwise is the silent lie this module exists to remove.
-      lines.push({ level: "ok", text: `${neededBinaries(input.envs).join(", ")} resolved on PATH` });
-    }
-    for (const m of input.missing) {
-      lines.push({ level: "warning", text: missingBinaryMessage(m, input.pathEnv) });
-    }
-    lines.push(...socketLines(input.env, input.envs));
-
-    const registry = input.registry ?? [];
-    const degraded = registry.filter((r) => r.state !== "ok");
-    if (registry.length > 0 && degraded.length === 0) {
-      lines.push({ level: "ok", text: "Claude session registry readable in every environment" });
-    }
-    // A warning, never fatal: live state is an enhancement, and refusing to boot over it would turn a
-    // degraded board into no board.
-    for (const r of degraded) {
-      lines.push({ level: "warning", text: `registry: environment "${r.envId}" — ${r.detail}` });
-    }
-  }
-
-  return { lines, fatal: lines.some((l) => l.level === "fatal") };
+  const checks = buildStartupChecks(input);
+  return { lines: toReportLines(checks), fatal: haltsLaunch(checks) };
 }
 
 export async function loadEnvironmentsOrReport(
@@ -305,18 +80,6 @@ export function formatReport(lines: readonly ReportLine[]): string {
   return ["corral preflight", ...body].join("\n");
 }
 
-
-/** One actionable line. The PATH is the load-bearing part — see the note on MissingBinary. */
-export function missingBinaryMessage(missing: MissingBinary, pathEnv: string): string {
-  return (
-    `[preflight] "${missing.bin}" is not on this server process's PATH, so environment(s) ` +
-    `${missing.envIds.join(", ")} cannot list sessions and every live-terminal attach will fail ` +
-    `immediately. PATH searched: ${pathEnv}. Fix the PATH the server is launched with (a ` +
-    `non-interactive shell does not read your profile) or install "${missing.bin}" into one of those ` +
-    `directories.`
-  );
-}
-
 /**
  * The whole preflight, as both entrypoints need it. Exported so `scripts/preflight.ts` and
  * `server/index.ts` cannot drift: a check added here fires on every launch path, and one added to only
@@ -328,10 +91,15 @@ export function missingBinaryMessage(missing: MissingBinary, pathEnv: string): s
  *
  * The dynamic import is load-bearing — environments.ts evaluates ENVIRONMENTS at module scope, so a
  * static import throws during resolution, before any of this can turn it into a readable line.
+ *
+ * Returns `configLine` alongside the report: a later sweep needs the same load result and must not
+ * import environments.ts a second time to get it — the module is evaluated once at module scope, so a
+ * second import returns the same result and only creates the illusion of a fresh read.
  */
 export async function runPreflight(): Promise<{
   report: { lines: readonly ReportLine[]; fatal: boolean };
   envs: readonly HerdrEnv[] | null;
+  configLine: ReportLine;
 }> {
   const env = process.env;
   const pathEnv = env.PATH ?? "";
@@ -345,7 +113,6 @@ export async function runPreflight(): Promise<{
     configLine: cfg.line,
     missing: cfg.ok ? findMissingBinaries(cfg.envs, (bin) => resolveOnPath(bin, pathEnv, isExecutableFile)) : [],
     pathEnv,
-    ...(cfg.ok ? { registry: checkRegistryDirs(cfg.envs, isDirectory) } : {}),
   });
-  return { report, envs: cfg.ok ? cfg.envs : null };
+  return { report, envs: cfg.ok ? cfg.envs : null, configLine: cfg.line };
 }
