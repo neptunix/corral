@@ -15,7 +15,7 @@ const resolved = {
     title: "Refactor the API", description: "why and how", status: "doing", priority: "p1",
     columns: [{ id: "todo", label: "Todo" }, { id: "doing", label: "Doing" }],
     sessions: [{
-      name: "api-refactor-a", claudeName: null, key: "work-local:w1:p1",
+      name: "api-refactor-a", key: "work-local:w1:p1",
       sessionId: "11111111-2222-3333-4444-555555555555",
       status: "working", detached: false, ctxPct: 41, self: true,
     }],
@@ -30,6 +30,15 @@ describe("whoami schema", () => {
     if (!parsed.resolved) throw new Error("expected resolved");
     expect(parsed.task?.sessions[0]?.self).toBe(true);
     expect(parsed.session.ctxPct).toBe(41);
+  });
+
+  // An MCP client talks to whatever corral server happens to be running, which may predate this
+  // field. Requiring it would fail EVERY card read against an older server rather than lose one
+  // informational string — the fixture above deliberately omits it.
+  it("accepts a card session from a server that does not send claudeName yet", () => {
+    const parsed = WhoamiResponseSchema.parse(resolved);
+    if (!parsed.resolved) throw new Error("expected resolved");
+    expect(parsed.task?.sessions[0]?.claudeName).toBeNull();
   });
 
   it("parses an unresolved payload carrying a reason and the env list", () => {

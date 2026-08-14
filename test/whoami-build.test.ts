@@ -116,6 +116,37 @@ describe("buildWhoami", () => {
     expect(c?.ctxPct).toBeNull();
   });
 
+  // claudeName is the address a peer is messaged by; the card's own `name` is only the label corral
+  // was asked for. The fixture already has all three states — the two names diverge on the self row
+  // (link `api-refactor-a` vs captured `api-refactor`, the shape a resumed session produces), the
+  // sibling is live with no capture, and the third link has no live row at all.
+  it("reports the captured Claude name per card session, and null when there is none", () => {
+    const localEnv = ENVIRONMENTS.find((e) => e.id === "work-local");
+    if (localEnv === undefined) throw new Error("fixture missing work-local");
+    const out = buildWhoami({
+      resolution: { ok: true, env: localEnv, row: me },
+      envs: ENVIRONMENTS, snapshot, boards: [board],
+    });
+    if (!out.resolved) throw new Error("expected resolved");
+    const sessions = out.task?.sessions ?? [];
+    expect(sessions.find((s) => s.name === "api-refactor-a")?.claudeName).toBe("api-refactor");
+    expect(sessions.find((s) => s.name === "api-refactor-b")?.claudeName).toBeNull();
+    expect(sessions.find((s) => s.name === "api-refactor-c")?.claudeName).toBeNull();
+  });
+
+  it("normalises an empty captured name to null rather than handing out a blank address", () => {
+    const localEnv = ENVIRONMENTS.find((e) => e.id === "work-local");
+    if (localEnv === undefined) throw new Error("fixture missing work-local");
+    const blank = row({ statusline: { ...statusline, session_name: "" }, statuslineStatus: "ok" });
+    const out = buildWhoami({
+      resolution: { ok: true, env: localEnv, row: blank },
+      envs: ENVIRONMENTS, snapshot: { ...snapshot, sessions: [blank, sibling] }, boards: [board],
+    });
+    if (!out.resolved) throw new Error("expected resolved");
+    expect(out.session.sessionName).toBeNull();
+    expect(out.task?.sessions.find((s) => s.name === "api-refactor-a")?.claudeName).toBeNull();
+  });
+
   it("returns a null task for a session bound to nothing", () => {
     const localEnv = ENVIRONMENTS.find((e) => e.id === "work-local");
     if (localEnv === undefined) throw new Error("fixture missing work-local");

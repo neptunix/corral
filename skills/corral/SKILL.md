@@ -48,20 +48,27 @@ Messaging between sessions belongs to the harness, not to corral: `SendMessage` 
 discovers. corral supplies the address — **a session's name is what you message it by** — but a card
 carries two names for a session, and only one of them is the address:
 
-- **The card's label** (`corral_whoami`'s session list, `corral_spawn`'s request) is the name corral
-  was *asked* for. It is not the address. corral slugifies it, appends a letter when it is taken, and
-  omits `--name` entirely when *resuming* a session — which then derives its own name from its
-  directory. On a real fleet this diverged on 6 of 16 panes.
-- **The name it answers to** is what `corral_fleet` prints, what `corral_spawn` *replies* with, and
-  what `corral_whoami` shows as `(as claude: …)` when the two differ. That is the address.
+- **The card's label** — `corral_whoami`'s session list, and what `corral_spawn` both asks for and
+  replies with. It is *not* an address. corral slugifies it, keeps it unique only within the card,
+  and omits `--name` entirely when *resuming* — a resumed session then derives its own name from its
+  directory. Claude Code separately keeps names unique per machine and appends a variant of its own
+  when the requested one is taken. On a real fleet the two diverged on 6 of 16 panes.
+- **The name it answers to** is the captured one: what `corral_fleet` prints, and what
+  `corral_whoami` shows as `(as claude: …)` when it differs from the label. That is the address.
 
 When they differ, messaging the card's label reaches nobody — or a stranger who happens to hold it.
+So after a spawn, the reply tells you what was *requested*; the address is confirmed one poll later,
+when the new session's own row appears in `corral_fleet`. `(claude name not captured)` means exactly
+that — unknown, not "same as the label".
 
-**The fleet is wider than your reach.** corral spans every environment and every Claude account on
-the machine; messaging reaches your own account only. Two markers in a fleet row say where it stops:
+**The fleet is wider than your reach.** corral spans every environment on the machine; messaging
+reaches only sessions registered under the same `CLAUDE_CONFIG_DIR` as this one, plus the account's
+Remote Control peers. Config dir, not account — one login can back two config dirs, and those cannot
+see each other. Two markers in a fleet row say where it stops:
 
-- **`account:`** — a different Claude account. Unreachable, whatever `env` says, and no setting
-  changes that from here. Operator's to act on.
+- **`account:`** — a different Claude account, so a different config dir too. Unreachable, whatever
+  `env` says, and no setting changes that from here. Operator's to act on. It is the common shape of
+  the boundary, not the boundary itself: an *unmarked* row can still be out of reach.
 - **`rc: off`** — another machine with Remote Control off. Reachable the moment it is on, **and
   only if this session has it on too**: Remote Control is what gives either side a channel off its
   own machine, so with it off here, other machines do not appear at all. Both ends, or neither.

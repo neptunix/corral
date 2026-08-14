@@ -591,7 +591,16 @@ describe("formatWhoami", () => {
       });
       expect(out).toContain("s0-orchestrator-spec  (as claude: github-private-e5)");
       expect(out.split("\n").find((l) => l.includes("matching"))).not.toContain("as claude");
-      expect(out.split("\n").find((l) => l.includes("unknown-yet"))).not.toContain("as claude");
+      // Unknown must not render like a verified match — that is what turns a card label into an
+      // address in the reader's hands.
+      expect(out.split("\n").find((l) => l.includes("unknown-yet"))).toContain("(claude name not captured)");
+    });
+
+    it("labels the tab-label stand-in on the `you are:` line instead of passing it off as a name", () => {
+      const out = formatWhoami({ ...resolved, session: { ...resolved.session, sessionName: null } });
+      const line = out.split("\n").find((l) => l.startsWith("you are:"));
+      expect(line).toContain("tab label");
+      expect(line).toContain("not an address");
     });
 
     it.each(NEWLINE_VARIANTS)("keeps a %s-injected live session name on a single line", (_label, sep) => {
@@ -1099,6 +1108,22 @@ describe("formatSpawnReply", () => {
     const out = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/repos/corral", idempotent: true });
     expect(out).not.toContain("It will read the brief");
     expect(out).toMatch(/did not receive this brief/i);
+  });
+
+  // The name in this reply is what corral ASKED for. corral only keeps it unique on the card, while
+  // Claude Code keeps names unique per machine and substitutes a variant when one is taken — so the
+  // reply cannot be handed straight to SendMessage, which is what the skill points readers at.
+  it("does not present the requested name as a confirmed address", () => {
+    const out = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/x", idempotent: false });
+    expect(out).toContain("what corral asked for");
+    expect(out).toContain("corral_fleet");
+  });
+
+  // Nothing named the adopted session at all: no launch command ran, so the name above is the card's.
+  it("tells the caller the adopted session was never named by corral", () => {
+    const out = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/x", idempotent: true });
+    expect(out).toContain("did not name it");
+    expect(out).toContain("corral_fleet");
   });
 
   // Both values come from herdr, where anything with socket access can rename a workspace.

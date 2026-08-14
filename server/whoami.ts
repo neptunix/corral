@@ -174,6 +174,16 @@ function envList(envs: readonly HerdrEnv[], snapshot: Snapshot): WhoamiEnv[] {
   }));
 }
 
+/**
+ * A captured session name, or null. `session_name` is `z.string().nullable()`, so "" is a valid
+ * capture — and an empty address is worse than a missing one: it renders as a blank where a reader
+ * is told to find the string to message. Normalised here, at the boundary, so every renderer of
+ * either name field inherits it.
+ */
+function capturedName(name: string | null | undefined): string | null {
+  return name === undefined || name === null || name === "" ? null : name;
+}
+
 function cardSession(index: LiveIndex, link: SessionLink, selfRow: SessionRow): WhoamiCardSession {
   // Liveness via the CANONICAL resolver (server/live-resolve.ts), not a local reimplementation: a
   // UUID-carrying link whose pane now holds a different session resolves via the UUID index or
@@ -181,7 +191,7 @@ function cardSession(index: LiveIndex, link: SessionLink, selfRow: SessionRow): 
   const live = resolveLiveRow(link, index);
   return {
     name: link.name,
-    claudeName: live?.statusline?.session_name ?? null,
+    claudeName: capturedName(live?.statusline?.session_name),
     key: `${link.env}:${link.paneId}`,
     sessionId: link.sessionId,
     status: live?.status ?? "detached",
@@ -234,7 +244,7 @@ function sessionBlock(env: HerdrEnv, row: SessionRow): WhoamiSession {
     workspaceId: row.workspaceId ?? "",
     workspaceLabel: row.workspace,
     sessionId: row.sessionId,
-    sessionName: sl?.session_name ?? null,
+    sessionName: capturedName(sl?.session_name),
     cwd: row.cwd,
     status: row.status,
     model: sl?.model ?? null,
