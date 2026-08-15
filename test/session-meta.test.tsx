@@ -122,6 +122,18 @@ describe("SessionMeta", () => {
     expect(text.getAttribute("title")).toBe("long text");
   });
 
+  // The badge carries the ⚠, but the text carries the doubt: a retained line is the best there is and
+  // still not what the last sweep saw. Now that a healthy recap is at full strength, the dimming is
+  // the only thing separating the two at a glance.
+  it("dims the recap text when the read failed and leaves a healthy one at full strength", () => {
+    const fresh = render(<SessionMeta statusline={statusline()} recap="a recap" recapStatus="ok" recapSource="away-summary" />);
+    expect(screen.getByText("a recap").className).not.toMatch(/text-muted-foreground\/\d/);
+    cleanup();
+    render(<SessionMeta statusline={statusline()} recap="a recap" recapStatus="read-error" recapSource="away-summary" />);
+    expect(screen.getByText("a recap").className).toContain("text-muted-foreground/50");
+    fresh.unmount();
+  });
+
   it("renders both halves even with nothing captured yet", () => {
     render(<SessionMeta statusline={null} recap={null} recapStatus={null} recapSource={null} />);
     expect(screen.getByText("metrics not read yet")).toBeTruthy();
