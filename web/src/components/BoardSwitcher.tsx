@@ -1,6 +1,8 @@
 import type { Board } from "@shared/board-schema";
-import type { JSX } from "react";
+import { useState, type JSX } from "react";
 
+import { GearIcon } from "./icons/gearIcon";
+import { SettingsModal } from "./SettingsModal";
 import { ThemeSwitch } from "./ThemeSwitch";
 
 interface Props {
@@ -19,53 +21,66 @@ export function BoardSwitcher({
   boards, activeBoardId, unassignedCount, attentionCounts, unassignedAttentionCount,
   showingUnassigned, onSelect, onUnassigned, onNewBoard,
 }: Props): JSX.Element {
+  const [showSettings, setShowSettings] = useState(false);
   return (
-    <nav className="flex items-center gap-1 border-b border-border px-4 py-2">
-      {boards.map((b) => {
-        const attn = attentionCounts.get(b.id) ?? 0;
-        return (
+    <>
+      <nav className="flex items-center gap-1 border-b border-border px-4 py-2">
+        {boards.map((b) => {
+          const attn = attentionCounts.get(b.id) ?? 0;
+          return (
+            <button
+              key={b.id}
+              onClick={() => { onSelect(b.id); }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                activeBoardId === b.id && !showingUnassigned
+                  ? "bg-muted text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {b.label}
+              {attn > 0 && (
+                <span
+                  className="min-w-4 px-1 h-4 rounded-full bg-destructive text-destructive-foreground text-[10px] leading-4 text-center"
+                  title={`${String(attn)} session(s) need you on this board`}
+                >{attn}</span>
+              )}
+            </button>
+          );
+        })}
+        <button
+          onClick={onNewBoard}
+          className="px-3 py-1.5 rounded text-sm text-muted-foreground hover:text-foreground"
+        >
+          + New board
+        </button>
+        <div className="ml-auto flex items-center gap-2">
           <button
-            key={b.id}
-            onClick={() => { onSelect(b.id); }}
+            onClick={onUnassigned}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-              activeBoardId === b.id && !showingUnassigned
-                ? "bg-muted text-foreground"
-                : "text-muted-foreground hover:text-foreground"
+              showingUnassigned ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {b.label}
-            {attn > 0 && (
+            Unassigned sessions{unassignedCount > 0 ? ` (${String(unassignedCount)})` : ""}
+            {unassignedAttentionCount > 0 && (
               <span
                 className="min-w-4 px-1 h-4 rounded-full bg-destructive text-destructive-foreground text-[10px] leading-4 text-center"
-                title={`${String(attn)} session(s) need you on this board`}
-              >{attn}</span>
+                title={`${String(unassignedAttentionCount)} unassigned session(s) need you`}
+              >⊙{unassignedAttentionCount}</span>
             )}
           </button>
-        );
-      })}
-      <button
-        onClick={onNewBoard}
-        className="px-3 py-1.5 rounded text-sm text-muted-foreground hover:text-foreground"
-      >
-        + New board
-      </button>
-      <div className="ml-auto flex items-center gap-2">
-        <button
-          onClick={onUnassigned}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-            showingUnassigned ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Unassigned sessions{unassignedCount > 0 ? ` (${String(unassignedCount)})` : ""}
-          {unassignedAttentionCount > 0 && (
-            <span
-              className="min-w-4 px-1 h-4 rounded-full bg-destructive text-destructive-foreground text-[10px] leading-4 text-center"
-              title={`${String(unassignedAttentionCount)} unassigned session(s) need you`}
-            >⊙{unassignedAttentionCount}</span>
-          )}
-        </button>
-        <ThemeSwitch />
-      </div>
-    </nav>
+          <button
+            type="button"
+            onClick={() => { setShowSettings(true); }}
+            aria-label="Settings"
+            title="Settings"
+            className="px-2.5 py-1.5 rounded-md bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <GearIcon className="w-4 h-4" />
+          </button>
+          <ThemeSwitch />
+        </div>
+      </nav>
+      {showSettings && <SettingsModal onClose={() => { setShowSettings(false); }} />}
+    </>
   );
 }
