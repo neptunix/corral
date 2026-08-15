@@ -98,6 +98,19 @@ describe("SideRail", () => {
     expect(screen.getByRole("button", { name: /System health/ })).toBeTruthy();
   });
 
+  // Regression: the auto-open effect must guard on the visible `shown` state, not the raw internal
+  // `open`. A stale open === "attention" left over from a board the operator has since left must not
+  // silently suppress the health auto-open for the rest of the session.
+  it("still auto-opens health after a stale attention panel is left behind on a board switch", () => {
+    const { rerender } = render(rail());
+    fireEvent.click(bell());
+    expect(screen.getByText("Attention")).toBeTruthy();
+    rerender(rail({ showUnassigned: true }));
+    expect(screen.queryByText("Attention")).toBe(null);
+    rerender(rail({ showUnassigned: true, diagnostics: broken }));
+    expect(screen.getByText("Health")).toBeTruthy();
+  });
+
   it("names the count and kind rather than showing a bare digit", () => {
     render(rail({ diagnostics: broken }));
     expect(screen.getByRole("button", { name: "System health: 1 problem" })).toBeTruthy();

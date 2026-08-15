@@ -1,4 +1,3 @@
-
 import type { Board, BoardState, SessionLink, Task } from "@shared/board-schema";
 import type { DiagnosticsSnapshot } from "@shared/diagnostics-schema";
 import { DiagnosticsSnapshotSchema } from "@shared/diagnostics-schema";

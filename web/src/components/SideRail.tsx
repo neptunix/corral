@@ -58,19 +58,20 @@ export function SideRail({
   const rollup = computeRollup(renderedChecks(held, streamDown));
   const count = badgeCount(rollup);
 
-  useEffect(() => {
-    // The latch is spent only on the branch that actually opens: a problem arriving while the bell is
-    // open must not forfeit the auto-open for the rest of the page's life.
-    if (autoOpenSpent.current || count === 0 || open !== "none") return;
-    autoOpenSpent.current = true;
-    setOpen("health");
-    setAnnouncement(`System health opened: ${healthPhrase(count, rollup.info)}`);
-  }, [count, rollup.info, open]);
-
   const boardScoped = !showUnassigned && activeBoardId !== null;
   const entries = boardScoped ? boardAttention(attention, boards, activeBoardId) : [];
   // Pure derivation, not an effect: no render may contain a panel scoped to a board that is not shown.
   const shown: Open = open === "attention" && !boardScoped ? "none" : open;
+
+  useEffect(() => {
+    // The latch is spent only on the branch that actually opens: a problem arriving while the bell is
+    // open must not forfeit the auto-open for the rest of the page's life. Guards on `shown`, not
+    // `open` — a stale "attention" that no longer renders (board left) must not block auto-open.
+    if (autoOpenSpent.current || count === 0 || shown !== "none") return;
+    autoOpenSpent.current = true;
+    setOpen("health");
+    setAnnouncement(`System health opened: ${healthPhrase(count, rollup.info)}`);
+  }, [count, rollup.info, shown]);
 
   const toggle = (panel: Open): void => {
     if (panel === "health") autoOpenSpent.current = true;
