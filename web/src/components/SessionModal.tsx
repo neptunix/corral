@@ -62,6 +62,9 @@ export function SessionModal({
   canAttachFiles = false, status, claudeStatus, waitingFor, remoteControl, registryStatus, onClose,
 }: Props): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // The hairline around the terminal. Sized from the terminal's own box rather than from the space it
+  // was given — see the render for why those are never the same thing.
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const [closeInfo, setCloseInfo] = useState<{ code: number; reason: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [starting, setStarting] = useState(awaitAgent);
@@ -275,6 +278,24 @@ export function SessionModal({
 
     const ro = new ResizeObserver(() => { sendResize(); });
     ro.observe(el);
+    // A second observer, on the TERMINAL rather than on the box holding it, and it sets the HEIGHT
+    // only. xterm rounds down to whole rows, so its box is up to one row shorter than the space it
+    // was given, by a different amount at every window size; following it is what keeps the hairline
+    // on the last row instead of a ragged distance below it. Observing the element (rather than
+    // measuring after fit) also sidesteps the question of when xterm's relayout lands.
+    //
+    // The width is NOT tracked, because it cannot be: `.xterm` is a plain block element that xterm
+    // never sizes (only `.xterm-screen` inside it carries cols × cell width), so it is always exactly
+    // as wide as this container. The hairline's left and right edges are therefore the container's,
+    // and there is a slice of non-output between the last column and the right edge — wider than one
+    // cell, since the fit addon also reserves room for an overview ruler.
+    const xtermEl = el.querySelector(".xterm");
+    const frameObserver = new ResizeObserver(() => {
+      const frame = frameRef.current;
+      if (frame === null || !(xtermEl instanceof HTMLElement)) return;
+      frame.style.height = `${String(Math.round(xtermEl.getBoundingClientRect().height))}px`;
+    });
+    if (xtermEl !== null) frameObserver.observe(xtermEl);
     // Without this the pane cannot be scrolled at all on a phone — why, in lib/touch-scroll.ts.
     const detachTouchScroll = attachTouchScroll(el);
 
@@ -283,6 +304,7 @@ export function SessionModal({
       if (liveTimer !== undefined) clearTimeout(liveTimer);
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       ro.disconnect();
+      frameObserver.disconnect();
       detachTouchScroll();
       el.removeEventListener("paste", onPasteCapture, true);
       detachTextInput();
@@ -334,53 +356,101 @@ export function SessionModal({
         // dvh, not vh: on iOS `vh` is the LARGE viewport (toolbars hidden), so with the Safari toolbars
         // shown a 90vh panel overflows the visible area — and `fixed inset-0` means it cannot be
         // scrolled to. The terminal is the flex child that absorbs the difference.
-        className="relative bg-card/75 backdrop-blur-md border border-border rounded-lg shadow-2xl w-[90vw] h-[90dvh] flex flex-col overflow-hidden"
+        //
+        // Below `sm` the panel takes the whole screen — no inset, no radius, no side border. A 90%
+        // panel on a phone spends a tenth of the shortest dimension there is on showing a board the
+        // terminal is covering anyway, and the terminal is the only thing on this screen worth space.
+        className="relative bg-card/75 backdrop-blur-md border-border shadow-2xl w-screen h-[100dvh] flex flex-col overflow-hidden sm:w-[90vw] sm:h-[90dvh] sm:rounded-lg sm:border"
         onClick={(e) => { e.stopPropagation(); }}
         onDragEnter={(e) => { if (canAttachFiles && isFileDrag(e.dataTransfer.types)) { e.preventDefault(); setDragging(true); } }}
         onDragOver={(e) => { if (canAttachFiles && isFileDrag(e.dataTransfer.types)) e.preventDefault(); }}
         onDragLeave={(e) => { const rt = e.relatedTarget; if (!(rt instanceof Node) || !e.currentTarget.contains(rt)) setDragging(false); }}
         onDrop={(e) => { void handleDrop(e); }}
       >
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
-          <span className="text-foreground text-sm font-semibold">{title !== "" ? title : paneId}</span>
-          <span className="text-xs text-muted-foreground/70">{title !== "" ? `${paneId} · ${envLabel}` : envLabel}</span>
-          <span className="text-xs text-muted-foreground">
+        {/* Which fields survive a phone: the ones that say WHAT this session is and whether it needs
+            you. The address (pane, env), the workspace and the session name are all recoverable from
+            the card you opened this from, so below `sm` they give way — unwrapped, they took three
+            lines of a 390px screen before the terminal even started. */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0 sm:px-4">
+          <span className="text-foreground text-sm font-semibold truncate">{title !== "" ? title : paneId}</span>
+          <span className="hidden shrink-0 text-xs text-muted-foreground/70 sm:inline">{title !== "" ? `${paneId} · ${envLabel}` : envLabel}</span>
+          {/* Every text child of this row must be able to give way, and the ✕ must not. The row does
+              not wrap and the panel clips it, so one child that refuses to shrink pushes whatever
+              follows past the edge — and below `sm` the panel covers the backdrop, so tapping outside
+              no longer closes and a phone has no Esc: the ✕ is the only way out. Both the state
+              (which carries a free-form `waitingFor`) and the close/drop messages (whose text comes
+              from the server) are unbounded, so both truncate rather than shove. */}
+          <span
+            className="min-w-0 truncate text-xs text-muted-foreground"
+            title={sessionStateLabel({ status, claudeStatus, waitingFor, registryStatus })}
+          >
             · {sessionStateLabel({ status, claudeStatus, waitingFor, registryStatus })}
           </span>
           {workspace !== "" && (
-            <span className="text-xs text-muted-foreground/60 truncate" title={workspace}>· {workspace}</span>
+            <span className="hidden text-xs text-muted-foreground/60 truncate sm:inline" title={workspace}>· {workspace}</span>
           )}
           {statusline?.session_name !== null && statusline?.session_name !== undefined && statusline.session_name !== "" && (
-            <span className="text-xs text-muted-foreground/60 truncate" title={statusline.session_name}>· {statusline.session_name}</span>
+            <span className="hidden text-xs text-muted-foreground/60 truncate sm:inline" title={statusline.session_name}>· {statusline.session_name}</span>
           )}
           {starting && (
-            <span className="text-xs text-warning">· starting session…</span>
+            <span className="min-w-0 truncate text-xs text-warning">· starting session…</span>
           )}
           {closeInfo !== null && !starting && (
-            <span className="text-xs text-warning">· {closeMessage(closeInfo.code, closeInfo.reason)}</span>
+            <span className="min-w-0 truncate text-xs text-warning" title={closeMessage(closeInfo.code, closeInfo.reason)}>
+              · {closeMessage(closeInfo.code, closeInfo.reason)}
+            </span>
           )}
           {dropError !== null && (
-            <span className="text-xs text-warning">· {dropError}</span>
+            <span className="min-w-0 truncate text-xs text-warning" title={dropError}>· {dropError}</span>
           )}
           {/* `true` only. `false` and `null` both render nothing, and that is deliberate even though
               they look identical here: `null` means corral has no record and cannot say, `false` is a
               positive "not connected". Do NOT collapse them with a nullish default.
               Read-only — Remote Control is turned on at launch and corral never changes it. */}
-          {remoteControl === true && (
-            <span
-              className="ml-auto text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-border text-muted-foreground"
-              title="Remote Control is connected — this session is reachable from claude.ai"
-            >remote</span>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            className={`${remoteControl === true ? "" : "ml-auto "}text-muted-foreground hover:text-foreground text-lg leading-none`}
-            title="Close (Esc)"
-          >✕</button>
+          {/* Grouped so the right edge holds regardless of which of these render: `ml-auto` used to
+              live on whichever element happened to come first, which breaks the moment one of them is
+              conditional on the viewport as well as on the data. */}
+          <span className="ml-auto flex shrink-0 items-center gap-2">
+            {remoteControl === true && (
+              <span
+                className="hidden text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-border text-muted-foreground sm:inline"
+                title="Remote Control is connected — this session is reachable from claude.ai"
+              >remote</span>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-muted-foreground hover:text-foreground text-lg leading-none"
+              title="Close (Esc)"
+            >✕</button>
+          </span>
         </div>
         <SessionMeta statusline={statusline} recap={recap} recapStatus={recapStatus} recapSource={recapSource} />
-        <div ref={containerRef} className="flex-1 min-h-0 p-2" />
+        {/* A hairline sitting directly on the terminal, in the same tone as the recap badge above it:
+            xterm's background carries alpha (TERM_THEME), so on the frosted panel its edge is
+            otherwise indistinguishable from the panel. No fill and no padding inside it — both could
+            only be panel colour, which is a light frame around a dark terminal whenever the pane's
+            own Claude theme disagrees with corral's, and corral cannot know that theme's background:
+            it only flips the `base` field of the theme file, and the colours live inside Claude Code.
+
+            The line is an OVERLAY whose height comes from the terminal's own box (set in the effect
+            above), rather than a border on the box holding it. The two differ by up to one row,
+            because xterm rounds down to whole rows while its container resizes continuously — a
+            border on the container would sit a ragged, window-size-dependent distance below the
+            output. Here that leftover ends up outside the line, where it reads as panel margin.
+            Horizontally the line is the container's own width; see the effect for why nothing else
+            is available to measure.
+
+            The inset is deliberately tiny on a phone: every pixel of frame there is a pixel not spent
+            on output. */}
+        <div className="relative flex-1 min-h-0 m-0.5 sm:m-1">
+          <div ref={containerRef} className="absolute inset-0 overflow-hidden" />
+          <div
+            ref={frameRef}
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 rounded border border-muted-foreground/30"
+          />
+        </div>
         {dragging && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-none">
             <span className="text-foreground text-sm font-medium rounded-md border border-border bg-card/80 px-4 py-2">
