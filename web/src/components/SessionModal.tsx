@@ -3,17 +3,15 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef, useState, type JSX } from "react";
 
+import { SessionMeta } from "./SessionMeta";
 import { useTheme } from "./ThemeProvider";
 import {
   ATTACH_LIVE_AFTER_MS, ATTACH_RETRY_DELAY_MS, shouldRetryAttach,
 } from "../lib/attach";
-import { contextLevelClass } from "../lib/level";
 import { formatDropInjection, formatPaste } from "../lib/paste";
 import { closeMessage } from "../lib/protocol";
-import { isRecapStale, RECAP_SOURCE_LABEL, recapReason } from "../lib/recap-line";
 import { sessionStateLabel } from "../lib/session-state";
 import { attachCommittedTextInput } from "../lib/text-input";
-import { isStale } from "../lib/time";
 import { attachTouchScroll } from "../lib/touch-scroll";
 import { isFileDrag, uploadFile, UPLOAD_MAX_BYTES } from "../lib/upload";
 
@@ -56,37 +54,6 @@ interface Props {
   readonly remoteControl: boolean | null;
   readonly registryStatus: RegistryStatus | null;
   readonly onClose: () => void;
-}
-
-// Renders the statusline's second-line chips: model · ctx NN% (NNK) · $X.XX · +A/−R. Any field null →
-// its chip is omitted entirely (not "· —"), so a partial capture still reads clean. The ctx% is
-// color-coded by level (green/amber/red) via contextLevelClass — which warns earlier than the 5h/7d
-// windows since context degrades before it's full; everything else stays muted (parent span).
-function MetricChips({ sl }: { readonly sl: StatuslineData }): JSX.Element {
-  const chips: JSX.Element[] = [];
-  if (sl.model !== null) chips.push(<span key="model">{sl.model}</span>);
-  if (sl.ctx.pct !== null) {
-    const pct = sl.ctx.pct;
-    chips.push(
-      <span key="ctx">
-        ctx <span className={`font-semibold ${contextLevelClass(pct)}`}>{`${String(pct)}%`}</span>
-        {sl.ctx.tokens !== null ? ` (${String(Math.round(sl.ctx.tokens / 1000))}K)` : ""}
-      </span>,
-    );
-  }
-  if (sl.cost.usd !== null) chips.push(<span key="cost">{`$${sl.cost.usd.toFixed(2)}`}</span>);
-  if (sl.cost.lines_added !== null || sl.cost.lines_removed !== null) {
-    chips.push(<span key="lines">{`+${String(sl.cost.lines_added ?? 0)}/−${String(sl.cost.lines_removed ?? 0)}`}</span>);
-  }
-  return (
-    <>
-      {chips.flatMap((chip, i) =>
-        i === 0
-          ? [chip]
-          : [<span key={`sep-${String(chip.key)}`} className="text-muted-foreground/40"> · </span>, chip],
-      )}
-    </>
-  );
 }
 
 export function SessionModal({
@@ -412,38 +379,7 @@ export function SessionModal({
             title="Close (Esc)"
           >✕</button>
         </div>
-        {/* Both rows render UNCONDITIONALLY, each on its own line. The block used to appear only once
-            data had arrived, so the first statusline capture (and later the recap) inserted a row and
-            shoved the terminal down — a visible jump on every open. Reserving the space costs two muted
-            placeholders and makes the layout static. A long recap also gets the full width to truncate
-            against instead of competing for the model's row. */}
-        <div className="flex flex-col gap-0.5 px-4 py-1.5 border-b border-border shrink-0 text-[11px]">
-          <span className={`font-mono tabular-nums text-muted-foreground ${statusline !== null && isStale(statusline.captured_at) ? "opacity-50" : ""}`}>
-            {statusline !== null
-              ? <MetricChips sl={statusline} />
-              : <span className="text-muted-foreground/40">metrics not read yet</span>}
-          </span>
-          {recap !== null && recap !== "" ? (
-            // A retained recap is still the best text there is, so it stays — but it must SAY when the
-            // last read failed, or a stale line is indistinguishable from a fresh one.
-            <span
-              className={`truncate ${isRecapStale(recapStatus, true) ? "text-muted-foreground/50" : "text-muted-foreground/80"}`}
-              title={isRecapStale(recapStatus, true) ? `${recap}\n\n${recapReason(recapStatus)} — showing the last one read` : recap}
-            >
-              {recapSource !== null && (
-                <span className="text-muted-foreground/50" title={RECAP_SOURCE_LABEL[recapSource].hint}>
-                  {RECAP_SOURCE_LABEL[recapSource].tag}{" "}
-                </span>
-              )}
-              {recap}
-              {isRecapStale(recapStatus, true) && (
-                <span className="text-muted-foreground/40"> · {recapReason(recapStatus)}</span>
-              )}
-            </span>
-          ) : (
-            <span className="truncate text-muted-foreground/40">{recapReason(recapStatus)}</span>
-          )}
-        </div>
+        <SessionMeta statusline={statusline} recap={recap} recapStatus={recapStatus} recapSource={recapSource} />
         <div ref={containerRef} className="flex-1 min-h-0 p-2" />
         {dragging && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-none">
