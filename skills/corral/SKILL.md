@@ -92,9 +92,15 @@ what you asked and move on, never block on a reply. Only the receiving operator 
 configured thresholds (default 30/40/60%). Same number `corral_whoami` reports — corral hands it
 to you before you ask.
 
-- **notice:** drop a light, low-key mention into your normal reply — "context's at N%" in passing.
-- **nudge:** be more direct — context is climbing, and a handoff is available if there's work left.
-- **urgent:** say so plainly and offer the handoff now — don't wait for a natural pause.
+- **notice:** say the number, and recommend a fresh session for work that has not started yet. Finish
+  what is already open here.
+- **nudge:** recommend it seriously. Start nothing new in this session, and offer the handoff in the
+  same reply rather than waiting to be asked.
+- **urgent:** critical. Say plainly that this session should end, and offer the handoff immediately —
+  mid-task if that is where you are. A handoff written late carries less than an early one.
+
+Never answer the signal with your own estimate of the room left ("enough for one more"). That
+estimate is systematically optimistic, and it converts a signal into a reason to keep going.
 
 Handoff itself follows the procedure below — wait for the operator, never spawn unprompted.
 <!-- ctx-signal:end -->
