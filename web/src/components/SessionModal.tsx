@@ -62,6 +62,9 @@ export function SessionModal({
   canAttachFiles = false, status, claudeStatus, waitingFor, remoteControl, registryStatus, onClose,
 }: Props): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // The hairline around the terminal. Sized from the terminal's own box rather than from the space it
+  // was given — see the render for why those are never the same thing.
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const [closeInfo, setCloseInfo] = useState<{ code: number; reason: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [starting, setStarting] = useState(awaitAgent);
@@ -275,6 +278,21 @@ export function SessionModal({
 
     const ro = new ResizeObserver(() => { sendResize(); });
     ro.observe(el);
+    // A second observer, on the TERMINAL rather than on the box holding it. xterm is quantised to
+    // whole rows and columns, so its box is up to one cell shorter and narrower than the space it was
+    // given, and by a different amount at every window size. Following the terminal's own box is what
+    // keeps the hairline on the last row instead of a ragged distance below it. Observing the element
+    // (rather than measuring after fit) also sidesteps the question of when xterm's relayout lands.
+    const frameObserver = new ResizeObserver(() => {
+      const frame = frameRef.current;
+      const xterm = el.querySelector(".xterm");
+      if (frame === null || !(xterm instanceof HTMLElement)) return;
+      const box = xterm.getBoundingClientRect();
+      frame.style.width = `${String(Math.round(box.width))}px`;
+      frame.style.height = `${String(Math.round(box.height))}px`;
+    });
+    const xtermEl = el.querySelector(".xterm");
+    if (xtermEl !== null) frameObserver.observe(xtermEl);
     // Without this the pane cannot be scrolled at all on a phone — why, in lib/touch-scroll.ts.
     const detachTouchScroll = attachTouchScroll(el);
 
@@ -283,6 +301,7 @@ export function SessionModal({
       if (liveTimer !== undefined) clearTimeout(liveTimer);
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       ro.disconnect();
+      frameObserver.disconnect();
       detachTouchScroll();
       el.removeEventListener("paste", onPasteCapture, true);
       detachTextInput();
@@ -395,16 +414,27 @@ export function SessionModal({
         <SessionMeta statusline={statusline} recap={recap} recapStatus={recapStatus} recapSource={recapSource} />
         {/* A hairline sitting directly on the terminal, in the same tone as the recap badge above it:
             xterm's background carries alpha (TERM_THEME), so on the frosted panel its edge is
-            otherwise indistinguishable from the panel. No padding inside the border and no fill —
-            both would show panel colour between the line and the output, which is a light frame
-            around a dark terminal whenever the pane's own Claude theme disagrees with corral's.
+            otherwise indistinguishable from the panel. No fill and no padding inside it — both could
+            only be panel colour, which is a light frame around a dark terminal whenever the pane's
+            own Claude theme disagrees with corral's, and corral cannot know that theme's background:
+            it only flips the `base` field of the theme file, and the colours live inside Claude Code.
+
+            The line is an OVERLAY, sized in the effect above from the terminal's own box, rather than
+            a border on the box holding it. Those differ by up to one cell in each direction, because
+            xterm rounds down to whole rows and columns while its container resizes continuously — a
+            border on the container would sit a ragged, window-size-dependent distance away from the
+            output. Here the leftover ends up outside the line, where it reads as panel margin.
 
             The inset is deliberately tiny on a phone: every pixel of frame there is a pixel not spent
             on output. */}
-        <div
-          ref={containerRef}
-          className="flex-1 min-h-0 overflow-hidden m-0.5 rounded border border-muted-foreground/30 sm:m-1"
-        />
+        <div className="relative flex-1 min-h-0 m-0.5 sm:m-1">
+          <div ref={containerRef} className="absolute inset-0 overflow-hidden" />
+          <div
+            ref={frameRef}
+            aria-hidden
+            className="pointer-events-none absolute left-0 top-0 rounded border border-muted-foreground/30"
+          />
+        </div>
         {dragging && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-none">
             <span className="text-foreground text-sm font-medium rounded-md border border-border bg-card/80 px-4 py-2">
