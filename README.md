@@ -257,12 +257,13 @@ Attaching the TUI to an already-headless server is otherwise fine.
 **Already started one inside a tab?** It cannot be moved out without stopping it, and stopping it
 takes the agents with it. Adopt the recipe above at your next reboot or planned restart.
 
-**Scroll speed.** A pane running a TUI — every Claude Code session — receives exactly one wheel report
-per wheel event no matter how far the trackpad or the finger travelled, so it scrolls a single notch at
-a time and xterm's `scrollSensitivity` has nothing to act on. The gear in the top right of the board
-header sets how many wheel events corral emits per real one (1–10, default 3), which is the only lever
-that path responds to. It is stored per browser in `localStorage`, so a laptop and a phone keep
-independent values, and it applies to sessions opened after the change.
+**Scroll speed.** A pane running a TUI — every Claude Code session — gets at most one wheel report per
+wheel event, and a trackpad flick or a finger drag already reaches that ceiling, so xterm's own
+`scrollSensitivity` has no headroom left to give there. The gear in the top right of the board header
+sets how many wheel events corral emits per real one (1–10, default 3), which does cross it. It acts on
+pixel-mode wheel input — Chrome, Safari, trackpads, touch — and leaves Firefox's line-mode wheel alone.
+Stored per browser in `localStorage`, so a laptop and a phone keep independent values, and it applies to
+sessions opened after the change.
 
 ## Launching corral
 

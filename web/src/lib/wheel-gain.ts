@@ -1,17 +1,20 @@
 import { wheelInit } from "./touch-scroll";
 
-// Speeding up a pane means sending MORE wheel events, not bigger ones. xterm's mouse-reporting branch
-// (bindMouse, the one every Claude Code pane takes) does:
+// Speeding up a pane means sending MORE wheel events, not bigger ones — past a ceiling xterm's own
+// option cannot cross. Its mouse-reporting branch (bindMouse, the one every Claude Code pane takes) is:
 //     if (0 === coreMouseService.consumeWheelEvent(...)) return false;
 //     ... coreMouseService.triggerMouseEvent({ button: 4, action: deltaY < 0 ? 0 : 1 })
-// The amount consumeWheelEvent works out — the only place `scrollSensitivity` is applied — is compared
-// against zero and then discarded, so exactly ONE wheel report reaches the app per wheel event, whatever
-// the delta. The alt-screen-without-scrollback branch emits exactly one arrow key the same way. Only the
-// scrollback path scales with sensitivity, which is why turning the option up does nothing under a TUI.
+// consumeWheelEvent is where `scrollSensitivity` is applied, and it carries a running remainder between
+// events, so the option genuinely scales how OFTEN a report is emitted. What it cannot do is emit more
+// than one per event: the amount is compared against zero and then discarded. A trackpad flick or a
+// finger drag clears that bar on nearly every event already, so raising the option changes nothing for
+// exactly the input this setting exists for — it only helps below the ceiling, at slow tiny deltas. The
+// alt-screen-without-scrollback branch emits one arrow key per event the same way.
 //
-// So the gain is applied here, ahead of xterm: swallow the real event and re-dispatch it `repeats` times.
-// Both paths scale identically — a TUI gets N reports, a shell scrolls N times — and the touch shim rides
-// along, since its synthesized events pass through this listener too.
+// So the gain is applied here instead, ahead of xterm: swallow the real event and re-dispatch it
+// `repeats` times. N events means up to N reports, which is the headroom the option does not have. Both
+// paths scale — a TUI gets N reports, a shell scrolls N times — and the touch shim rides along, since its
+// synthesized events pass through this listener too.
 
 // Marks our own copies so the capture listener does not multiply them again.
 const synthetic = new WeakSet<WheelEvent>();
@@ -31,7 +34,7 @@ interface WheelShape {
  * deltaX, and a terminal has nothing to scroll sideways anyway.
  */
 export function shouldGain(e: WheelShape, repeats: number): boolean {
-  if (repeats <= 1 || e.deltaY === 0) return false;
+  if (repeats <= 1) return false;
   if (e.deltaMode !== 0) return false;
   return Math.abs(e.deltaY) > Math.abs(e.deltaX);
 }

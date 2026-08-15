@@ -143,8 +143,9 @@ export function SessionModal({
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       fontSize: 13,
       scrollback: 5000,
-      // scrollSensitivity is deliberately left at its default: it cannot speed up a pane running a TUI
-      // (see wheel-gain.ts). The operator's setting is applied by attachWheelGain below instead.
+      // scrollSensitivity is deliberately left at its default: it saturates at one wheel report per
+      // event, a ceiling a trackpad or a finger already reaches (see wheel-gain.ts). The operator's
+      // setting is applied by attachWheelGain below instead.
       theme: TERM_THEME[resolvedRef.current],
     });
     termRef.current = term;

@@ -41,6 +41,25 @@ describe("settings modal — scroll speed", () => {
     expect(readTerminalPrefs().scrollSpeed).toBe(SCROLL_SPEED_DEFAULT);
   });
 
+  it("stays open on a click inside the panel", () => {
+    const onClose = vi.fn();
+    render(<SettingsModal onClose={onClose} />);
+
+    fireEvent.click(screen.getByLabelText("Scroll speed"));
+    fireEvent.click(screen.getByText("Settings"));
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes on Escape", () => {
+    const onClose = vi.fn();
+    render(<SettingsModal onClose={onClose} />);
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("closes on Done and on a click outside the panel", () => {
     const onClose = vi.fn();
     const { container } = render(<SettingsModal onClose={onClose} />);

@@ -17,8 +17,11 @@ export function clampScrollSpeed(value: number): number {
   return Math.round(Math.min(SCROLL_SPEED_MAX, Math.max(SCROLL_SPEED_MIN, value)));
 }
 
+// No per-field `.catch` the way spawn-prefs.ts has one: with a single field there is nothing to
+// preserve, and anything the catch would rescue already lands on the same default through the
+// object-level parse failure below.
 const terminalPrefsSchema = z.object({
-  scrollSpeed: z.number().catch(SCROLL_SPEED_DEFAULT).transform(clampScrollSpeed),
+  scrollSpeed: z.number().transform(clampScrollSpeed),
 });
 
 export type TerminalPrefs = z.infer<typeof terminalPrefsSchema>;

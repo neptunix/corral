@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
 
+import { touchWheelDeltaY, wheelInit } from "../web/src/lib/touch-scroll";
 import { attachWheelGain, shouldGain } from "../web/src/lib/wheel-gain";
 
 let detach: (() => void) | null = null;
@@ -87,14 +88,27 @@ describe("wheel gain — dispatch", () => {
     expect(seen.every((e) => e.altKey && e.shiftKey)).toBe(true);
   });
 
-  it("passes an event through untouched at a gain of 1", () => {
+  // Cancelling an event it declined to multiply would kill native scrolling and still show green.
+  it("passes an event through untouched, and uncancelled, at a gain of 1", () => {
     const { container, screen, seen } = mount();
     detach = attachWheelGain(container, 1);
 
     const original = wheel(40);
-    screen.dispatchEvent(original);
+    const notCancelled = screen.dispatchEvent(original);
 
     expect(seen).toEqual([original]);
+    expect(notCancelled).toBe(true);
+  });
+
+  it("leaves a line-mode event alone rather than cancelling it", () => {
+    const { container, screen, seen } = mount();
+    detach = attachWheelGain(container, 5);
+
+    const original = wheel(3, { deltaMode: 1 });
+    const notCancelled = screen.dispatchEvent(original);
+
+    expect(seen).toEqual([original]);
+    expect(notCancelled).toBe(true);
   });
 
   it("stops on detach", () => {
@@ -105,6 +119,20 @@ describe("wheel gain — dispatch", () => {
     screen.dispatchEvent(wheel(40));
 
     expect(seen).toHaveLength(1);
+  });
+
+  // The seam with the touch shim: on a phone the gain only works if the events touch-scroll synthesizes
+  // qualify. jsdom has no Touch constructor, so the shim's own event factory stands in for the finger.
+  it("gains the events the touch shim synthesizes", () => {
+    const { container, screen, seen } = mount();
+    detach = attachWheelGain(container, 4);
+
+    const fingerDelta = touchWheelDeltaY(300, 283);
+    if (fingerDelta === null) throw new Error("17px is above the jitter threshold");
+    screen.dispatchEvent(new WheelEvent("wheel", wheelInit(fingerDelta, 10, 283)));
+
+    expect(seen).toHaveLength(4);
+    expect(seen.every((e) => e.deltaY === fingerDelta)).toBe(true);
   });
 
   // The copies are built by `wheelInit`, whose legacy wheelDeltaY mapping is pinned in

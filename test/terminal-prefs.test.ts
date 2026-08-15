@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 describe("terminal prefs — scroll speed clamp", () => {
-  // xterm throws on scrollSensitivity <= 0, so this bound is a crash guard.
+  // Below 1 would mean emitting fewer wheel events than arrived — swallowing scrolls outright.
   it("never returns a value below the minimum", () => {
     expect(clampScrollSpeed(0)).toBe(SCROLL_SPEED_MIN);
     expect(clampScrollSpeed(-5)).toBe(SCROLL_SPEED_MIN);
@@ -85,7 +85,7 @@ describe("terminal prefs — untrusted storage", () => {
     expect(readTerminalPrefs().scrollSpeed).toBe(SCROLL_SPEED_DEFAULT);
   });
 
-  // A hand-edited or older-build value must not reach xterm unclamped.
+  // A hand-edited or older-build value must not reach the wheel shim unclamped.
   it("clamps an out-of-range stored speed", () => {
     window.localStorage.setItem(KEY, JSON.stringify({ scrollSpeed: 0 }));
     expect(readTerminalPrefs().scrollSpeed).toBe(SCROLL_SPEED_MIN);

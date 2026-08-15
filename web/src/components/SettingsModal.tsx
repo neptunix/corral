@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useEffect, useState, type JSX } from "react";
 
 import {
   clampScrollSpeed, readTerminalPrefs, writeTerminalPrefs,
@@ -13,6 +13,15 @@ interface Props {
 // scroll speed: a trackpad and a phone want different multipliers and each browser keeps its own.
 export function SettingsModal({ onClose }: Props): JSX.Element {
   const [scrollSpeed, setScrollSpeed] = useState<number>(() => readTerminalPrefs().scrollSpeed);
+
+  // Esc closes, as it does in every other modal here.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("keydown", onKey); };
+  }, [onClose]);
 
   // Persisted on every move rather than on a Save button: the terminal reads the value when a session
   // opens, so the tuning loop is drag → close → open a session → scroll.
