@@ -39,7 +39,7 @@ export function SettingsModal({ onClose }: Props): JSX.Element {
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2.5">Terminal</div>
           <div className="flex items-baseline justify-between mb-2">
             <label htmlFor="scroll-speed" className="text-foreground text-sm">Scroll speed</label>
-            <span className="text-foreground text-sm tabular-nums">{scrollSpeed.toFixed(1)}×</span>
+            <span className="text-foreground text-sm tabular-nums">{scrollSpeed}×</span>
           </div>
           <input
             id="scroll-speed"
@@ -47,7 +47,7 @@ export function SettingsModal({ onClose }: Props): JSX.Element {
             className="w-full accent-primary"
             min={SCROLL_SPEED_MIN}
             max={SCROLL_SPEED_MAX}
-            step={0.5}
+            step={1}
             value={scrollSpeed}
             onChange={(e) => { update(Number(e.target.value)); }}
           />
@@ -56,8 +56,9 @@ export function SettingsModal({ onClose }: Props): JSX.Element {
             <span>{SCROLL_SPEED_MAX}× faster</span>
           </div>
           <p className="text-[11px] text-muted-foreground leading-relaxed mt-3">
-            Multiplies wheel and touch scrolling inside the session terminal. Saved on this device
-            only — your phone keeps its own value. Applies to sessions opened after the change.
+            Wheel notches sent per real one inside the session terminal — the only lever that a pane
+            running a TUI responds to. Saved on this device only, so your phone keeps its own value,
+            and applies to sessions opened after the change.
           </p>
         </div>
         <div className="flex justify-end gap-2 px-6 pt-5 pb-6">

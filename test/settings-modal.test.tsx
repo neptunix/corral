@@ -13,15 +13,15 @@ afterEach(() => {
 describe("settings modal — scroll speed", () => {
   it("opens on the default when nothing is stored", () => {
     render(<SettingsModal onClose={() => undefined} />);
-    expect(screen.getByText(`${SCROLL_SPEED_DEFAULT.toFixed(1)}×`)).toBeTruthy();
+    expect(screen.getByText(`${String(SCROLL_SPEED_DEFAULT)}×`)).toBeTruthy();
   });
 
   it("persists a move immediately, without a save button", () => {
     render(<SettingsModal onClose={() => undefined} />);
-    fireEvent.change(screen.getByLabelText("Scroll speed"), { target: { value: "6.5" } });
+    fireEvent.change(screen.getByLabelText("Scroll speed"), { target: { value: "6" } });
 
-    expect(readTerminalPrefs().scrollSpeed).toBe(6.5);
-    expect(screen.getByText("6.5×")).toBeTruthy();
+    expect(readTerminalPrefs().scrollSpeed).toBe(6);
+    expect(screen.getByText("6×")).toBeTruthy();
   });
 
   it("reopens on the persisted value", () => {
@@ -30,7 +30,7 @@ describe("settings modal — scroll speed", () => {
     cleanup();
 
     render(<SettingsModal onClose={() => undefined} />);
-    expect(screen.getByText("8.0×")).toBeTruthy();
+    expect(screen.getByText("8×")).toBeTruthy();
   });
 
   it("resets to the default", () => {

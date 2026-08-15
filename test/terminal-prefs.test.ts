@@ -23,8 +23,14 @@ describe("terminal prefs — scroll speed clamp", () => {
     expect(clampScrollSpeed(1000)).toBe(SCROLL_SPEED_MAX);
   });
 
-  it("passes an in-range value through untouched", () => {
-    expect(clampScrollSpeed(4.5)).toBe(4.5);
+  it("passes an in-range whole number through untouched", () => {
+    expect(clampScrollSpeed(4)).toBe(4);
+  });
+
+  // The value is a repeat count, so halves have no meaning downstream.
+  it("rounds a fractional value", () => {
+    expect(clampScrollSpeed(4.4)).toBe(4);
+    expect(clampScrollSpeed(4.6)).toBe(5);
   });
 
   it("falls back to the default on NaN and Infinity", () => {
@@ -35,8 +41,8 @@ describe("terminal prefs — scroll speed clamp", () => {
 
 describe("terminal prefs — round trip", () => {
   it("reads back what was written", () => {
-    writeTerminalPrefs({ scrollSpeed: 5.5 });
-    expect(readTerminalPrefs().scrollSpeed).toBe(5.5);
+    writeTerminalPrefs({ scrollSpeed: 5 });
+    expect(readTerminalPrefs().scrollSpeed).toBe(5);
   });
 
   // Private-mode Safari throws from the accessors themselves, so the whole object is replaced here —

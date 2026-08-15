@@ -10,10 +10,11 @@ export const SCROLL_SPEED_MIN = 1;
 export const SCROLL_SPEED_MAX = 10;
 export const SCROLL_SPEED_DEFAULT = 3;
 
-// xterm THROWS on scrollSensitivity <= 0, so clamping is a crash guard, not cosmetics.
+// The speed is a COUNT — how many wheel events corral emits per real one (wheel-gain.ts) — so it is
+// whole numbers only, and never below 1, which would mean swallowing scrolls outright.
 export function clampScrollSpeed(value: number): number {
   if (!Number.isFinite(value)) return SCROLL_SPEED_DEFAULT;
-  return Math.min(SCROLL_SPEED_MAX, Math.max(SCROLL_SPEED_MIN, value));
+  return Math.round(Math.min(SCROLL_SPEED_MAX, Math.max(SCROLL_SPEED_MIN, value)));
 }
 
 const terminalPrefsSchema = z.object({

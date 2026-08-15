@@ -15,6 +15,7 @@ import { readTerminalPrefs } from "../lib/terminal-prefs";
 import { attachCommittedTextInput } from "../lib/text-input";
 import { attachTouchScroll } from "../lib/touch-scroll";
 import { isFileDrag, uploadFile, UPLOAD_MAX_BYTES } from "../lib/upload";
+import { attachWheelGain } from "../lib/wheel-gain";
 
 import "@xterm/xterm/css/xterm.css";
 
@@ -142,12 +143,8 @@ export function SessionModal({
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       fontSize: 13,
       scrollback: 5000,
-      // xterm's default of 1 is punishing on this fleet: panes running a TUI with mouse reporting take
-      // the consumeWheelEvent path, where a pixel delta under 50 is multiplied by 0.3 before being
-      // divided by the cell height — roughly one wheel notch per 57px of trackpad or finger travel.
-      // Read once here rather than watched: the gear lives in the app header, which this modal covers,
-      // so the value cannot change while a terminal is open.
-      scrollSensitivity: readTerminalPrefs().scrollSpeed,
+      // scrollSensitivity is deliberately left at its default: it cannot speed up a pane running a TUI
+      // (see wheel-gain.ts). The operator's setting is applied by attachWheelGain below instead.
       theme: TERM_THEME[resolvedRef.current],
     });
     termRef.current = term;
@@ -305,6 +302,10 @@ export function SessionModal({
     if (xtermEl !== null) frameObserver.observe(xtermEl);
     // Without this the pane cannot be scrolled at all on a phone — why, in lib/touch-scroll.ts.
     const detachTouchScroll = attachTouchScroll(el);
+    // The operator's scroll speed. Read once rather than watched: the gear lives in the app header,
+    // which this modal covers, so the value cannot change while a terminal is on screen. Attached AFTER
+    // the touch shim, but order does not matter — this listener is in the capture phase.
+    const detachWheelGain = attachWheelGain(el, readTerminalPrefs().scrollSpeed);
 
     return () => {
       disposed = true;
@@ -313,6 +314,7 @@ export function SessionModal({
       ro.disconnect();
       frameObserver.disconnect();
       detachTouchScroll();
+      detachWheelGain();
       el.removeEventListener("paste", onPasteCapture, true);
       detachTextInput();
       dataSub.dispose();
