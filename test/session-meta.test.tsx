@@ -56,8 +56,62 @@ describe("SessionMeta", () => {
     const badge = screen.getByText("prompt ⚠");
     const text = screen.getByText(long);
     expect(badge.className).toContain("shrink-0");
-    expect(text.className).toContain("truncate");
+    // The text half is the one that gives way — clipped from `sm` up, scrollable below it.
+    expect(text.className).toContain("sm:text-ellipsis");
     expect(text.contains(badge)).toBe(false);
+  });
+
+  // Two rungs shared one tone, and they are 29 of the 30 sessions in a fleet: the badge read as a
+  // bare word rather than a label. Asserts the difference, not a specific colour name beyond the one
+  // token that carries it.
+  it("gives each rung its own tone", () => {
+    const { container: topic } = render(
+      <SessionMeta statusline={statusline()} recap="t" recapStatus="ok" recapSource="ai-title" />,
+    );
+    const { container: prompt } = render(
+      <SessionMeta statusline={statusline()} recap="p" recapStatus="ok" recapSource="last-prompt" />,
+    );
+    const { container: recap } = render(
+      <SessionMeta statusline={statusline()} recap="r" recapStatus="ok" recapSource="away-summary" />,
+    );
+    const cls = (c: HTMLElement): string => c.querySelector("[data-testid=recap-badge]")?.className ?? "";
+    expect(cls(topic)).toContain("sky");
+    expect(cls(prompt)).toContain("muted-foreground");
+    expect(cls(recap)).toContain("green");
+    expect(cls(topic)).not.toBe(cls(prompt));
+  });
+
+  // `border-border` is the hairline for dividing FILLED surfaces; the row sits on a translucent panel,
+  // where it disappears. Both the badge and the divider between the halves are drawn with it.
+  it("draws the neutral badge and the divider in a tone that survives the translucent panel", () => {
+    const { container } = render(
+      <SessionMeta statusline={statusline()} recap="p" recapStatus="ok" recapSource="last-prompt" />,
+    );
+    const badge = container.querySelector("[data-testid=recap-badge]");
+    expect(badge?.className).toContain("border-muted-foreground/30");
+    expect(container.querySelector(".w-px")?.className).toContain("bg-muted-foreground/30");
+  });
+
+  // The badge used to be a ~22px box against 16px of text beside it, which dragged the whole row up.
+  // Vertical padding is what did it, so its absence is the assertion.
+  it("keeps the badge's box level with the line of text beside it", () => {
+    render(<SessionMeta statusline={statusline()} recap="p" recapStatus="ok" recapSource="last-prompt" />);
+    const badge = screen.getByTestId("recap-badge");
+    expect(badge.className).toContain("leading-[15px]");
+    expect(badge.className).not.toMatch(/\bpy-/);
+  });
+
+  // A tooltip is a hover affordance and a finger cannot hover, so on a phone the tail of a long recap
+  // is unreachable unless the line itself scrolls.
+  it("lets the recap scroll on a phone and clips it with a tooltip above the breakpoint", () => {
+    render(<SessionMeta statusline={statusline()} recap="long text" recapStatus="ok" recapSource="last-prompt" />);
+    const text = screen.getByText("long text");
+    expect(text.className).toContain("overflow-x-auto");
+    expect(text.className).toContain("overscroll-x-contain");
+    // Reserved scrollbar space would add back the row height the badge fix just removed.
+    expect(text.className).toContain("no-scrollbar");
+    expect(text.className).toContain("sm:overflow-hidden");
+    expect(text.getAttribute("title")).toBe("long text");
   });
 
   it("renders both halves even with nothing captured yet", () => {

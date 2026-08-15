@@ -334,24 +334,32 @@ export function SessionModal({
         // dvh, not vh: on iOS `vh` is the LARGE viewport (toolbars hidden), so with the Safari toolbars
         // shown a 90vh panel overflows the visible area — and `fixed inset-0` means it cannot be
         // scrolled to. The terminal is the flex child that absorbs the difference.
-        className="relative bg-card/75 backdrop-blur-md border border-border rounded-lg shadow-2xl w-[90vw] h-[90dvh] flex flex-col overflow-hidden"
+        //
+        // Below `sm` the panel takes the whole screen — no inset, no radius, no side border. A 90%
+        // panel on a phone spends a tenth of the shortest dimension there is on showing a board the
+        // terminal is covering anyway, and the terminal is the only thing on this screen worth space.
+        className="relative bg-card/75 backdrop-blur-md border-border shadow-2xl w-screen h-[100dvh] flex flex-col overflow-hidden sm:w-[90vw] sm:h-[90dvh] sm:rounded-lg sm:border"
         onClick={(e) => { e.stopPropagation(); }}
         onDragEnter={(e) => { if (canAttachFiles && isFileDrag(e.dataTransfer.types)) { e.preventDefault(); setDragging(true); } }}
         onDragOver={(e) => { if (canAttachFiles && isFileDrag(e.dataTransfer.types)) e.preventDefault(); }}
         onDragLeave={(e) => { const rt = e.relatedTarget; if (!(rt instanceof Node) || !e.currentTarget.contains(rt)) setDragging(false); }}
         onDrop={(e) => { void handleDrop(e); }}
       >
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
-          <span className="text-foreground text-sm font-semibold">{title !== "" ? title : paneId}</span>
-          <span className="text-xs text-muted-foreground/70">{title !== "" ? `${paneId} · ${envLabel}` : envLabel}</span>
-          <span className="text-xs text-muted-foreground">
+        {/* Which fields survive a phone: the ones that say WHAT this session is and whether it needs
+            you. The address (pane, env), the workspace and the session name are all recoverable from
+            the card you opened this from, so below `sm` they give way — unwrapped, they took three
+            lines of a 390px screen before the terminal even started. */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0 sm:px-4">
+          <span className="text-foreground text-sm font-semibold truncate">{title !== "" ? title : paneId}</span>
+          <span className="hidden shrink-0 text-xs text-muted-foreground/70 sm:inline">{title !== "" ? `${paneId} · ${envLabel}` : envLabel}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">
             · {sessionStateLabel({ status, claudeStatus, waitingFor, registryStatus })}
           </span>
           {workspace !== "" && (
-            <span className="text-xs text-muted-foreground/60 truncate" title={workspace}>· {workspace}</span>
+            <span className="hidden text-xs text-muted-foreground/60 truncate sm:inline" title={workspace}>· {workspace}</span>
           )}
           {statusline?.session_name !== null && statusline?.session_name !== undefined && statusline.session_name !== "" && (
-            <span className="text-xs text-muted-foreground/60 truncate" title={statusline.session_name}>· {statusline.session_name}</span>
+            <span className="hidden text-xs text-muted-foreground/60 truncate sm:inline" title={statusline.session_name}>· {statusline.session_name}</span>
           )}
           {starting && (
             <span className="text-xs text-warning">· starting session…</span>
@@ -366,21 +374,42 @@ export function SessionModal({
               they look identical here: `null` means corral has no record and cannot say, `false` is a
               positive "not connected". Do NOT collapse them with a nullish default.
               Read-only — Remote Control is turned on at launch and corral never changes it. */}
-          {remoteControl === true && (
-            <span
-              className="ml-auto text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-border text-muted-foreground"
-              title="Remote Control is connected — this session is reachable from claude.ai"
-            >remote</span>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            className={`${remoteControl === true ? "" : "ml-auto "}text-muted-foreground hover:text-foreground text-lg leading-none`}
-            title="Close (Esc)"
-          >✕</button>
+          {/* Grouped so the right edge holds regardless of which of these render: `ml-auto` used to
+              live on whichever element happened to come first, which breaks the moment one of them is
+              conditional on the viewport as well as on the data. */}
+          <span className="ml-auto flex shrink-0 items-center gap-2">
+            {remoteControl === true && (
+              <span
+                className="hidden text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-border text-muted-foreground sm:inline"
+                title="Remote Control is connected — this session is reachable from claude.ai"
+              >remote</span>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-muted-foreground hover:text-foreground text-lg leading-none"
+              title="Close (Esc)"
+            >✕</button>
+          </span>
         </div>
         <SessionMeta statusline={statusline} recap={recap} recapStatus={recapStatus} recapSource={recapSource} />
-        <div ref={containerRef} className="flex-1 min-h-0 p-2" />
+        {/* The terminal gets a box of its own from `sm` up: a hairline sitting directly on its
+            surface, because xterm's background carries alpha (TERM_THEME) and on the frosted panel
+            its edge is otherwise indistinguishable from the panel itself.
+
+            The fill is that same theme colour, and it is what makes the box work. xterm quantises to
+            whole rows — its height is rows × cell height, while the box it lives in is a flex child
+            that resizes continuously — so 0 to one cell of the box is always left over at the bottom.
+            Painted with the panel behind it, that leftover reads as a ragged gap that jumps every
+            time the window moves; painted with the terminal's own colour, it reads as the terminal.
+
+            Below `sm` the terminal runs edge to edge: on a phone every pixel of frame is a pixel not
+            spent on output, and there is no panel border there for the hairline to relate to. */}
+        <div
+          ref={containerRef}
+          className="flex-1 min-h-0 overflow-hidden sm:m-1 sm:rounded sm:border sm:border-border/25 sm:p-1"
+          style={{ backgroundColor: TERM_THEME[resolved].background }}
+        />
         {dragging && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-none">
             <span className="text-foreground text-sm font-medium rounded-md border border-border bg-card/80 px-4 py-2">

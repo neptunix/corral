@@ -37,6 +37,17 @@ function MetricChips({ sl }: { readonly sl: StatuslineData }): JSX.Element {
 }
 
 /**
+ * One tone per rung. Green is Claude reporting on its own work, blue a topic it invented for the
+ * session, neutral your own last prompt — descending order of how much the line is worth trusting.
+ * Amber is not here: a failed read overrides every rung (see `RecapBadge`).
+ */
+const TONE: Readonly<Record<RecapSource, string>> = {
+  "away-summary": "border-green-500/40 text-green-500 light:text-green-700",
+  "ai-title": "border-sky-500/40 text-sky-500 light:text-sky-700",
+  "last-prompt": "border-muted-foreground/30 text-muted-foreground/75",
+};
+
+/**
  * Which rung of the ladder produced the recap, and whether the last read of it failed.
  *
  * A badge rather than a bare word: sharing a line with the metrics puts the tag mid-sentence, where
@@ -54,19 +65,18 @@ function RecapBadge({ source, stale, status }: {
 }): JSX.Element | null {
   if (source === null && !stale) return null;
   const label = source === null ? "" : RECAP_SOURCE_LABEL[source].tag;
-  const tone = stale
+  // No rung to name means the only reason this badge renders at all is the failed read.
+  const tone = stale || source === null
     ? "border-amber-500/60 text-amber-500 light:text-amber-700"
-    // Only the top rung is Claude reporting on its own work; a topic or your own last prompt is a
-    // stand-in for one. Worth a glance's difference, not a colour of its own.
-    : source === "away-summary"
-      ? "border-green-500/40 text-green-500 light:text-green-700"
-      // The title bar's own pill, unchanged: two pills 20px apart in one header must not disagree
-      // on size, radius and weight. Only the colour carries the difference between them.
-      : "border-border text-muted-foreground";
+    : TONE[source];
   return (
     <span
       data-testid="recap-badge"
-      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${tone}`}
+      // No vertical padding, and a line box sized to the row: the badge used to be ~22px tall against
+      // 16px of text beside it and dragged the whole row to ~34px. The border tone is muted-foreground,
+      // not `border-border` — that token is a hairline for dividing FILLED surfaces, and this badge sits
+      // on a translucent panel where it disappears, which is most of the fleet (topic and prompt).
+      className={`shrink-0 rounded border px-1 text-[10px] leading-[15px] uppercase ${tone}`}
       title={stale
         ? `${recapReason(status)} — showing the last recap that was read`
         : source === null ? undefined : RECAP_SOURCE_LABEL[source].hint}
@@ -113,13 +123,27 @@ export function SessionMeta({ statusline, recap, recapStatus, recapSource }: {
           ? <MetricChips sl={statusline} />
           : <span className="text-muted-foreground/40">metrics not read yet</span>}
       </span>
-      <span className="hidden w-px self-stretch bg-border sm:block" />
+      {/* Same tone as the badge's border, and for the same reason: `border-border` divides filled
+          surfaces and vanishes on the translucent panel this row sits on. */}
+      <span className="hidden w-px self-stretch bg-muted-foreground/30 sm:block" />
       {recap !== null && recap !== "" ? (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden sm:min-w-[14em]">
           <RecapBadge source={recapSource} stale={stale} status={recapStatus} />
           {/* The retained text stays — it is still the best there is — but dimmed, so a stale line
-              cannot be mistaken for a fresh one at a glance. */}
-          <span className={`truncate ${stale ? "text-muted-foreground/50" : "text-muted-foreground/80"}`} title={recap}>
+              cannot be mistaken for a fresh one at a glance.
+
+              Below `sm` the tail scrolls instead of being clipped: `title` is a hover affordance, and
+              a finger cannot hover, so on a phone the end of a long recap is otherwise unreachable.
+              From `sm` up it goes back to clip-and-tooltip — with a pointer the whole text is one
+              hover away, which beats having to drag it. `overscroll-x-contain` keeps a swipe that
+              runs off the end of the text from scrolling the page under it, and the scrollbar is
+              hidden because on the platforms that reserve space for one it would add back the row
+              height this change just removed. */}
+          <span
+            className={`no-scrollbar min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain whitespace-nowrap sm:overflow-hidden sm:text-ellipsis ${
+              stale ? "text-muted-foreground/50" : "text-muted-foreground/80"}`}
+            title={recap}
+          >
             {recap}
           </span>
         </span>

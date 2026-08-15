@@ -124,6 +124,16 @@ body {
   border-radius: 9999px;
 }
 
+/* A scroll container whose scrollbar must not take part in layout. Used by the recap line, where the
+   9px reserved by the rule above would add back the row height the badge fix removes — and where the
+   scrollbar would be pure noise anyway, since the content is one line of text on a phone. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* 150ms color transition, enabled only after first paint (.transitions-ready added
    post-mount) so theme switches animate but the initial load does not flash. */
 .transitions-ready * {
