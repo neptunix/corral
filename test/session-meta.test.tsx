@@ -81,7 +81,9 @@ describe("SessionMeta", () => {
     );
     const cls = (c: HTMLElement): string => c.querySelector("[data-testid=recap-badge]")?.className ?? "";
     expect(cls(topic)).toContain("sky");
-    expect(cls(prompt)).toContain("muted-foreground");
+    // `text-`, not bare `muted-foreground`: the badge's BORDER carries that word too, so the looser
+    // form passes with the text tone deleted outright.
+    expect(cls(prompt)).toContain("text-muted-foreground");
     expect(cls(recap)).toContain("green");
     expect(cls(topic)).not.toBe(cls(prompt));
   });
@@ -120,6 +122,17 @@ describe("SessionMeta", () => {
     expect(text.className).toContain("no-scrollbar");
     expect(text.className).toContain("sm:overflow-hidden");
     expect(text.getAttribute("title")).toBe("long text");
+  });
+
+  // The badge carries the ⚠, but the text carries the doubt: a retained line is the best there is and
+  // still not what the last sweep saw. Now that a healthy recap is at full strength, the dimming is
+  // the only thing separating the two at a glance.
+  it("dims the recap text when the read failed and leaves a healthy one at full strength", () => {
+    render(<SessionMeta statusline={statusline()} recap="a recap" recapStatus="ok" recapSource="away-summary" />);
+    expect(screen.getByText("a recap").className).not.toMatch(/text-muted-foreground\/\d/);
+    cleanup();
+    render(<SessionMeta statusline={statusline()} recap="a recap" recapStatus="read-error" recapSource="away-summary" />);
+    expect(screen.getByText("a recap").className).toContain("text-muted-foreground/50");
   });
 
   it("renders both halves even with nothing captured yet", () => {

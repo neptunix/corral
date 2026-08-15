@@ -350,8 +350,11 @@ export function SessionModal({
     if (termRef.current !== null) termRef.current.options.theme = TERM_THEME[resolved];
   }, [resolved]);
 
+  // The scrim only exists where the panel does not already cover the screen. Below `sm` it does cover
+  // it, so the scrim's one remaining effect was to darken the board showing THROUGH the panel —
+  // muting the header without dimming anything the operator can actually see.
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 flex items-center justify-center z-50 sm:bg-black/60" onClick={onClose}>
       <div
         // dvh, not vh: on iOS `vh` is the LARGE viewport (toolbars hidden), so with the Safari toolbars
         // shown a 90vh panel overflows the visible area — and `fixed inset-0` means it cannot be
@@ -360,7 +363,11 @@ export function SessionModal({
         // Below `sm` the panel takes the whole screen — no inset, no radius, no side border. A 90%
         // panel on a phone spends a tenth of the shortest dimension there is on showing a board the
         // terminal is covering anyway, and the terminal is the only thing on this screen worth space.
-        className="relative bg-card/75 backdrop-blur-md border-border shadow-2xl w-screen h-[100dvh] flex flex-col overflow-hidden sm:w-[90vw] sm:h-[90dvh] sm:rounded-lg sm:border"
+        // Frosted only from `sm` up, and opaque below it. A translucent full-screen panel reveals
+        // nothing — the board it would show through is entirely behind it — so on a phone the effect
+        // costs a per-frame backdrop blur, which Safari charges for on every scroll, and returns a
+        // muted header. On a desktop the panel is a window over the board, which is the whole point.
+        className="relative bg-card border-border shadow-2xl w-screen h-[100dvh] flex flex-col overflow-hidden sm:bg-card/85 sm:backdrop-blur-md sm:w-[90vw] sm:h-[90dvh] sm:rounded-lg sm:border"
         onClick={(e) => { e.stopPropagation(); }}
         onDragEnter={(e) => { if (canAttachFiles && isFileDrag(e.dataTransfer.types)) { e.preventDefault(); setDragging(true); } }}
         onDragOver={(e) => { if (canAttachFiles && isFileDrag(e.dataTransfer.types)) e.preventDefault(); }}

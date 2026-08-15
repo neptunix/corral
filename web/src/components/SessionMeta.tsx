@@ -44,7 +44,7 @@ function MetricChips({ sl }: { readonly sl: StatuslineData }): JSX.Element {
 const TONE: Readonly<Record<RecapSource, string>> = {
   "away-summary": "border-green-500/40 text-green-500 light:text-green-700",
   "ai-title": "border-sky-500/40 text-sky-500 light:text-sky-700",
-  "last-prompt": "border-muted-foreground/30 text-muted-foreground/75",
+  "last-prompt": "border-muted-foreground/30 text-muted-foreground",
 };
 
 /**
@@ -141,7 +141,7 @@ export function SessionMeta({ statusline, recap, recapStatus, recapSource }: {
               height this change just removed. */}
           <span
             className={`no-scrollbar min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain whitespace-nowrap sm:overflow-hidden sm:text-ellipsis ${
-              stale ? "text-muted-foreground/50" : "text-muted-foreground/80"}`}
+              stale ? "text-muted-foreground/50" : "text-muted-foreground"}`}
             title={recap}
           >
             {recap}
