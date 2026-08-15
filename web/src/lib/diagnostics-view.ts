@@ -40,3 +40,46 @@ export function pickSnapshot(
   if (heldAt === null || incomingAt === null) return incoming;
   return incomingAt > heldAt ? incoming : held;
 }
+
+/** The view-only group synthetic rows are lifted into; `CheckScope` has no "client" kind to express it. */
+const SYNTHETIC_GROUP_KEY = "client";
+const SYNTHETIC_IDS = new Set(["backend-unreachable", "sweep-failed"]);
+
+/**
+ * Conditions the server's own rollup structurally cannot report: the panel cannot be a server check
+ * about the server whose death it reports, and a sweep that throws cannot file a report about itself.
+ * Both are minted as ordinary `Check` values so they flow through ONE code path into grouping, the
+ * rollup, the badge digit and the auto-open trigger.
+ *
+ * `scope` and `class` are forced to existing enum members because the wire schema is frozen this
+ * stage; the grouper lifts these two ids out by id, not by scope.
+ */
+export function syntheticChecks(snapshot: DiagnosticsSnapshot, streamDown: boolean): Check[] {
+  const rows: Check[] = [];
+  const base = {
+    state: "problem", severity: "fatal", doc: null,
+    scope: { kind: "global" }, class: "network",
+    checkedAt: null, startupOkLine: false, haltsStartup: false,
+  } as const;
+  if (streamDown) {
+    rows.push({
+      ...base, id: "backend-unreachable", key: "backend-unreachable",
+      title: "corral is not answering",
+      detail: "The dashboard lost its connection to the corral server. Every row below predates the "
+        + "disconnect. The page keeps retrying on its own.",
+    });
+  }
+  if (snapshot.lastError !== null) {
+    rows.push({
+      ...base, id: "sweep-failed", key: "sweep-failed",
+      title: "the diagnostics sweep is failing",
+      detail: `The last sweep threw and the rows below are the previous run's: ${snapshot.lastError}`,
+    });
+  }
+  return rows;
+}
+
+/** Server checks plus synthetics — the single list every derived value reads (badge, header, age). */
+export function renderedChecks(snapshot: DiagnosticsSnapshot, streamDown: boolean): Check[] {
+  return [...syntheticChecks(snapshot, streamDown), ...snapshot.checks];
+}

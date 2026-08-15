@@ -2,7 +2,7 @@ import type { Check, DiagnosticsSnapshot } from "@shared/diagnostics-schema";
 import { emptyDiagnostics } from "@shared/diagnostics-schema";
 import { describe, expect, it } from "vitest";
 
-import { maxCheckedAt, pickSnapshot } from "../web/src/lib/diagnostics-view";
+import { maxCheckedAt, pickSnapshot, renderedChecks, syntheticChecks } from "../web/src/lib/diagnostics-view";
 
 function check(over: Partial<Check> = {}): Check {
   return {
@@ -74,5 +74,43 @@ describe("pickSnapshot", () => {
     const rechecked = snapshot({ checks: [check({ checkedAt: 200 })] });
     const stale = snapshot({ checks: [check({ checkedAt: 150 })] });
     expect(pickSnapshot(rechecked, stale)).toBe(rechecked);
+  });
+});
+
+describe("synthetic client checks", () => {
+  it("reports a dead stream as a fatal the server could never file itself", () => {
+    const rows = syntheticChecks(emptyDiagnostics(), true);
+    expect(rows.map((r) => r.id)).toEqual(["backend-unreachable"]);
+    expect(rows[0]?.state).toBe("problem");
+    expect(rows[0]?.severity).toBe("fatal");
+  });
+
+  it("reports a sweep that failed, which the sweep publishing it cannot", () => {
+    const rows = syntheticChecks(snapshot({ lastError: "ENOENT: herdr" }), false);
+    expect(rows.map((r) => r.id)).toEqual(["sweep-failed"]);
+    expect(rows[0]?.detail).toContain("ENOENT: herdr");
+  });
+
+  it("emits nothing when the stream is up and the sweep is healthy", () => {
+    expect(syntheticChecks(snapshot({ checks: [check()] }), false)).toEqual([]);
+  });
+
+  // checkedAt is load-bearing: the header age is max(checkedAt) over server rows, and a client-minted
+  // timestamp would make a dead backend read "checked just now" and freeze pickSnapshot's comparator.
+  it("carries no timestamp, so it can never freshen the header age", () => {
+    for (const row of syntheticChecks(snapshot({ lastError: "x" }), true)) {
+      expect(row.checkedAt).toBe(null);
+      expect(row.doc).toBe(null);
+      expect(row.key).toBe(row.id);
+      expect(row.haltsStartup).toBe(false);
+      expect(row.startupOkLine).toBe(false);
+    }
+    expect(maxCheckedAt(syntheticChecks(snapshot({ lastError: "x" }), true))).toBe(null);
+  });
+
+  it("puts synthetic rows first in the rendered list", () => {
+    const rows = renderedChecks(snapshot({ checks: [check()], lastError: "x" }), true);
+    expect(rows.slice(0, 2).map((r) => r.id)).toEqual(["backend-unreachable", "sweep-failed"]);
+    expect(rows).toHaveLength(3);
   });
 });
