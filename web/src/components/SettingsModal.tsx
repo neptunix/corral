@@ -55,11 +55,6 @@ export function SettingsModal({ onClose }: Props): JSX.Element {
             <span>{SCROLL_SPEED_MIN}× slower</span>
             <span>{SCROLL_SPEED_MAX}× faster</span>
           </div>
-          <p className="text-[11px] text-muted-foreground leading-relaxed mt-3">
-            Wheel notches sent per real one inside the session terminal — the only lever that a pane
-            running a TUI responds to. Saved on this device only, so your phone keeps its own value,
-            and applies to sessions opened after the change.
-          </p>
         </div>
         <div className="flex justify-end gap-2 px-6 pt-5 pb-6">
           <button
