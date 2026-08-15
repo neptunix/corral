@@ -27,6 +27,14 @@ describe("helper-drift", () => {
     expect(c.detail).toContain("corral-status-capture.sh");
   });
 
+  it("titles the failing state without claiming a direction — the hash only proves the two sides differ", () => {
+    const d = deps({ hashFile: (p) => (p === `${D}/corral-status-capture.sh` ? "old" : "same") });
+    const c = driftCheck(d, "work", D);
+    expect(c.title).toBe(`installed helper files differ from the checkout in ${D}`);
+    expect(c.title).not.toContain("stale");
+    expect(c.detail).toContain("corral-status-capture.sh");
+  });
+
   it("never reports statusline-command.sh — README allows your own", () => {
     const d = deps({ hashFile: (p) => (p.endsWith("statusline-command.sh") ? "mine" : "same") });
     expect(driftCheck(d, "work", D).state).toBe("ok");

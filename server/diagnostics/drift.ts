@@ -76,9 +76,9 @@ export function driftCheck(deps: CheckDeps, envId: string, dir: string): Check {
   }
   const names = drifted.map((r) => r.name).join(", ");
   return {
-    ...base, title: `installed helper files are stale in ${dir}`,
+    ...base, title: `installed helper files differ from the checkout in ${dir}`,
     state: "problem", severity: "warning",
-    detail: `${names} in ${dir} do not match this checkout — re-copy from the paths in README → "Installing the Claude helper files".`,
+    detail: `${names} in ${dir} do not match this checkout — re-copy from the paths in README → "Installing the Claude helper files", or check whether this server is running an older checkout than the installed copies.`,
   };
 }
 
