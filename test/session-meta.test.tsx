@@ -45,6 +45,11 @@ describe("SessionMeta", () => {
     expect(screen.getByText("Fixing the focus flag")).toBeTruthy();
     const badge = screen.getByText("recap ⚠");
     expect(badge.getAttribute("title")).toContain("recap read failed");
+    // A failed read outranks the rung that produced the text. Without this the two live in separate
+    // branches and nothing says which wins, so a stale top-rung recap could render green — identical
+    // to a healthy one, which is the single thing this badge exists to prevent.
+    expect(badge.className).toContain("amber");
+    expect(badge.className).not.toContain("green");
   });
 
   // The warning used to be appended AFTER the text. On a row shared with the metrics a suffix is the
@@ -107,6 +112,9 @@ describe("SessionMeta", () => {
     render(<SessionMeta statusline={statusline()} recap="long text" recapStatus="ok" recapSource="last-prompt" />);
     const text = screen.getByText("long text");
     expect(text.className).toContain("overflow-x-auto");
+    // Load-bearing, and easy to lose: without it the text wraps instead of overflowing, the scroll
+    // container never has anything to scroll, and the row grows by a line — the opposite of the point.
+    expect(text.className).toContain("whitespace-nowrap");
     expect(text.className).toContain("overscroll-x-contain");
     // Reserved scrollbar space would add back the row height the badge fix just removed.
     expect(text.className).toContain("no-scrollbar");

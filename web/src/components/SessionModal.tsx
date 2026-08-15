@@ -278,20 +278,23 @@ export function SessionModal({
 
     const ro = new ResizeObserver(() => { sendResize(); });
     ro.observe(el);
-    // A second observer, on the TERMINAL rather than on the box holding it. xterm is quantised to
-    // whole rows and columns, so its box is up to one cell shorter and narrower than the space it was
-    // given, and by a different amount at every window size. Following the terminal's own box is what
-    // keeps the hairline on the last row instead of a ragged distance below it. Observing the element
-    // (rather than measuring after fit) also sidesteps the question of when xterm's relayout lands.
+    // A second observer, on the TERMINAL rather than on the box holding it, and it sets the HEIGHT
+    // only. xterm rounds down to whole rows, so its box is up to one row shorter than the space it
+    // was given, by a different amount at every window size; following it is what keeps the hairline
+    // on the last row instead of a ragged distance below it. Observing the element (rather than
+    // measuring after fit) also sidesteps the question of when xterm's relayout lands.
+    //
+    // The width is NOT tracked, because it cannot be: `.xterm` is a plain block element that xterm
+    // never sizes (only `.xterm-screen` inside it carries cols × cell width), so it is always exactly
+    // as wide as this container. The hairline's left and right edges are therefore the container's,
+    // and there is a slice of non-output between the last column and the right edge — wider than one
+    // cell, since the fit addon also reserves room for an overview ruler.
+    const xtermEl = el.querySelector(".xterm");
     const frameObserver = new ResizeObserver(() => {
       const frame = frameRef.current;
-      const xterm = el.querySelector(".xterm");
-      if (frame === null || !(xterm instanceof HTMLElement)) return;
-      const box = xterm.getBoundingClientRect();
-      frame.style.width = `${String(Math.round(box.width))}px`;
-      frame.style.height = `${String(Math.round(box.height))}px`;
+      if (frame === null || !(xtermEl instanceof HTMLElement)) return;
+      frame.style.height = `${String(Math.round(xtermEl.getBoundingClientRect().height))}px`;
     });
-    const xtermEl = el.querySelector(".xterm");
     if (xtermEl !== null) frameObserver.observe(xtermEl);
     // Without this the pane cannot be scrolled at all on a phone — why, in lib/touch-scroll.ts.
     const detachTouchScroll = attachTouchScroll(el);
@@ -371,7 +374,16 @@ export function SessionModal({
         <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0 sm:px-4">
           <span className="text-foreground text-sm font-semibold truncate">{title !== "" ? title : paneId}</span>
           <span className="hidden shrink-0 text-xs text-muted-foreground/70 sm:inline">{title !== "" ? `${paneId} · ${envLabel}` : envLabel}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">
+          {/* Every text child of this row must be able to give way, and the ✕ must not. The row does
+              not wrap and the panel clips it, so one child that refuses to shrink pushes whatever
+              follows past the edge — and below `sm` the panel covers the backdrop, so tapping outside
+              no longer closes and a phone has no Esc: the ✕ is the only way out. Both the state
+              (which carries a free-form `waitingFor`) and the close/drop messages (whose text comes
+              from the server) are unbounded, so both truncate rather than shove. */}
+          <span
+            className="min-w-0 truncate text-xs text-muted-foreground"
+            title={sessionStateLabel({ status, claudeStatus, waitingFor, registryStatus })}
+          >
             · {sessionStateLabel({ status, claudeStatus, waitingFor, registryStatus })}
           </span>
           {workspace !== "" && (
@@ -381,13 +393,15 @@ export function SessionModal({
             <span className="hidden text-xs text-muted-foreground/60 truncate sm:inline" title={statusline.session_name}>· {statusline.session_name}</span>
           )}
           {starting && (
-            <span className="text-xs text-warning">· starting session…</span>
+            <span className="min-w-0 truncate text-xs text-warning">· starting session…</span>
           )}
           {closeInfo !== null && !starting && (
-            <span className="text-xs text-warning">· {closeMessage(closeInfo.code, closeInfo.reason)}</span>
+            <span className="min-w-0 truncate text-xs text-warning" title={closeMessage(closeInfo.code, closeInfo.reason)}>
+              · {closeMessage(closeInfo.code, closeInfo.reason)}
+            </span>
           )}
           {dropError !== null && (
-            <span className="text-xs text-warning">· {dropError}</span>
+            <span className="min-w-0 truncate text-xs text-warning" title={dropError}>· {dropError}</span>
           )}
           {/* `true` only. `false` and `null` both render nothing, and that is deliberate even though
               they look identical here: `null` means corral has no record and cannot say, `false` is a
@@ -419,11 +433,13 @@ export function SessionModal({
             own Claude theme disagrees with corral's, and corral cannot know that theme's background:
             it only flips the `base` field of the theme file, and the colours live inside Claude Code.
 
-            The line is an OVERLAY, sized in the effect above from the terminal's own box, rather than
-            a border on the box holding it. Those differ by up to one cell in each direction, because
-            xterm rounds down to whole rows and columns while its container resizes continuously — a
-            border on the container would sit a ragged, window-size-dependent distance away from the
-            output. Here the leftover ends up outside the line, where it reads as panel margin.
+            The line is an OVERLAY whose height comes from the terminal's own box (set in the effect
+            above), rather than a border on the box holding it. The two differ by up to one row,
+            because xterm rounds down to whole rows while its container resizes continuously — a
+            border on the container would sit a ragged, window-size-dependent distance below the
+            output. Here that leftover ends up outside the line, where it reads as panel margin.
+            Horizontally the line is the container's own width; see the effect for why nothing else
+            is available to measure.
 
             The inset is deliberately tiny on a phone: every pixel of frame there is a pixel not spent
             on output. */}
@@ -432,7 +448,7 @@ export function SessionModal({
           <div
             ref={frameRef}
             aria-hidden
-            className="pointer-events-none absolute left-0 top-0 rounded border border-muted-foreground/30"
+            className="pointer-events-none absolute inset-x-0 top-0 rounded border border-muted-foreground/30"
           />
         </div>
         {dragging && (
