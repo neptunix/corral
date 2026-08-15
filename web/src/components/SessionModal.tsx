@@ -393,22 +393,17 @@ export function SessionModal({
           </span>
         </div>
         <SessionMeta statusline={statusline} recap={recap} recapStatus={recapStatus} recapSource={recapSource} />
-        {/* The terminal gets a box of its own from `sm` up: a hairline sitting directly on its
-            surface, because xterm's background carries alpha (TERM_THEME) and on the frosted panel
-            its edge is otherwise indistinguishable from the panel itself.
+        {/* A hairline sitting directly on the terminal, in the same tone as the recap badge above it:
+            xterm's background carries alpha (TERM_THEME), so on the frosted panel its edge is
+            otherwise indistinguishable from the panel. No padding inside the border and no fill —
+            both would show panel colour between the line and the output, which is a light frame
+            around a dark terminal whenever the pane's own Claude theme disagrees with corral's.
 
-            The fill is that same theme colour, and it is what makes the box work. xterm quantises to
-            whole rows — its height is rows × cell height, while the box it lives in is a flex child
-            that resizes continuously — so 0 to one cell of the box is always left over at the bottom.
-            Painted with the panel behind it, that leftover reads as a ragged gap that jumps every
-            time the window moves; painted with the terminal's own colour, it reads as the terminal.
-
-            Below `sm` the terminal runs edge to edge: on a phone every pixel of frame is a pixel not
-            spent on output, and there is no panel border there for the hairline to relate to. */}
+            The inset is deliberately tiny on a phone: every pixel of frame there is a pixel not spent
+            on output. */}
         <div
           ref={containerRef}
-          className="flex-1 min-h-0 overflow-hidden sm:m-1 sm:rounded sm:border sm:border-border/25 sm:p-1"
-          style={{ backgroundColor: TERM_THEME[resolved].background }}
+          className="flex-1 min-h-0 overflow-hidden m-0.5 rounded border border-muted-foreground/30 sm:m-1"
         />
         {dragging && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-none">
