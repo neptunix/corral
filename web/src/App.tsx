@@ -71,7 +71,7 @@ export function App(): JSX.Element {
 
   // The no-board stream sends GlobalState frames (no board/tasks) — parse the union, never drop them:
   // a dropped frame freezes the attention feed and unassigned list on that view.
-  const frame = useEventSource(streamUrl, StreamFrameSchema);
+  const { frame } = useEventSource(streamUrl, StreamFrameSchema);
 
   // Clear the local override + optimistic overlay whenever SSE delivers a fresh snapshot. The optimistic
   // clear uses a functional guard so a zero-override poll (the steady state) doesn't force a re-render.
