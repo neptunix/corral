@@ -382,9 +382,9 @@ Each entry describes one place corral can see and spawn sessions into:
 - `kind: "local"` — talks to a herdr socket on this machine. With no `socket` it inherits
   the ambient `HERDR_SOCKET_PATH` (launch corral from the right herdr context or set it).
 - `kind: "remote"` — talks to a box over SSH (`sshHost`, `socket`, `herdrBin` required).
-  An unreachable environment keeps its last-good snapshot and is **not** flagged anywhere in the
-  UI yet — its cards simply stop changing. The server records the reason, so the server log is
-  where you find out; corral also names a missing `herdr`/`ssh` at startup.
+  An unreachable environment keeps its last-good snapshot and its cards stop changing. The 🛟 health
+  panel in the right-hand rail flags it — `env-reachable` turns amber there with the reason — and the
+  server records it in the log as well; corral also names a missing `herdr`/`ssh` at startup.
 - `spawnCommand` — what corral runs to start a new agent session in this environment.
   Defaults to `claude`. One hard constraint: it must be a **single token** — no spaces and no
   arguments, which the config schema rejects outright, so wrap any flags in a script. It does not
