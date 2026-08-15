@@ -257,6 +257,12 @@ Attaching the TUI to an already-headless server is otherwise fine.
 **Already started one inside a tab?** It cannot be moved out without stopping it, and stopping it
 takes the agents with it. Adopt the recipe above at your next reboot or planned restart.
 
+**Scroll speed.** xterm's default multiplier is 1, which is punishing in a pane running a TUI with
+mouse reporting — that path damps pixel deltas under 50 by 0.3 before dividing by the cell height, so
+a trackpad or a finger buys about one wheel notch per 57px of travel. The gear in the top right of
+the board header sets the multiplier (1–10, default 3). It is stored per browser in `localStorage`,
+so a laptop and a phone keep independent values, and it applies to sessions opened after the change.
+
 ## Launching corral
 
 **Launch from a normal terminal, never from inside a Claude Code session.** corral refuses to start

@@ -11,6 +11,7 @@ import {
 import { formatDropInjection, formatPaste } from "../lib/paste";
 import { closeMessage } from "../lib/protocol";
 import { sessionStateLabel } from "../lib/session-state";
+import { readTerminalPrefs } from "../lib/terminal-prefs";
 import { attachCommittedTextInput } from "../lib/text-input";
 import { attachTouchScroll } from "../lib/touch-scroll";
 import { isFileDrag, uploadFile, UPLOAD_MAX_BYTES } from "../lib/upload";
@@ -141,6 +142,12 @@ export function SessionModal({
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       fontSize: 13,
       scrollback: 5000,
+      // xterm's default of 1 is punishing on this fleet: panes running a TUI with mouse reporting take
+      // the consumeWheelEvent path, where a pixel delta under 50 is multiplied by 0.3 before being
+      // divided by the cell height — roughly one wheel notch per 57px of trackpad or finger travel.
+      // Read once here rather than watched: the gear lives in the app header, which this modal covers,
+      // so the value cannot change while a terminal is open.
+      scrollSensitivity: readTerminalPrefs().scrollSpeed,
       theme: TERM_THEME[resolvedRef.current],
     });
     termRef.current = term;
