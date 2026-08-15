@@ -1,8 +1,10 @@
 import type { Check, DiagnosticsSnapshot } from "@shared/diagnostics-schema";
-import { emptyDiagnostics } from "@shared/diagnostics-schema";
+import { computeRollup, emptyDiagnostics } from "@shared/diagnostics-schema";
 import { describe, expect, it } from "vitest";
 
-import { maxCheckedAt, pickSnapshot, renderedChecks, syntheticChecks } from "../web/src/lib/diagnostics-view";
+import {
+  badgeCount, groupChecks, headerStatus, maxCheckedAt, pickSnapshot, renderedChecks, syntheticChecks,
+} from "../web/src/lib/diagnostics-view";
 
 function check(over: Partial<Check> = {}): Check {
   return {
@@ -112,5 +114,101 @@ describe("synthetic client checks", () => {
     const rows = renderedChecks(snapshot({ checks: [check()], lastError: "x" }), true);
     expect(rows.slice(0, 2).map((r) => r.id)).toEqual(["backend-unreachable", "sweep-failed"]);
     expect(rows).toHaveLength(3);
+  });
+});
+
+const label = (id: string): string => (id === "e1" ? "Work (local)" : id);
+
+describe("headerStatus", () => {
+  it("says checking only when nothing has been rendered and no class has answered", () => {
+    expect(headerStatus(computeRollup([]), 0, 0)).toBe("checking");
+  });
+
+  // An answered class with an empty row set is still an answer (server/diagnostics-store.ts:50) —
+  // that is precisely what `answered` was added to make distinguishable.
+  it("says ok when a class answered but produced no rows", () => {
+    expect(headerStatus(computeRollup([]), 1, 0)).toBe("ok");
+  });
+
+  // THE REGRESSION GUARD. A remote env's jq row is {state:"pending", severity:"fatal"}. Ranking by
+  // raw severity paints an ordinary remote install red.
+  it("ignores a pending row's severity, so a remote install stays green", () => {
+    const rows = [check({ state: "pending", severity: "fatal", checkedAt: 1 })];
+    expect(headerStatus(computeRollup(rows), 1, rows.length)).toBe("ok");
+  });
+
+  it("ranks real problems by severity", () => {
+    const rows = [check({ state: "problem", severity: "warning" }), check({ state: "problem", severity: "info" })];
+    expect(headerStatus(computeRollup(rows), 1, rows.length)).toBe("warning");
+  });
+
+  it("reads info, not green, for an info-only snapshot", () => {
+    const rows = [check({ state: "problem", severity: "info" })];
+    expect(headerStatus(computeRollup(rows), 1, rows.length)).toBe("info");
+  });
+
+  it("does not say checking when a dead backend is the only thing rendered", () => {
+    const rows = renderedChecks(emptyDiagnostics(), true);
+    expect(headerStatus(computeRollup(rows), 0, rows.length)).toBe("fatal");
+  });
+});
+
+describe("badgeCount", () => {
+  it("counts fatal and warning problems only", () => {
+    const rows = [
+      check({ state: "problem", severity: "fatal" }),
+      check({ state: "problem", severity: "warning" }),
+      check({ state: "problem", severity: "info" }),
+      check({ state: "pending", severity: "fatal" }),
+      check({ state: "ok", severity: "fatal" }),
+    ];
+    expect(badgeCount(computeRollup(rows))).toBe(2);
+  });
+
+  it("includes a synthetic fatal the wire rollup cannot see", () => {
+    expect(badgeCount(computeRollup(renderedChecks(emptyDiagnostics(), true)))).toBe(1);
+  });
+});
+
+describe("groupChecks", () => {
+  it("leads with the client group and never folds it into global", () => {
+    const groups = groupChecks(renderedChecks(snapshot({ checks: [check()] }), true), label);
+    expect(groups[0]?.key).toBe("client");
+    expect(groups[0]?.problems.map((c) => c.id)).toEqual(["backend-unreachable"]);
+    expect(groups[1]?.key).toBe("global");
+  });
+
+  it("labels an env group through the injected label source", () => {
+    const rows = [check({ scope: { kind: "env", envId: "e1" }, key: "a@e1" })];
+    expect(groupChecks(rows, label)[0]?.label).toBe("Work (local)");
+  });
+
+  // Sorting by raw severity would float a healthy row above a real problem.
+  it("sorts problems above everything, and never ranks a non-problem by severity", () => {
+    const rows = [
+      check({ key: "k1", state: "ok", severity: "fatal" }),
+      check({ key: "k2", state: "problem", severity: "warning" }),
+      check({ key: "k3", state: "problem", severity: "fatal" }),
+    ];
+    const g = groupChecks(rows, label)[0];
+    expect(g?.problems.map((c) => c.key)).toEqual(["k3", "k2"]);
+    expect(g?.ok.map((c) => c.key)).toEqual(["k1"]);
+  });
+
+  it("splits the fold by kind so a green tick never covers a pending row", () => {
+    const rows = [
+      check({ key: "a", state: "ok" }), check({ key: "b", state: "n/a" }), check({ key: "c", state: "pending" }),
+    ];
+    const g = groupChecks(rows, label)[0];
+    expect([g?.ok.length, g?.na.length, g?.pending.length]).toEqual([1, 1, 1]);
+  });
+
+  it("orders groups global, then env, then config dir", () => {
+    const rows = [
+      check({ key: "d", scope: { kind: "configDir", envId: "e1", dir: "~/.claude" } }),
+      check({ key: "e", scope: { kind: "env", envId: "e1" } }),
+      check({ key: "g", scope: { kind: "global" } }),
+    ];
+    expect(groupChecks(rows, label).map((x) => x.key)).toEqual(["global", "env:e1", "dir:e1:~/.claude"]);
   });
 });

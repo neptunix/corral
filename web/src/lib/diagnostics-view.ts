@@ -1,4 +1,4 @@
-import type { Check, DiagnosticsSnapshot } from "@shared/diagnostics-schema";
+import type { Check, DiagnosticsSnapshot, Rollup } from "@shared/diagnostics-schema";
 
 /**
  * The newest timestamp among SERVER-BACKED checks, or null when none carries one.
@@ -82,4 +82,89 @@ export function syntheticChecks(snapshot: DiagnosticsSnapshot, streamDown: boole
 /** Server checks plus synthetics — the single list every derived value reads (badge, header, age). */
 export function renderedChecks(snapshot: DiagnosticsSnapshot, streamDown: boolean): Check[] {
   return [...syntheticChecks(snapshot, streamDown), ...snapshot.checks];
+}
+
+export type HeaderStatus = "checking" | "ok" | "info" | "warning" | "fatal";
+
+/**
+ * The header's one-word verdict. Reads the ROLLUP, never raw rows: `computeRollup` is what enforces
+ * "severity is meaningful only when state === 'problem'", and a remote env's `jq-present` row really
+ * is {state:"pending", severity:"fatal"} — ranking rows directly paints a healthy install red.
+ *
+ * `checking` needs both conditions. An empty row set with an answered class is not "nothing has run
+ * yet": the store records that an empty array for an answered class is still an answer.
+ */
+export function headerStatus(rollup: Rollup, answeredCount: number, renderedCount: number): HeaderStatus {
+  if (renderedCount === 0 && answeredCount === 0) return "checking";
+  if (rollup.fatal > 0) return "fatal";
+  if (rollup.warning > 0) return "warning";
+  if (rollup.info > 0) return "info";
+  return "ok";
+}
+
+/** The red digit. `info` is a recommendation, not a problem, and `pending` is not an answer. */
+export function badgeCount(rollup: Rollup): number {
+  return rollup.fatal + rollup.warning;
+}
+
+export interface CheckGroup {
+  readonly key: string;
+  readonly label: string;
+  /** Rendered in full — the only rows the operator can act on. */
+  readonly problems: readonly Check[];
+  readonly ok: readonly Check[];
+  readonly na: readonly Check[];
+  readonly pending: readonly Check[];
+}
+
+const SEVERITY_RANK = { fatal: 0, warning: 1, info: 2 } as const;
+
+function groupKeyOf(c: Check): string {
+  if (SYNTHETIC_IDS.has(c.id)) return SYNTHETIC_GROUP_KEY;
+  if (c.scope.kind === "global") return "global";
+  if (c.scope.kind === "env") return `env:${c.scope.envId}`;
+  return `dir:${c.scope.envId}:${c.scope.dir}`;
+}
+
+function groupLabelOf(c: Check, labelFor: (envId: string) => string): string {
+  if (SYNTHETIC_IDS.has(c.id)) return "This browser";
+  if (c.scope.kind === "global") return "corral";
+  if (c.scope.kind === "env") return labelFor(c.scope.envId);
+  return `${labelFor(c.scope.envId)} · ${c.scope.dir}`;
+}
+
+/** Sort key for the group list: client first, then global, then envs, then config dirs. */
+function groupRank(key: string): number {
+  if (key === SYNTHETIC_GROUP_KEY) return 0;
+  if (key === "global") return 1;
+  return key.startsWith("env:") ? 2 : 3;
+}
+
+/**
+ * Rows bucketed by scope and by what the operator can do about them. `labelFor` is injected so this
+ * module never imports `EnvState` — and so the caller can keep the label source stable across the
+ * board switch that empties `envs`.
+ */
+export function groupChecks(checks: readonly Check[], labelFor: (envId: string) => string): CheckGroup[] {
+  const byKey = new Map<string, { label: string; problems: Check[]; ok: Check[]; na: Check[]; pending: Check[] }>();
+  for (const c of checks) {
+    const key = groupKeyOf(c);
+    let g = byKey.get(key);
+    if (g === undefined) {
+      g = { label: groupLabelOf(c, labelFor), problems: [], ok: [], na: [], pending: [] };
+      byKey.set(key, g);
+    }
+    if (c.state === "problem") g.problems.push(c);
+    else if (c.state === "pending") g.pending.push(c);
+    else if (c.state === "n/a") g.na.push(c);
+    else g.ok.push(c);
+  }
+  return [...byKey.entries()]
+    .sort(([a], [b]) => groupRank(a) - groupRank(b) || a.localeCompare(b))
+    .map(([key, g]) => ({
+      key, label: g.label,
+      // Severity ranks ONLY inside `problems` — every other bucket has a severity the schema calls meaningless.
+      problems: [...g.problems].sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]),
+      ok: g.ok, na: g.na, pending: g.pending,
+    }));
 }
