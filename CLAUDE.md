@@ -51,9 +51,12 @@ messages, code comments) must carry NO local/private data — scrub before publi
 - Bug repros use placeholder ids (`w1:p1`, `<uuid>`, `/repo/path`), never a real session or
   transcript dump.
 
-Outward-facing text is product text, not a work log — PR bodies, release notes, issue text alike:
-- Lead with what the change gives the reader. Release notes may go deeper into mechanism than a PR
-  body, but only where it changes what the reader does or expects.
+Outward-facing text is written for its reader, never as a work log — PR bodies, release notes,
+issue text alike:
+- Release notes are for users: what changed for them and why it matters, kept short. Link the PR
+  for anyone who wants the depth.
+- The PR body is where mechanism, constraints and trade-offs go. It is public and reached from the
+  release, so it is scrubbed to the same standard, not a looser one.
 - No development history anywhere: review rounds and their counts, what an earlier attempt got
   wrong, what was tried and abandoned, gate/test totals, validation steps, agent or tool names.
   Strip the harness's `Generated with Claude Code` block and session link from PR bodies; the
@@ -63,6 +66,6 @@ Outward-facing text is product text, not a work log — PR bodies, release notes
   PR comment by default. Opening a PR with its title and body is part of the flow and needs no ask.
 - Never open an issue unless the operator explicitly confirmed it.
 - Before merging a PR or publishing a release, re-read the text against the final diff: accurate,
-  product-only, scrubbed.
+  free of work log, scrubbed.
 
 Full design: `docs/specs/design-spec.md`.
