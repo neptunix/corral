@@ -55,12 +55,12 @@ Outward-facing text is written for its reader, never as a work log — PR bodies
 issue text alike:
 - Release notes are for users: what changed for them and why it matters, kept short. Link the PR
   for anyone who wants the depth.
-- The PR body is where mechanism, constraints and trade-offs go. It is public and reached from the
-  release, so it is scrubbed to the same standard, not a looser one.
+- The PR body is where mechanism, constraints and trade-offs go — the depth a release links to.
 - No development history anywhere: review rounds and their counts, what an earlier attempt got
-  wrong, what was tried and abandoned, gate/test totals, validation steps, agent or tool names.
-  Strip the harness's `Generated with Claude Code` block and session link from PR bodies; the
-  `Co-Authored-By` commit trailer stays.
+  wrong, what was tried and abandoned, gate/test totals, validation steps, or which agent did the
+  work. Naming a library or dependency is product content and stays. Strip the harness's
+  `Generated with Claude Code` block and session link from PR bodies; the `Co-Authored-By` commit
+  trailer stays.
 - Report to the operator in the session; comment on a PR or issue only when asked — a session
   handoff or progress update never goes into one. This overrides `neptunix:handoff`, which posts a
   PR comment by default. Opening a PR with its title and body is part of the flow and needs no ask.
