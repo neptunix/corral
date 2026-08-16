@@ -40,9 +40,9 @@ Tests are Vitest, `test/<name>.test.ts`.
   `$CORRAL_HOME/environments.json`) — Zod-validated, loaded once. NEVER add/edit envs via the API (SSH-relay risk).
 - `poller.ts` orchestrates; scheduling is in `scheduler.ts`.
 
-## Public repo — keep PRs, issues, and commits clean
-This repo is public. Outward-facing text (PR titles/bodies, issue text, commit messages, code
-comments) must carry NO local/private data — scrub before publishing:
+## Public repo — keep PRs, issues, releases, and commits clean
+This repo is public. Outward-facing text (PR titles/bodies, issue text, release notes, commit
+messages, code comments) must carry NO local/private data — scrub before publishing:
 - No absolute home paths — use repo-relative paths or a `~/…` / `<CORRAL_HOME>` placeholder, never
   `/Users/<name>/…` or `/home/<name>/…`.
 - No real hostnames, SSH targets, IPs, tokens, emails, or other personal identifiers.
@@ -50,5 +50,22 @@ comments) must carry NO local/private data — scrub before publishing:
   `$CORRAL_HOME/boards/`) — redact to `<env>` / `<board>` / `<repo>`.
 - Bug repros use placeholder ids (`w1:p1`, `<uuid>`, `/repo/path`), never a real session or
   transcript dump.
+
+Outward-facing text is written for its reader, never as a work log — PR bodies, release notes,
+issue text alike:
+- Release notes are for users: what changed for them and why it matters, kept short. Link the PR
+  for anyone who wants the depth.
+- The PR body is where mechanism, constraints and trade-offs go — the depth a release links to.
+- No development history anywhere: review rounds and their counts, what an earlier attempt got
+  wrong, what was tried and abandoned, gate/test totals, validation steps, or which agent did the
+  work. Naming a library or dependency is product content and stays. Strip the harness's
+  `Generated with Claude Code` block and session link from PR bodies; the `Co-Authored-By` commit
+  trailer stays.
+- Report to the operator in the session; comment on a PR or issue only when asked — a session
+  handoff or progress update never goes into one. This overrides `neptunix:handoff`, which posts a
+  PR comment by default. Opening a PR with its title and body is part of the flow and needs no ask.
+- Never open an issue unless the operator explicitly confirmed it.
+- Before merging a PR or publishing a release, re-read the text against the final diff: accurate,
+  free of work log, scrubbed.
 
 Full design: `docs/specs/design-spec.md`.
