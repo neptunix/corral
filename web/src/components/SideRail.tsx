@@ -94,7 +94,7 @@ export function SideRail({
         {boardScoped && (
           <button type="button" onClick={() => { toggle("attention"); }}
                   aria-expanded={shown === "attention"} aria-controls="attention-panel"
-                  className="relative text-muted-foreground hover:text-foreground"
+                  className="relative flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground aria-expanded:text-foreground before:content-[''] before:absolute before:-left-2 before:top-1/2 before:-translate-y-1/2 before:w-0.5 before:h-[18px] before:rounded-full aria-expanded:before:bg-primary"
                   aria-label={entries.length > 0
                     ? `Sessions needing attention: ${String(entries.length)}`
                     : "Sessions needing attention: none"}>
@@ -108,7 +108,7 @@ export function SideRail({
         )}
         <button type="button" onClick={() => { toggle("health"); }}
                 aria-expanded={shown === "health"} aria-controls="health-panel"
-                className="relative text-muted-foreground hover:text-foreground"
+                className="relative flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground aria-expanded:text-foreground before:content-[''] before:absolute before:-left-2 before:top-1/2 before:-translate-y-1/2 before:w-0.5 before:h-[18px] before:rounded-full aria-expanded:before:bg-primary"
                 aria-label={`System health: ${healthPhrase(count, rollup.info)}`}>
           <span className="text-lg" aria-hidden>🛟</span>
           {count > 0 && (

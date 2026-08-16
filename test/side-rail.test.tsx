@@ -83,6 +83,16 @@ describe("SideRail", () => {
     expect(screen.queryByText("Health")).toBe(null);
   });
 
+  // aria-expanded is what the edge-bar indicator's CSS keys off, so this pins the state the
+  // visual indicator depends on, not just the panel's presence in the DOM.
+  it("marks only the open button's icon as expanded", () => {
+    render(rail({ diagnostics: broken }));
+    expect(screen.getByRole("button", { name: /System health/ }).getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(bell());
+    expect(bell().getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: /System health/ }).getAttribute("aria-expanded")).toBe("false");
+  });
+
   it("hides the bell off a board but keeps health reachable", () => {
     render(rail({ activeBoardId: null }));
     expect(screen.queryByRole("button", { name: /Sessions needing attention/ })).toBe(null);
