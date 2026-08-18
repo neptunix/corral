@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SessionModal } from "../web/src/components/SessionModal";
 import { ThemeProvider } from "../web/src/components/ThemeProvider";
-import { RECONNECT_BASE_MS, RESUME_PROBE_MS } from "../web/src/lib/attach";
+import { ATTACH_RETRY_DELAY_MS, RECONNECT_BASE_MS, RESUME_PROBE_MS } from "../web/src/lib/attach";
 
 // xterm needs a real canvas/DOM measurement pass that jsdom cannot give it, and none of it matters
 // here: every assertion below is about SOCKETS, not about what was painted. The mock is the smallest
@@ -19,7 +19,7 @@ vi.mock("@xterm/xterm", () => {
     options = {};
     loadAddon(): void { /* fit addon */ }
     open(): void { /* no DOM to build */ }
-    focus(): void { /* see design §3.5 — kept on every run */ }
+    focus(): void { /* kept on every run: outside a user gesture it cannot raise the iOS keyboard */ }
     write(): void { /* output is not asserted here */ }
     dispose(): void { /* nothing to release */ }
     getSelection(): string { return ""; }
@@ -87,13 +87,14 @@ function firePageshow(persisted: boolean): void {
   window.dispatchEvent(e);
 }
 
-function renderModal(): void {
+function renderModal(awaitAgent = false): void {
   render(
     <ThemeProvider>
       <SessionModal
         env="work-local"
         envLabel="work-local"
         paneId="w1:p1"
+        awaitAgent={awaitAgent}
         status="idle"
         claudeStatus={null}
         waitingFor={null}
@@ -219,6 +220,90 @@ describe("SessionModal reconnect", () => {
     act(() => { vi.advanceTimersByTime(RESUME_PROBE_MS); });
 
     expect(FakeWebSocket.sockets).toHaveLength(2);
+  });
+
+  it("does not resurrect a session that ended while the probe was in flight", () => {
+    renderModal();
+    const ws = openFirstSocket();
+    passTheAttemptFloor();
+
+    act(() => { setVisible("visible"); }); // readyState OPEN → probe armed
+    // The close lands INSIDE the probe window. It is 1009: an over-size paste, which a retry would
+    // repeat byte for byte. The probe must respect that verdict, not just notice the socket is gone.
+    act(() => { ws.serverClose(1009); });
+    act(() => { vi.advanceTimersByTime(RESUME_PROBE_MS * 2); });
+
+    expect(FakeWebSocket.sockets).toHaveLength(1);
+    expect(screen.getByTitle(/payload|connection closed/i)).toBeTruthy(); // the reason survives
+  });
+
+  it("backs off when the server accepts the handshake and drops it immediately", () => {
+    renderModal();
+
+    // A flapping server: every attach completes its handshake and dies. Resetting the backoff on
+    // `open` alone would hold the retry at the 500 ms floor forever, and each attempt forks a pty
+    // server-side.
+    for (let i = 0; i < 3; i++) {
+      const ws = FakeWebSocket.sockets.at(-1);
+      if (ws === undefined) throw new Error("no socket was created");
+      act(() => { ws.open(); });
+      act(() => { ws.serverClose(1006); });
+      act(() => { vi.advanceTimersByTime(60_000); }); // long enough for whatever the delay has become
+    }
+    const afterThree = FakeWebSocket.sockets.length;
+
+    // By now the curve has outgrown the floor, so one base delay must NOT be enough to try again.
+    // Reset the exponent on `open` alone and this fires immediately, every time, forever.
+    const ws = FakeWebSocket.sockets.at(-1);
+    if (ws === undefined) throw new Error("no socket was created");
+    act(() => { ws.open(); });
+    act(() => { ws.serverClose(1006); });
+    act(() => { vi.advanceTimersByTime(RECONNECT_BASE_MS); });
+
+    expect(FakeWebSocket.sockets.length).toBe(afterThree);
+  });
+
+  it("treats an attach-limit rejection as a failed attach, not as a working connection", () => {
+    renderModal();
+
+    // The server accepts the upgrade and THEN closes 1013 (ws-attach.ts handleUpgrade → close), so
+    // the browser sees open-then-close. Counting that as "we connected once" would switch on the
+    // unlimited retry and hide the limit behind a spinner that never escalates.
+    for (let i = 0; i < 20; i++) {
+      const ws = FakeWebSocket.sockets.at(-1);
+      if (ws === undefined) throw new Error("no socket was created");
+      act(() => { ws.open(); });
+      act(() => { ws.serverClose(1013); });
+      act(() => { vi.advanceTimersByTime(120_000); });
+    }
+
+    expect(FakeWebSocket.sockets.length).toBeLessThanOrEqual(7);
+  });
+
+  it("says it is reconnecting even when the session never finished starting", () => {
+    renderModal(true);
+    const ws = openFirstSocket();
+
+    // awaitAgent holds `starting` until output proves live. A drop before that must not leave the
+    // header stuck on "starting session…" with the recovery invisible.
+    act(() => { ws.serverClose(1006); });
+
+    expect(screen.getByText(/reconnecting/)).toBeTruthy();
+  });
+
+  it("lets the post-spawn boot race finish its own wait instead of racing it", () => {
+    renderModal(true);
+    const ws = FakeWebSocket.sockets[0];
+    if (ws === undefined) throw new Error("no socket was created");
+    act(() => { ws.open(); });
+
+    // 4001 = Claude has not registered as a herdr agent yet. shouldRetryAttach owns this, on its own
+    // 1.2 s cadence; a tab switch during the wait must not collapse it to the 500 ms floor.
+    act(() => { ws.serverClose(4001); });
+    act(() => { vi.advanceTimersByTime(ATTACH_RETRY_DELAY_MS / 2); });
+    act(() => { setVisible("visible"); });
+
+    expect(FakeWebSocket.sockets).toHaveLength(1);
   });
 
   it("gives up on a handshake that never once succeeded, so a misconfiguration is not hidden", () => {

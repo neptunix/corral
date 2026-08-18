@@ -36,7 +36,6 @@ describe("shouldRetryAttach", () => {
 });
 
 // ── Reconnect contract ──
-// Design: docs/specs/2026-08-17-terminal-reconnect-on-resume-design.md §3.2–§3.3.
 
 describe("shouldReconnectAfterClose", () => {
   it("reconnects the codes that mean the transport died", () => {
@@ -103,7 +102,7 @@ describe("resumeAction", () => {
 
   it("respects the close-code verdict: a non-retryable close is never resurrected on resume", () => {
     // The effect does not re-run on a close, so these listeners are still registered against a
-    // socket that closed for a reason §3.2 said must not retry.
+    // socket that closed for a reason shouldReconnectAfterClose refused to retry.
     for (const closeCode of [1000, 4000, 4001, 1009]) {
       expect(resumeAction({ ...visible, readyState: 3, closeCode }), `code ${String(closeCode)}`)
         .toBe("none");

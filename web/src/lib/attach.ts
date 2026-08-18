@@ -25,7 +25,7 @@ export function shouldRetryAttach(e: {
 // A frozen tab (iOS suspends the whole browser process; Safari also force-closes sockets on bfcache
 // entry) stops answering the server's ping, so pty-bridge.ts reaps the attach and the terminal is
 // left dead with no way back but closing the modal. Everything below is the client half of the
-// recovery. Design: docs/specs/2026-08-17-terminal-reconnect-on-resume-design.md.
+// recovery.
 
 export const RECONNECT_BASE_MS = 500;
 export const RECONNECT_MAX_MS = 30_000;
@@ -48,6 +48,17 @@ export const RECONNECT_LIMIT_DELAY_MS = 62_000;
  * is a corral restart or a suspended phone and retries without limit.
  */
 export const RECONNECT_COLD_ATTEMPTS = 6;
+/**
+ * How long an attach must survive before it counts as a working connection — which is what clears
+ * the backoff and switches on the unlimited retry above.
+ *
+ * Keyed on duration rather than on `open`, because completing a handshake proves less than it
+ * looks. The attach limiter accepts the upgrade and only THEN closes 1013
+ * (`server/ws-attach.ts`), so a rejection arrives as open-then-close; and a server that accepts
+ * every attach and drops it would otherwise hold the retry at the floor forever, forking a pty per
+ * attempt.
+ */
+export const RECONNECT_STABLE_MS = 3_000;
 /** How long to let a poked socket reveal that it is actually dead (see `resumeAction`). */
 export const RESUME_PROBE_MS = 1_500;
 
@@ -75,11 +86,13 @@ export type ResumeDecision = "reconnect" | "probe" | "none";
  * `closeCode` is the verdict of the close that already happened, or null while the socket lives. It
  * gates everything: the terminal effect does not re-run on a close, so after a 4001 or a 1009 these
  * listeners are still registered against a dead socket, and without the gate a return to the tab
- * would resurrect a session §3.2 just said must stay dead.
+ * would resurrect a session `shouldReconnectAfterClose` just refused to retry.
  *
- * CONNECTING is NOT treated as dead. A handshake is already in flight and its own `onclose` covers
- * failure; tearing it down would discard an in-flight attempt on exactly the slow connection this
- * feature exists for.
+ * On the `visible` path CONNECTING is NOT treated as dead: a handshake is in flight and its own
+ * `onclose` covers failure, so tearing it down would discard an attempt on exactly the slow
+ * connection this exists for. A persisted `pageshow` deliberately overrides that. Safari force-closed
+ * the socket on the way into bfcache, and a socket killed while frozen may sit in CONNECTING without
+ * ever delivering an `onclose` — waiting on one that never comes is the worse of the two mistakes.
  */
 export function resumeAction(e: {
   readonly trigger: ResumeTrigger;

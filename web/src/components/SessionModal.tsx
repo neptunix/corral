@@ -7,8 +7,8 @@ import { SessionMeta } from "./SessionMeta";
 import { useTheme } from "./ThemeProvider";
 import {
   ATTACH_LIVE_AFTER_MS, ATTACH_RETRY_DELAY_MS, jitter, RECONNECT_BASE_MS, RECONNECT_COLD_ATTEMPTS,
-  RECONNECT_LIMIT_DELAY_MS, RECONNECT_MAX_MS, reconnectNominalMs, RESUME_PROBE_MS,
-  type ResumeTrigger, resumeAction, shouldReconnectAfterClose, shouldRetryAttach,
+  RECONNECT_LIMIT_DELAY_MS, RECONNECT_MAX_MS, reconnectNominalMs, RECONNECT_STABLE_MS,
+  RESUME_PROBE_MS, type ResumeTrigger, resumeAction, shouldReconnectAfterClose, shouldRetryAttach,
 } from "../lib/attach";
 import { formatDropInjection, formatPaste } from "../lib/paste";
 import { closeMessage } from "../lib/protocol";
@@ -77,7 +77,7 @@ export function SessionModal({
   const [starting, setStarting] = useState(awaitAgent);
   const startedAtRef = useRef(0);
   // Recovery state, all of it deliberately outside the effect so it survives the re-run that a
-  // reconnect IS. See docs/specs/2026-08-17-terminal-reconnect-on-resume-design.md §3.1.
+  // reconnect IS.
   const [reconnectInfo, setReconnectInfo] = useState<{ attempts: number; reason: string } | null>(null);
   const backoffRef = useRef(0); // exponent for the next delay; safe to reset, unlike `attempt`
   const everOpenRef = useRef(false); // a handshake completed at least once — see the cold-start gate
@@ -187,6 +187,7 @@ export function SessionModal({
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let probeTimer: ReturnType<typeof setTimeout> | undefined;
+    let stableTimer: ReturnType<typeof setTimeout> | undefined;
     // Single-flight. `visibilitychange`, `pageshow` and an `onclose` can all land in the same tick,
     // and until the bump re-runs this effect the listeners below are still registered — so without
     // this a bfcache restore opens two attaches against one pane, which then fight for herdr's
@@ -229,10 +230,16 @@ export function SessionModal({
     }
 
     ws.onopen = () => {
-      everOpenRef.current = true;
-      backoffRef.current = 0;
       setReconnectInfo(null);
       sendResize();
+      // Completing a handshake is not the same as having a connection. The limiter accepts the
+      // upgrade and only then closes 1013, and a flapping server accepts every attach and drops it
+      // — treating either as success would clear the backoff and switch on the unlimited retry for
+      // a link that never worked. Surviving RECONNECT_STABLE_MS is the proof.
+      stableTimer = setTimeout(() => {
+        everOpenRef.current = true;
+        backoffRef.current = 0;
+      }, RECONNECT_STABLE_MS);
       if (awaitAgent) liveTimer = setTimeout(goLive, ATTACH_LIVE_AFTER_MS);
     };
     ws.onmessage = (e: MessageEvent<string | ArrayBuffer>) => {
@@ -249,6 +256,10 @@ export function SessionModal({
       // Only the ref is cleared, not the effect-local `live`, which shouldRetryAttach below still reads.
       liveRef.current = false;
       if (liveTimer !== undefined) clearTimeout(liveTimer);
+      if (stableTimer !== undefined) clearTimeout(stableTimer); // died before it counted as working
+      // Recorded BEFORE the boot-race branch, so a tab switch during that 1.2 s wait sees a 4001 and
+      // leaves it alone instead of collapsing the retry to the attempt floor.
+      closeCodeRef.current = e.code;
       // Boot race: retry a not-yet-live post-spawn attach (4001) until Claude registers or the window
       // elapses — the buffered error blob is dropped so the user only ever sees "starting…" then Claude.
       // `starting` is already true across the whole retry loop (init from awaitAgent, cleared only by
@@ -257,7 +268,6 @@ export function SessionModal({
         retryTimer = setTimeout(() => { setAttempt((a) => a + 1); }, ATTACH_RETRY_DELAY_MS);
         return;
       }
-      closeCodeRef.current = e.code;
       // The transport died — re-attach. Gated on having connected once, because a REJECTED UPGRADE
       // (bad origin, unknown env, malformed pane: rejectUpgrade in server/ws-attach.ts) never
       // becomes a WebSocket and so also reports 1006. Retrying that forever would bury a permanent
@@ -304,11 +314,20 @@ export function SessionModal({
       if (pending !== "none") return;
       pending = "probe";
       // Poke the socket: WebKit updates a stale readyState on send, so this is what makes a dead
-      // connection admit it. Folklore rather than spec — §3.3 names the fallback if it fails.
+      // connection admit it. Folklore from bug reports rather than specified behaviour: if a device
+      // ever shows it is not enough, the accurate replacement is an application-level ping/pong over
+      // the existing text-control channel, which costs a protocol change on both sides.
       sendResize();
       probeTimer = setTimeout(() => {
         pending = "none";
-        if (disposed || ws.readyState === WebSocket.OPEN) return;
+        if (disposed) return;
+        // Ask the same question again rather than just re-reading readyState: a close can land
+        // INSIDE the probe window, and its code decides. A 1009 paste or a 1000 exit arriving here
+        // would otherwise be re-attached — and the setCloseInfo(null) below would wipe the reason
+        // the operator needs, or cancel the auto-dismiss that a clean exit had already armed.
+        if (resumeAction({
+          trigger: "visible", persisted: false, readyState: ws.readyState, closeCode: closeCodeRef.current,
+        }) !== "reconnect") return;
         backoffRef.current = 0;
         scheduleReconnect(0, "resume", "connection closed");
       }, RESUME_PROBE_MS);
@@ -421,6 +440,7 @@ export function SessionModal({
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
       if (probeTimer !== undefined) clearTimeout(probeTimer);
+      if (stableTimer !== undefined) clearTimeout(stableTimer);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
       ro.disconnect();
@@ -520,16 +540,21 @@ export function SessionModal({
           {statusline?.session_name !== null && statusline?.session_name !== undefined && statusline.session_name !== "" && (
             <span className="hidden text-xs text-muted-foreground/60 truncate sm:inline" title={statusline.session_name}>· {statusline.session_name}</span>
           )}
-          {starting && (
+          {starting && reconnectInfo === null && (
             <span className="min-w-0 truncate text-xs text-warning">· starting session…</span>
           )}
           {/* Recovery is automatic, so this row is the whole of its surface — no button, nothing to
               press. It still has to SAY something: a terminal sitting out a backoff and a hung one
               look identical otherwise. Once the delay has reached its cap the bare word stops being
               enough — a corral that is merely down and a permanent 403 both spin forever — so the
-              attempt count and the close reason join it. Precedence in this one-line row:
-              starting > reconnecting > closed. */}
-          {reconnectInfo !== null && !starting && (
+              attempt count and the close reason join it.
+
+              Precedence in this one-line row: reconnecting > starting > closed. Reconnecting wins
+              over "starting session…" because an awaitAgent session whose transport dies before
+              output ever flowed keeps `starting` true for the whole outage — ranking it first left
+              the recovery, its attempt count and its reason invisible for exactly as long as they
+              mattered. */}
+          {reconnectInfo !== null && (
             <span className="min-w-0 truncate text-xs text-warning">
               · {reconnectNominalMs(reconnectInfo.attempts) < RECONNECT_MAX_MS
                 ? "reconnecting…"
