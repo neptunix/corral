@@ -5,7 +5,9 @@ import { describe, it, expect } from "vitest";
 
 import type { HerdrEnv } from "../environments.ts";
 import type { CheckDeps } from "../server/diagnostics/deps.ts";
-import { compareSemver, envChecks, nodeVersionCheck } from "../server/diagnostics/env.ts";
+import {
+  compareSemver, configDirExistsChecks, envChecks, jqPresentCheck, nodeVersionCheck,
+} from "../server/diagnostics/env.ts";
 
 const NOW = 5_000;
 const deps = (over: Partial<CheckDeps>): CheckDeps => ({
@@ -90,9 +92,9 @@ describe("jq-present", () => {
     expect(c?.detail).toContain("/opt/homebrew/bin/jq");
   });
 
-  it("is pending on a remote environment — its jq lives on the other host", () => {
+  it("emits no jq-present row from envChecks for a remote environment — the remote adapter owns it", () => {
     const c = pick(envChecks(deps({}), [remote("box")], []), "jq-present", "box");
-    expect(c?.state).toBe("pending");
+    expect(c).toBeUndefined();
   });
 });
 
@@ -124,9 +126,17 @@ describe("claude-config-dirs and config-dir-exists", () => {
     expect(c?.scope).toEqual({ kind: "configDir", envId: "work", dir: "/h/.clade" });
   });
 
-  it("is pending for a remote environment's dirs — they are paths on another host", () => {
+  it("emits no config-dir-exists rows from envChecks for a remote environment — the remote adapter owns them", () => {
     const c = pick(envChecks(deps({ isDir: () => false }), [remote("box")], []), "config-dir-exists", "box");
-    expect(c?.state).toBe("pending");
+    expect(c).toBeUndefined();
+  });
+
+  it("jqPresentCheck and configDirExistsChecks judge a remote env by deps alone once called directly", () => {
+    const d = deps({ isDir: () => true, isExec: (p) => p === "/usr/bin/jq" });
+    const jq = jqPresentCheck(d, remote("box"), 1);
+    expect(jq.state).toBe("ok"); // found ON PATH (deps() defaults pathEnv "/usr/bin") — no remote branch left
+    const dirs = configDirExistsChecks(d, remote("box"), 1);
+    expect(dirs.every((c) => c.state === "ok")).toBe(true);
   });
 
   it("gives two config dirs two distinct keys", () => {
