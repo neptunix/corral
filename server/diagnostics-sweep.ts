@@ -137,8 +137,18 @@ function ccVersionByEnv(snapshot: Snapshot): Record<string, string> {
   return byEnv;
 }
 
-const unreachableIds = (snapshot: Snapshot): ReadonlySet<string> =>
-  new Set(Object.entries(snapshot.envs).filter(([, s]) => !s.reachable).map(([id]) => id));
+/**
+ * Local envs only — R16: the SSH attempt IS a remote env's own gate, so an unreachable remote never
+ * lands in this set (never collapses to `env-unrunnable`; its own probed rows are its truth).
+ * `envs` (the config), not `snapshot.envs[id].kind`, is the authority: `EnvState.kind` is optional
+ * and unset in fixtures, so filtering on the snapshot would silently treat every fixture env as
+ * local and defeat the regression this edit exists for.
+ */
+const unreachableIds = (envs: readonly HerdrEnv[], snapshot: Snapshot): ReadonlySet<string> => {
+  const remote = new Set(envs.filter((e) => e.kind === "remote").map((e) => e.id));
+  return new Set(Object.entries(snapshot.envs)
+    .filter(([id, s]) => !s.reachable && !remote.has(id)).map(([id]) => id));
+};
 
 /**
  * Files the composed rows under their own classes, after collapsing whatever an unreachable
@@ -190,7 +200,7 @@ export function createDiagnosticsSweep(opts: SweepOpts): DiagnosticsSweep {
         });
         versionsAt = now;
       }
-      publish(opts.store, [...cheap, ...versionRows], unreachableIds(snapshot), now);
+      publish(opts.store, [...cheap, ...versionRows], unreachableIds(opts.envs, snapshot), now);
       opts.store.setLastError(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -287,5 +297,5 @@ export async function enumerateChecks(): Promise<Check[]> {
   const versions = await versionChecks({
     envs: ENUMERATE_ENVS, run: () => Promise.resolve(null), ccVersionByEnv: {}, now: () => 0,
   });
-  return suppressUnrunnable([...cheap, ...versions], unreachableIds(snapshot), 0);
+  return suppressUnrunnable([...cheap, ...versions], unreachableIds(ENUMERATE_ENVS, snapshot), 0);
 }

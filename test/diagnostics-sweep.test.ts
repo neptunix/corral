@@ -119,6 +119,28 @@ describe("createDiagnosticsSweep", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
+  it("keeps a remote environment OUT of the unreachable set — its rows are never collapsed to env-unrunnable", async () => {
+    const store = createDiagnosticsStore({ selfVersion: null });
+    const sweep = createDiagnosticsSweep(opts({
+      store, envs: [local("work"), remote("box")],
+      poller: { getSnapshot: () => snapshot({ work: { reachable: true }, box: { reachable: false, error: "down" } }) },
+    }));
+    await sweep.tick();
+    const unrunnable = store.snapshot().checks.filter((c) => c.id === "env-unrunnable");
+    expect(unrunnable).toEqual([]); // box is remote: nothing suppressed, no summary row
+  });
+
+  it("still collapses an unreachable LOCAL environment exactly as today", async () => {
+    const store = createDiagnosticsStore({ selfVersion: null });
+    const sweep = createDiagnosticsSweep(opts({
+      store, envs: [local("down-env")],
+      poller: { getSnapshot: () => snapshot({ "down-env": { reachable: false, error: "x" } }) },
+    }));
+    await sweep.tick();
+    const unrunnable = store.snapshot().checks.filter((c) => c.id === "env-unrunnable");
+    expect(unrunnable).toHaveLength(1);
+  });
+
   it("does not run the version probes for a remote environment", async () => {
     const ran: string[] = [];
     const sweep = createDiagnosticsSweep(opts({
