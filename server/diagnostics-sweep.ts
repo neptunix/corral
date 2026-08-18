@@ -14,6 +14,7 @@ import { buildStartupChecks, findMissingBinaries } from "./diagnostics/startup.t
 import { versionChecks } from "./diagnostics/versions.ts";
 import type { DiagnosticsStore } from "./diagnostics-store.ts";
 import type { RunTool } from "./exec-tool.ts";
+import type { ExecFn } from "./herdr.ts";
 import { runGuarded } from "./scheduler.ts";
 
 export interface SweepOpts {
@@ -34,6 +35,10 @@ export interface SweepOpts {
   readonly intervalMs: number;
   readonly versionTtlMs: number;
   readonly warn?: (msg: string) => void;
+  /** SSH transport for the remote probe — injected so no test performs a real connection. */
+  readonly probeExec: ExecFn;
+  /** REMOTE_PROBE_ENABLED (config.ts). Off: remote rows compose as n/a naming the switch; no exec. */
+  readonly remoteProbeEnabled: boolean;
 }
 
 export interface DiagnosticsSweep {

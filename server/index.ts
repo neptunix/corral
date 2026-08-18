@@ -5,7 +5,7 @@ import path from "node:path";
 import {
   BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, CORRAL_HOME, DIAGNOSTICS_INTERVAL_MS,
   DIAGNOSTICS_VERSION_TTL_MS, FLEET_RESTORE_STAGGER_MS, HOST, LIST_TIMEOUT, PORT,
-  UPLOAD_ROOT, WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED, ZOMBIE_REAP_GRACE_MS,
+  REMOTE_PROBE_ENABLED, UPLOAD_ROOT, WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED, ZOMBIE_REAP_GRACE_MS,
 } from "../config.ts";
 import { createApi } from "./api.ts";
 import { createAttentionStore } from "./attention-store.ts";
@@ -17,7 +17,7 @@ import { runLocalTool } from "./exec-tool.ts";
 import { createFleetMirror, ensureMirrorGitignore, mirrorPath } from "./fleet-mirror.ts";
 import { createFleetRestore } from "./fleet-restore.ts";
 import { createGit } from "./git.ts";
-import { closePane, listAllPanes, listWorkspaces, listWorkspacesStrict, readPane, workspaceClose } from "./herdr.ts";
+import { closePane, defaultExec, listAllPanes, listWorkspaces, listWorkspacesStrict, readPane, workspaceClose } from "./herdr.ts";
 import { assertLoopback } from "./host-guard.ts";
 import { createPoller } from "./poller.ts";
 import { formatReport, resolveReapGrace, runPreflight } from "./preflight.ts";
@@ -74,6 +74,7 @@ void (async () => {
     run: runLocalTool,
     intervalMs: DIAGNOSTICS_INTERVAL_MS, versionTtlMs: DIAGNOSTICS_VERSION_TTL_MS,
     warn: (m) => { console.error(m); },
+    probeExec: defaultExec, remoteProbeEnabled: REMOTE_PROBE_ENABLED,
   });
   if (DIAGNOSTICS_INTERVAL_MS > 0) diagnosticsSweep.start();
   // Backfill stored links' Claude sessionId once the poller sees it (spawned links start null) — the

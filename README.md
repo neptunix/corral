@@ -655,7 +655,9 @@ to a floor derived from `HERDR_DASH_POLL_MS`; to disable, use the flag, never a 
 
 Self-diagnostics sweep: `DIAGNOSTICS_INTERVAL_MS` (60000 — set to `0` to turn the background sweep
 off entirely; `POST /api/diagnostics/refresh` still runs one on demand) · `DIAGNOSTICS_VERSION_TTL_MS`
-(600000, floor 1000 — how long a herdr/Claude version probe is cached before the sweep re-runs it).
+(600000, floor 1000 — how long a herdr/Claude version probe is cached before the sweep re-runs it) ·
+`REMOTE_PROBE_ENABLED` (true — set to `false` to disable the outbound SSH probe of remote
+environments' install health; their remote rows then read `n/a` naming this switch).
 It also reads `$CORRAL_HOME/config.json` for `hooks.ctxThresholds` — see [Claude context-pressure
 hook](#claude-context-pressure-hook).
 

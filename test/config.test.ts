@@ -1,10 +1,12 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, it, expect, afterEach } from "vitest";
 
 import {
   ATTENTION_MIN_WORK_MS, BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, CORRAL_HOME,
   FOCUS_TRANSLATION_ENABLED, intFromEnv,
   LIST_TIMEOUT, RECAP_ENABLED, RECAP_INTERVAL_MS, RECAP_TAIL_BYTES,
-  RECAP_READ_TIMEOUT_MS, RECAP_CONTENT_MAX,
+  RECAP_READ_TIMEOUT_MS, RECAP_CONTENT_MAX, REMOTE_PROBE_ENABLED,
   TAB_RENAME_ENABLED, ZOMBIE_REAP_GRACE_MS,
 } from "../config.ts";
 import { resolveReapGrace } from "../server/preflight.ts";
@@ -77,6 +79,19 @@ describe("BRIEF_ROOT", () => {
   });
   it("does not live inside BOARD_DATA_DIR (what server/git.ts actually commits)", () => {
     expect(BRIEF_ROOT.startsWith(BOARD_DATA_DIR)).toBe(false);
+  });
+});
+
+describe("REMOTE_PROBE_ENABLED", () => {
+  it("REMOTE_PROBE_ENABLED defaults on", () => {
+    expect(REMOTE_PROBE_ENABLED).toBe(true);
+  });
+
+  it("REMOTE_PROBE_ENABLED is declared in the house spelling — !== \"false\", never === \"off\"", () => {
+    // The design's complaint was the `=off` spelling: an operator following the house convention
+    // writes =false, and under an exact === "off" test egress would stay ON with no warning.
+    const src = readFileSync(path.join(import.meta.dirname, "..", "config.ts"), "utf8");
+    expect(src).toMatch(/REMOTE_PROBE_ENABLED = process\.env\.REMOTE_PROBE_ENABLED !== "false"/);
   });
 });
 

@@ -62,6 +62,7 @@ const opts = (over: Partial<SweepOpts>): SweepOpts => ({
   configLine: { level: "ok", text: "config: 1 environment(s) loaded from /cfg.json" },
   run: () => Promise.resolve(null),
   intervalMs: 60_000, versionTtlMs: 600_000,
+  probeExec: () => Promise.reject(new Error("no ssh in tests")), remoteProbeEnabled: true,
   ...over,
 });
 
