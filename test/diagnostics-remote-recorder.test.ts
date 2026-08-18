@@ -39,6 +39,26 @@ describe("createDepsRecorder", () => {
     expect(r.drain()).toEqual([]);
   });
 
+  it("exec answers isFile/isExec from the executable bit — a non-executable exec answer is NOT a file", () => {
+    const r = createDepsRecorder(facts({
+      "/d/x": { kind: "exec", executable: true }, "/d/y": { kind: "exec", executable: false },
+    }), local());
+    expect(r.deps.isFile("/d/x")).toBe(true);
+    expect(r.deps.isExec("/d/x")).toBe(true);
+    expect(r.deps.isFile("/d/y")).toBe(false); // !not-exec does not imply regular file
+    expect(r.deps.isExec("/d/y")).toBe(false);
+    expect(r.drain()).toEqual([]);
+  });
+
+  it("dir answers isDir from the exists bit", () => {
+    const r = createDepsRecorder(facts({
+      "/d/dir1": { kind: "dir", exists: true }, "/d/dir2": { kind: "dir", exists: false },
+    }), local());
+    expect(r.deps.isDir("/d/dir1")).toBe(true);
+    expect(r.deps.isDir("/d/dir2")).toBe(false);
+    expect(r.drain()).toEqual([]);
+  });
+
   it("an unanswered path returns the negative value AND records the touch; drain resets", () => {
     const r = createDepsRecorder(facts({}), local());
     expect(r.deps.readText("/d/ghost")).toBeNull();

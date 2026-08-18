@@ -74,8 +74,11 @@ export function createDepsRecorder(facts: FactSource, local: {
         case "content":
         case "too-large":
         case "unreadable":
-        case "exec":
           return true;
+        case "exec":
+          // A remote `!exec` marker fires only after `[ -f ] && [ -x ]`, so an executable answer
+          // already implies regular file — but `!not-exec` does NOT imply regular file.
+          return answer.executable;
         case "absent":
         case "not-regular":
         case "dir":
