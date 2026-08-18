@@ -145,7 +145,7 @@ describe("versionChecks", () => {
     expect(byId(cs, "claude-cli-version")?.state).toBe("n/a");
   });
 
-  it("never runs a probe for a remote environment — its answer lives on the other host", async () => {
+  it("emits nothing and runs nothing for a remote environment — the remote adapter owns those rows", async () => {
     const ran: string[] = [];
     const cs = await versionChecks({
       envs: [{ id: "box", label: "box", kind: "remote", sshHost: "h", socket: "~/s.sock",
@@ -154,7 +154,6 @@ describe("versionChecks", () => {
       run: (bin, args) => { ran.push([bin, ...args].join(" ")); return Promise.resolve(null); },
     });
     expect(ran).toEqual([]);
-    expect(cs.length).toBeGreaterThan(0);
-    expect(cs.every((c) => c.state === "pending")).toBe(true);
+    expect(cs).toEqual([]);
   });
 });

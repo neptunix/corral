@@ -2,13 +2,10 @@ import type { Snapshot } from "@shared/schema";
 import { describe, it, expect } from "vitest";
 
 import type { HerdrEnv } from "../environments.ts";
-import { ctxHookChecks } from "../server/diagnostics/ctx-hook.ts";
 import { createNodeDeps } from "../server/diagnostics/deps.ts";
-import { driftCheck, themeCheck } from "../server/diagnostics/drift.ts";
-import { metricsChecks } from "../server/diagnostics/metrics.ts";
 import type { DiagnosticsStore } from "../server/diagnostics-store.ts";
 import { createDiagnosticsStore } from "../server/diagnostics-store.ts";
-import { createDiagnosticsSweep, REMOTE_DIR_SUBJECTS, type SweepOpts } from "../server/diagnostics-sweep.ts";
+import { createDiagnosticsSweep, type SweepOpts } from "../server/diagnostics-sweep.ts";
 
 const local = (id: string): HerdrEnv => ({
   id, label: id, kind: "local", claudeConfigDirs: ["/h/.claude"], spawnCommand: "claude", repos: {},
@@ -97,16 +94,18 @@ describe("createDiagnosticsSweep", () => {
     expect(calls).toBeGreaterThan(afterFirst); // Recheck must actually re-check
   });
 
-  it("emits pending rows for a remote environment instead of stat'ing local paths", async () => {
+  it("emits no per-dir rows for a remote environment from the cheap sweep — the remote class owns them", async () => {
     const store = createDiagnosticsStore({ selfVersion: null });
     const sweep = createDiagnosticsSweep(opts({
       store, envs: [remote("box")],
       poller: { getSnapshot: () => snapshot({ box: { reachable: true } }) },
     }));
     await sweep.tick();
-    const rows = store.snapshot().checks.filter((c) => c.scope.kind === "configDir");
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.every((c) => c.state === "pending")).toBe(true);
+    // Filter by CLASS, not just scope: from Task 12 on, the remote CLASS legitimately publishes
+    // configDir-scoped rows for this env — this test pins the cheap sweep only, and must stay
+    // green through that change.
+    const rows = store.snapshot().checks.filter((c) => c.class === "cheap" && c.scope.kind === "configDir");
+    expect(rows).toEqual([]);
   });
 
   it("produces no duplicate keys", async () => {
@@ -244,31 +243,5 @@ describe("createDiagnosticsSweep", () => {
     const themeKeys = rows.filter((c) => c.id === "theme-installed").map((c) => c.key);
     expect(themeKeys).toHaveLength(2); // a blanket first-wins dedupe would silently leave 1
     expect(new Set(themeKeys).size).toBe(1);
-  });
-});
-
-describe("REMOTE_DIR_SUBJECTS mirrors the local per-config-dir producers", () => {
-  it("covers exactly the ids the local producers emit for one dir", () => {
-    // The mirror is hand-maintained and invisible to the type system: a per-dir check added to
-    // metrics.ts / ctx-hook.ts / drift.ts would simply stop appearing for every remote environment,
-    // with nothing failing. This is the only thing that notices.
-    const deps = {
-      ...createNodeDeps({ repoRoot: "/repo" }),
-      isFile: () => false, isExec: () => false, isDir: () => false,
-      readText: () => null, hashFile: () => null, now: () => 1,
-    };
-    const produced = [
-      ...metricsChecks(deps, "work", "/h/.claude"),
-      ...ctxHookChecks(deps, "work", "/h/.claude"),
-      driftCheck(deps, "work", "/h/.claude"),
-      themeCheck(deps, "work", "/h/.claude"),
-    ].map((c) => c.id);
-    const mirrored = REMOTE_DIR_SUBJECTS.map((s) => s.id);
-    const notMirrored = produced.filter((id) => !mirrored.includes(id));
-    const staleMirror = mirrored.filter((id) => !produced.includes(id));
-    // Named, not just counted: the failure output has to say WHICH id drifted.
-    expect({ notMirrored, staleMirror }).toEqual({ notMirrored: [], staleMirror: [] });
-    expect(new Set(mirrored).size).toBe(mirrored.length); // no id mirrored twice
-    expect(new Set(produced)).toEqual(new Set(mirrored));
   });
 });

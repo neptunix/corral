@@ -1,5 +1,4 @@
-import type { Check, CheckClass, CheckDoc, CheckSeverity } from "@shared/diagnostics-schema";
-import { checkKey } from "@shared/diagnostics-schema";
+import type { Check, CheckClass } from "@shared/diagnostics-schema";
 import type { Snapshot } from "@shared/schema";
 
 import type { HerdrEnv } from "../environments.ts";
@@ -51,51 +50,6 @@ export interface DiagnosticsSweep {
 }
 
 /**
- * The per-config-dir subjects the LOCAL producers own (`metrics.ts`, `ctx-hook.ts`, `drift.ts`),
- * mirrored here as `pending` rows for a REMOTE config dir. Those producers stat and hash paths on the
- * machine they run on, so running them for a remote env's dirs would publish a verdict about THIS
- * disk under that environment's name — a green row for a file that is not there, which is the exact
- * silent lie this feature exists to remove.
- *
- * The ids, severities and doc anchors mirror the producers deliberately. `enumerateChecks()` includes
- * a remote environment, so Task 14's anchor guard reaches these rows too: a wrong anchor here fails
- * that guard rather than shipping a dead README link.
- *
- * Exported for the drift guard in `test/diagnostics-sweep.test.ts`, which runs the local producers for
- * one dir and requires their id set to equal this list's. TypeScript cannot see the relationship, so
- * without that test a per-dir check added to a producer would just stop appearing for every remote
- * environment — a silent absence in the surface with the least visibility.
- */
-export const REMOTE_DIR_SUBJECTS: readonly {
-  readonly id: string;
-  readonly label: string;
-  readonly severity: CheckSeverity;
-  readonly doc: CheckDoc;
-}[] = [
-  { id: "capture-script", label: "corral-status-capture.sh", severity: "warning", doc: { anchor: "installing-the-claude-helper-files-per-config-dir", title: "Installing the helper files" } },
-  { id: "statusline-registered", label: "statusline registration", severity: "warning", doc: { anchor: "claude-statusline-live-metrics", title: "Claude statusline" } },
-  { id: "ctx-hook-installed", label: "corral-claude-hook.sh", severity: "warning", doc: { anchor: "claude-context-pressure-hook", title: "Context-pressure hook" } },
-  { id: "ctx-hook-registered", label: "context-pressure hook registration", severity: "warning", doc: { anchor: "claude-context-pressure-hook", title: "Context-pressure hook" } },
-  { id: "corral-skill-installed", label: "corral SKILL.md", severity: "info", doc: { anchor: "claude-context-pressure-hook", title: "Context-pressure hook" } },
-  { id: "helper-drift", label: "installed helper files", severity: "warning", doc: { anchor: "upgrading", title: "Upgrading" } },
-  { id: "theme-installed", label: "corral theme preset", severity: "info", doc: { anchor: "claude-theme-optional", title: "Claude theme" } },
-];
-
-function remoteDirChecks(envId: string, dir: string, now: number): Check[] {
-  return REMOTE_DIR_SUBJECTS.map((s) => {
-    const scope = { kind: "configDir" as const, envId, dir };
-    return {
-      id: s.id, key: checkKey(s.id, scope), scope,
-      title: `${s.label}: ${dir} is on a remote host — not checked here`,
-      state: "pending" as const, severity: s.severity,
-      detail: `environment "${envId}" is remote — its config dir lives on the far host, so this can only be checked there.`,
-      doc: s.doc, class: "cheap" as const, checkedAt: now,
-      startupOkLine: false, haltsStartup: false,
-    };
-  });
-}
-
-/**
  * The one id this module composes twice BY DESIGN. `configDirsChecks` is called by both
  * `buildStartupChecks` (the launch report needs the row) and `envChecks` (the panel's per-environment
  * set needs it); both are the right owners of their own output, so the reconciliation belongs here, in
@@ -136,7 +90,8 @@ interface ComposeInput {
 /**
  * Every non-version row, in the order the design fixes: the startup set first (so the panel and the
  * launch report cannot disagree about it), then the global runtime rows, the per-environment rows, the
- * per-config-dir rows — local checked, remote `pending` — and finally the poller's reachability view.
+ * per-config-dir rows — local only, remote envs skipped (the remote class owns those) — and finally
+ * the poller's reachability view.
  */
 function cheapChecks(input: ComposeInput): Check[] {
   const { deps, envs } = input;
@@ -148,11 +103,8 @@ function cheapChecks(input: ComposeInput): Check[] {
     ...envChecks(deps, envs, input.snapshot.sessions),
   ];
   for (const env of envs) {
+    if (env.kind === "remote") continue; // the remote class owns these rows (adapter, Task 12)
     for (const dir of env.claudeConfigDirs) {
-      if (env.kind === "remote") {
-        checks.push(...remoteDirChecks(env.id, dir, now));
-        continue;
-      }
       checks.push(
         ...metricsChecks(deps, env.id, dir),
         ...ctxHookChecks(deps, env.id, dir),

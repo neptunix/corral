@@ -8,10 +8,10 @@ import type { RunTool } from "../exec-tool.ts";
 
 export interface VersionCheckOpts {
   /**
-   * Every configured environment. `versionChecks` itself skips `remote` ones and emits `pending`
-   * rows for them — enforced HERE, not left to the caller: `herdr integration status` resolves
+   * Every configured environment. `versionChecks` itself skips `remote` ones entirely and emits
+   * nothing for them — enforced HERE, not left to the caller: `herdr integration status` resolves
    * `CLAUDE_CONFIG_DIR` on the machine it runs on, so running it locally for a remote env's dirs
-   * publishes a verdict about the wrong disk.
+   * publishes a verdict about the wrong disk. The remote adapter owns those rows instead.
    */
   readonly envs: readonly HerdrEnv[];
   readonly run: RunTool;
@@ -26,9 +26,6 @@ const INTEGRATION_DETAIL =
   "without herdr's Claude integration installed and current, the attention feed never fires — " +
   "corral detects blocked/finished sessions from herdr's own agent status, and that status " +
   "depends on this integration.";
-
-const REMOTE_NOTE = (envId: string): string =>
-  `environment "${envId}" is remote — its herdr/Claude versions live on the far host and are not checked from here.`;
 
 export interface IntegrationStatus {
   readonly installed: boolean;
@@ -218,49 +215,18 @@ async function localEnvChecks(opts: VersionCheckOpts, env: HerdrEnv, now: number
 }
 
 /**
- * `pending` rows for a REMOTE environment, standing in for all three subjects with NO probe run:
- * `herdr integration status` resolves `CLAUDE_CONFIG_DIR` on the machine it runs on, so running it
- * locally for a remote env's dirs would publish a verdict about the wrong disk.
- */
-function remoteEnvChecks(env: HerdrEnv, now: number): Check[] {
-  const note = REMOTE_NOTE(env.id);
-  const envScope: CheckScope = { kind: "env", envId: env.id };
-  const herdrVersionRow: Check = {
-    id: "herdr-version", key: checkKey("herdr-version", envScope), scope: envScope,
-    title: `herdr version not checked for remote environment "${env.id}"`,
-    state: "pending", severity: "warning", detail: note,
-    doc: QUICK_START_DOC, class: "versions", checkedAt: now, startupOkLine: false, haltsStartup: false,
-  };
-  const claudeCliRow: Check = {
-    id: "claude-cli-version", key: checkKey("claude-cli-version", envScope), scope: envScope,
-    title: `Claude CLI version not checked for remote environment "${env.id}"`,
-    state: "pending", severity: "info", detail: note,
-    doc: QUICK_START_DOC, class: "versions", checkedAt: now, startupOkLine: false, haltsStartup: false,
-  };
-  const dirScopes: readonly CheckScope[] = env.claudeConfigDirs.length === 0
-    ? [envScope]
-    : env.claudeConfigDirs.map((dir): CheckScope => ({ kind: "configDir", envId: env.id, dir }));
-  const integrationRows: Check[] = dirScopes.map((scope) => ({
-    id: "herdr-claude-integration", key: checkKey("herdr-claude-integration", scope), scope,
-    title: `herdr's Claude integration not checked for remote environment "${env.id}"`,
-    state: "pending", severity: "warning", detail: note,
-    doc: INTEGRATION_DOC, class: "versions", checkedAt: now, startupOkLine: false, haltsStartup: false,
-  }));
-  return [herdrVersionRow, claudeCliRow, ...integrationRows];
-}
-
-/**
  * `herdr-version`, `herdr-claude-integration` (one per config dir), and `claude-cli-version` for
- * every configured environment, all filed under `class: "versions"` so the `cheap` sweep never
- * clears them. Probes run concurrently with `Promise.all`, both across environments and within one.
+ * every LOCAL configured environment, all filed under `class: "versions"` so the `cheap` sweep
+ * never clears them. Probes run concurrently with `Promise.all`, both across environments and
+ * within one.
  *
- * Skips `remote` environments itself (see `remoteEnvChecks`) rather than leaving that to the
- * caller — no probe here ever runs for one.
+ * Skips `remote` environments entirely and emits nothing for them — the remote adapter owns those
+ * rows instead of this module.
  */
 export async function versionChecks(opts: VersionCheckOpts): Promise<Check[]> {
   const now = opts.now();
-  const perEnv = await Promise.all(opts.envs.map((env) =>
-    env.kind === "remote" ? Promise.resolve(remoteEnvChecks(env, now)) : localEnvChecks(opts, env, now),
-  ));
+  const perEnv = await Promise.all(opts.envs
+    .filter((env) => env.kind !== "remote")
+    .map((env) => localEnvChecks(opts, env, now)));
   return perEnv.flat();
 }
