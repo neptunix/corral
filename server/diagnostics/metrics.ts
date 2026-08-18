@@ -148,8 +148,9 @@ function statuslineRegisteredCheck(deps: CheckDeps, envId: string, dir: string, 
 }
 
 /**
- * Two per-config-dir checks: `capture-script` and `statusline-registered`. LOCAL config dirs
- * only — callers pass local dirs; a remote dir's `pending` rows come from the sweep (Task 12).
+ * Two per-config-dir checks: `capture-script` and `statusline-registered`. Deps-only — no
+ * `env.kind` branch needed: called directly for local dirs, and for remote dirs via the remote
+ * adapter, which runs these same producers over a recording facade fed by SSH-probed facts.
  */
 export function metricsChecks(deps: CheckDeps, envId: string, dir: string): Check[] {
   const now = deps.now();

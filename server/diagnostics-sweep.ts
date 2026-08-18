@@ -246,6 +246,10 @@ export function createDiagnosticsSweep(opts: SweepOpts): DiagnosticsSweep {
         }
         const probe = await runProbe(env, opts.probeExec, planRound2For(env));
         const rows = await composeRemoteRows(composeOpts(env, probe, null));
+        // A permanently-partial host (e.g. no bash → $PATH never answers) stays ok:false forever by
+        // design — the 5-min retry and standing `problem` row are the honest state. Classifying on
+        // `arrived === 0` instead would hide an ongoing partial answer behind the 30-min TTL: the
+        // false-green this design exists to avoid.
         const ok = probe.arrived === probe.expected && probe.expected > 0;
         remoteCache.set(env.id, { rows, at: now, ok });
         return rows;

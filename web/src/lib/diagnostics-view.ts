@@ -88,8 +88,9 @@ export type HeaderStatus = "checking" | "ok" | "info" | "warning" | "fatal";
 
 /**
  * The header's one-word verdict. Reads the ROLLUP, never raw rows: `computeRollup` is what enforces
- * "severity is meaningful only when state === 'problem'", and a remote env's `jq-present` row really
- * is {state:"pending", severity:"fatal"} — ranking rows directly paints a healthy install red.
+ * "severity is meaningful only when state === 'problem'" — a row's `severity` field can be set
+ * regardless of `state`, so ranking rows directly (instead of the rollup) risks a non-problem row's
+ * severity painting a healthy install red.
  *
  * `checking` needs both conditions. An empty row set with an answered class is not "nothing has run
  * yet": the store records that an empty array for an answered class is still an answer.

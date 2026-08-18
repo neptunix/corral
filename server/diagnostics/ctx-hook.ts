@@ -159,7 +159,8 @@ function skillInstalledCheck(deps: CheckDeps, envId: string, dir: string, now: n
 
 /**
  * Three per-config-dir checks: `ctx-hook-installed`, `ctx-hook-registered`, `corral-skill-installed`.
- * LOCAL config dirs only — stage 1 has no remote handling here.
+ * Deps-only — no `env.kind` branch needed: called directly for local dirs, and for remote dirs via
+ * the remote adapter, which runs these same producers over a recording facade fed by SSH-probed facts.
  */
 export function ctxHookChecks(deps: CheckDeps, envId: string, dir: string): Check[] {
   const now = deps.now();
