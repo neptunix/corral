@@ -3,18 +3,59 @@ import { describe, it, expect } from "vitest";
 
 import type { HerdrEnv } from "../environments.ts";
 import { createNodeDeps } from "../server/diagnostics/deps.ts";
+import { buildManifest } from "../server/diagnostics/remote/manifest.ts";
+import type { ProbeManifest } from "../server/diagnostics/remote/manifest.ts";
+import { buildRoundT } from "../server/diagnostics/remote/script.ts";
+import type { RemoteEnv, ToolRequest } from "../server/diagnostics/remote/script.ts";
 import type { DiagnosticsStore } from "../server/diagnostics-store.ts";
 import { createDiagnosticsStore } from "../server/diagnostics-store.ts";
 import { createDiagnosticsSweep, type SweepOpts } from "../server/diagnostics-sweep.ts";
+import type { ExecFn } from "../server/herdr.ts";
 
 const local = (id: string): HerdrEnv => ({
   id, label: id, kind: "local", claudeConfigDirs: ["/h/.claude"], spawnCommand: "claude", repos: {},
 });
-const remote = (id: string): HerdrEnv => ({
-  id, label: id, kind: "remote", sshHost: "h", socket: "~/s.sock", herdrBin: "herdr",
+const remoteEnvFixture = (id: string, sshHost = "h"): RemoteEnv => ({
+  id, label: id, kind: "remote", sshHost, socket: "~/s.sock", herdrBin: "herdr",
   claudeConfigDirs: ["/far/.claude"], spawnCommand: "claude", repos: {},
 });
+const remote = (id: string, sshHost = "h"): HerdrEnv => remoteEnvFixture(id, sshHost);
 const snapshot = (envs: Snapshot["envs"]): Snapshot => ({ envs, sessions: [] });
+
+const b64 = (s: string): string => Buffer.from(s).toString("base64");
+
+/** Answers every manifest subject POSITIVELY — a live, fully healthy remote host. */
+function healthyCannedF(manifest: ProbeManifest): string {
+  const lines: string[] = [];
+  for (const e of manifest.entries) {
+    if (e.key === manifest.homeKey) lines.push(`${e.key}\tv:${b64("/home/u")}`);
+    else if (e.key === manifest.pathKey) lines.push(`${e.key}\tv:${b64("")}`);
+    else if (e.kind === "dir") lines.push(`${e.key}\t!dir`);
+    else if (e.kind === "exec") lines.push(`${e.key}\t!exec`);
+    else if (e.path.endsWith("/settings.json")) lines.push(`${e.key}\tf:${b64("{}")}`);
+    else lines.push(`${e.key}\t!absent`);
+  }
+  return lines.join("\n");
+}
+
+function cannedT(tools: readonly ToolRequest[]): string {
+  return tools.map((t) => `${t.key}\tv:${b64(t.signature.startsWith("herdr --version") ? "1.2.3" : "ok")}`).join("\n");
+}
+
+/**
+ * A healthy fake SSH transport for one remote env — routes by literal script/host text the same way
+ * Task 7's probe fixture does (`args[5]`), copied locally rather than shared: this file only needs a
+ * "fully answered" variant, not the whole failure-mode matrix `diagnostics-remote-probe.test.ts` covers.
+ */
+function healthyExec(env: RemoteEnv): ExecFn {
+  const manifest = buildManifest(env.claudeConfigDirs);
+  const roundT = buildRoundT(env);
+  return (_file, args) => {
+    const cmd = args[5] ?? "";
+    if (cmd.includes("integration status")) return Promise.resolve({ stdout: cannedT(roundT.tools), stderr: "" });
+    return Promise.resolve({ stdout: healthyCannedF(manifest), stderr: "" });
+  };
+}
 
 /**
  * Counts sweep BODIES, entry and exit, and reports whether two were ever inside at once.
@@ -67,11 +108,161 @@ const opts = (over: Partial<SweepOpts>): SweepOpts => ({
 });
 
 describe("createDiagnosticsSweep", () => {
-  it("fills both classes on the first tick", async () => {
+  it("fills all three classes on the first tick", async () => {
     const store = createDiagnosticsStore({ selfVersion: null });
     const sweep = createDiagnosticsSweep(opts({ store }));
     await sweep.tick();
-    expect(store.snapshot().answered.sort()).toEqual(["cheap", "versions"]);
+    expect(store.snapshot().answered.sort()).toEqual(["cheap", "remote", "versions"]);
+  });
+
+  it("publishes the remote class unconditionally — an all-local fleet still answers it", async () => {
+    const store = createDiagnosticsStore({ selfVersion: null });
+    const sweep = createDiagnosticsSweep(opts({ store })); // envs: [local("work")]
+    await sweep.tick();
+    expect(store.snapshot().answered.sort()).toEqual(["cheap", "remote", "versions"]);
+    expect(store.snapshot().checks.filter((c) => c.class === "remote")).toEqual([]);
+  });
+
+  it("a probed remote environment publishes real rows under class remote", async () => {
+    const store = createDiagnosticsStore({ selfVersion: null });
+    const env = remoteEnvFixture("box");
+    const sweep = createDiagnosticsSweep(opts({
+      store, envs: [env],
+      poller: { getSnapshot: () => snapshot({ box: { reachable: true } }) },
+      probeExec: healthyExec(env),
+    }));
+    await sweep.tick();
+    const jq = store.snapshot().checks.find((c) => c.key === "jq-present@box");
+    expect(jq).toBeDefined();
+    expect(jq?.class).toBe("remote");
+    expect(jq?.state).not.toBe("pending");
+  });
+
+  it("a dead remote host still publishes a FULL n/a row set and remote-probe n/a — and lastError stays null", async () => {
+    const store = createDiagnosticsStore({ selfVersion: null });
+    const sweep = createDiagnosticsSweep(opts({
+      store, envs: [remote("box")],
+      poller: { getSnapshot: () => snapshot({ box: { reachable: true } }) },
+      probeExec: () => Promise.reject(new Error("ssh: connect to host h port 22: unreachable")),
+    }));
+    await sweep.tick();
+    const remoteRows = store.snapshot().checks.filter((c) => c.class === "remote");
+    expect(remoteRows.length).toBeGreaterThan(0);
+    expect(remoteRows.every((c) => c.state === "n/a")).toBe(true);
+    const probeRow = remoteRows.find((c) => c.id === "remote-probe");
+    expect(probeRow?.state).toBe("n/a");
+    expect(store.snapshot().lastError).toBe(null);
+  });
+
+  it("one dead remote env does not take the other's rows or the cheap rows", async () => {
+    const store = createDiagnosticsStore({ selfVersion: null });
+    const h1 = remoteEnvFixture("h1", "host1");
+    const h2 = remoteEnvFixture("h2", "host2");
+    const exec1 = healthyExec(h1);
+    const probeExec: ExecFn = (file, args, options) =>
+      args[4] === "host2" ? Promise.reject(new Error("ssh: connect to host2: unreachable")) : exec1(file, args, options);
+    const sweep = createDiagnosticsSweep(opts({
+      store, envs: [local("work"), h1, h2],
+      poller: { getSnapshot: () => snapshot({ work: { reachable: true }, h1: { reachable: true }, h2: { reachable: true } }) },
+      probeExec,
+    }));
+    await sweep.tick();
+    const checks = store.snapshot().checks;
+    expect(checks.find((c) => c.key === "jq-present@h1")?.state).not.toBe("n/a");
+    expect(checks.find((c) => c.key === "jq-present@h2")?.state).toBe("n/a");
+    expect(checks.some((c) => c.class === "cheap")).toBe(true);
+  });
+
+  it("honours the 30-minute TTL on tick and the 60-second floor on refresh", async () => {
+    let now = 0;
+    let execCalls = 0;
+    const env = remoteEnvFixture("box");
+    const baseExec = healthyExec(env);
+    const probeExec: ExecFn = (file, args, options) => { execCalls += 1; return baseExec(file, args, options); };
+    const sweep = createDiagnosticsSweep(opts({
+      envs: [env],
+      poller: { getSnapshot: () => snapshot({ box: { reachable: true } }) },
+      probeExec,
+      deps: { ...createNodeDeps({ repoRoot: "/repo" }), now: () => now },
+    }));
+    await sweep.tick(); // cache miss: probes
+    const afterFirstTick = execCalls;
+    expect(afterFirstTick).toBeGreaterThan(0);
+    await sweep.tick(); // within TTL: cached
+    expect(execCalls).toBe(afterFirstTick);
+    await sweep.refresh(); // within the 60s floor: still cached
+    expect(execCalls).toBe(afterFirstTick);
+    now += 61_000;
+    await sweep.refresh(); // past the floor: probes again
+    expect(execCalls).toBeGreaterThan(afterFirstTick);
+    const afterFloorRefresh = execCalls;
+    now += 30 * 60_000; // well past the 30-minute TTL
+    await sweep.tick();
+    expect(execCalls).toBeGreaterThan(afterFloorRefresh);
+  });
+
+  it("a FAILED probe retries after 5 minutes, not 30", async () => {
+    let now = 0;
+    let execCalls = 0;
+    const probeExec: ExecFn = () => { execCalls += 1; return Promise.reject(new Error("down")); };
+    const sweep = createDiagnosticsSweep(opts({
+      envs: [remote("box")],
+      poller: { getSnapshot: () => snapshot({ box: { reachable: true } }) },
+      probeExec,
+      deps: { ...createNodeDeps({ repoRoot: "/repo" }), now: () => now },
+    }));
+    await sweep.tick();
+    const first = execCalls;
+    expect(first).toBeGreaterThan(0);
+    now += 2 * 60_000; // 2 minutes: inside the 5-minute failure TTL
+    await sweep.tick();
+    expect(execCalls).toBe(first);
+    now += 4 * 60_000; // 6 minutes total: past the 5-minute failure TTL, well under 30
+    await sweep.tick();
+    expect(execCalls).toBeGreaterThan(first);
+  });
+
+  it("remoteProbeEnabled: false composes n/a rows naming the switch and never touches the exec", async () => {
+    const store = createDiagnosticsStore({ selfVersion: null });
+    const sweep = createDiagnosticsSweep(opts({
+      store, envs: [remote("box")], remoteProbeEnabled: false,
+      poller: { getSnapshot: () => snapshot({ box: { reachable: true } }) },
+      probeExec: () => { throw new Error("must not be called"); },
+    }));
+    await sweep.tick();
+    const probeRow = store.snapshot().checks.find((c) => c.id === "remote-probe");
+    expect(probeRow?.state).toBe("n/a");
+    expect(probeRow?.title).toContain("REMOTE_PROBE_ENABLED");
+  });
+
+  it("produces no duplicate keys with a probed remote environment in the fleet", async () => {
+    const store = createDiagnosticsStore({ selfVersion: null });
+    const env = remoteEnvFixture("box");
+    const sweep = createDiagnosticsSweep(opts({
+      store, envs: [local("work"), env],
+      poller: { getSnapshot: () => snapshot({ work: { reachable: true }, box: { reachable: true } }) },
+      probeExec: healthyExec(env),
+    }));
+    await sweep.tick();
+    const keys = store.snapshot().checks.map((c) => c.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("DIAGNOSTICS_INTERVAL_MS=0 is NOT an off switch — a Recheck still sweeps and probes", async () => {
+    const store = createDiagnosticsStore({ selfVersion: null });
+    let execCalls = 0;
+    const env = remoteEnvFixture("box");
+    const baseExec = healthyExec(env);
+    const probeExec: ExecFn = (file, args, options) => { execCalls += 1; return baseExec(file, args, options); };
+    const sweep = createDiagnosticsSweep(opts({
+      store, intervalMs: 0, envs: [env],
+      poller: { getSnapshot: () => snapshot({ box: { reachable: true } }) },
+      probeExec,
+    }));
+    // never call start(): the unauthenticated refresh route must still run a full sweep.
+    await sweep.refresh();
+    expect(execCalls).toBeGreaterThan(0);
+    expect(store.snapshot().checks.some((c) => c.class === "remote")).toBe(true);
   });
 
   it("keeps version rows across a cheap-only re-tick", async () => {
