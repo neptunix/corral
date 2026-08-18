@@ -1,5 +1,5 @@
 // Client half of the post-spawn attach boot-race contract, kept in a plain module so vitest can pin
-// it (there is no React component runner) — mirrors web/src/lib/protocol.ts. `agent attach` returns
+// it as a contract rather than through the component — mirrors web/src/lib/protocol.ts. `agent attach` returns
 // WS close 4001 until Claude registers as a herdr agent (a few seconds after `pane run`), so the
 // auto-opened live terminal (awaitAgent) retries the attach until the connection stays live past the
 // server probe grace (WS_PROBE_GRACE_MS = 2000), never showing the transient error blob.
