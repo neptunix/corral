@@ -122,8 +122,8 @@ export function HealthPanel({ snapshot, streamDown, labelFor, onClose, onSnapsho
           {status !== "checking" && (
             <span className="text-xs text-foreground">
               {STATUS_WORD[status]}
-              {/* Reason-free on purpose: several pending rows WERE attempted and simply cannot be
-                  answered from this host, so "not checked here" would assert something untrue. */}
+              {/* Reason-free on purpose: pending now only ever means "not asked yet"
+                  (first sweep in flight, or a class that has not run). */}
               {rollup.pending > 0 && ` · ${String(rollup.pending)} pending`}
             </span>
           )}
