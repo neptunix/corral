@@ -76,11 +76,20 @@ async function herdrVersionCheck(opts: VersionCheckOpts, env: HerdrEnv, now: num
     startupOkLine: false, haltsStartup: false, severity: "warning" as const,
   };
   const output = await opts.run("herdr", ["--version"]);
-  const version = output === null ? null : extractVersion(output);
+  if (output === null) {
+    return {
+      ...base, title: `herdr --version could not be run for environment "${env.id}"`,
+      state: "n/a", detail: "",
+    };
+  }
+  const version = extractVersion(output);
   if (version === null) {
     return {
-      ...base, title: `herdr --version could not be read for environment "${env.id}"`,
-      state: "pending", detail: "",
+      ...base, title: `herdr --version output could not be read for environment "${env.id}"`,
+      state: "problem",
+      detail:
+        "the command ran but its output carried no recognizable version number — either herdr " +
+        "changed its output format or the command failed in an unexpected way.",
     };
   }
   const below = compareSemver(version, HERDR_MIN) < 0;
@@ -151,11 +160,20 @@ async function integrationCheckAt(
   };
   const runOpts = extraEnv === undefined ? undefined : { extraEnv };
   const output = await opts.run("herdr", ["integration", "status"], runOpts);
-  const parsed = output === null ? null : parseIntegrationStatus(output);
+  if (output === null) {
+    return {
+      ...base, title: `herdr integration status could not be run for environment "${env.id}"`,
+      state: "n/a", detail: "",
+    };
+  }
+  const parsed = parseIntegrationStatus(output);
   if (parsed === null) {
     return {
-      ...base, title: `herdr's Claude integration status could not be read for environment "${env.id}"`,
-      state: "pending", detail: "",
+      ...base, title: `herdr's Claude integration status output could not be read for environment "${env.id}"`,
+      state: "problem",
+      detail:
+        "the command ran but no `claude:` line could be parsed from its output — either herdr " +
+        "changed its output format or the command failed in an unexpected way.",
     };
   }
   if (parsed.installed && parsed.current) {

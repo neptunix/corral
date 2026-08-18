@@ -77,18 +77,31 @@ describe("versionChecks", () => {
     expect(c?.detail).toMatch(/attention/i);
   });
 
-  it("goes pending when a command cannot be run", async () => {
+  it("goes n/a when a command cannot be run at all", async () => {
     const cs = await versionChecks({ envs: [local("work")], run: run({}), ccVersionByEnv: {}, now: () => 1 });
-    expect(byId(cs, "herdr-version")?.state).toBe("pending");
-    expect(byId(cs, "herdr-claude-integration")?.state).toBe("pending");
+    expect(byId(cs, "herdr-version")?.state).toBe("n/a");
+    expect(byId(cs, "herdr-claude-integration")?.state).toBe("n/a");
   });
 
-  it("goes pending — not 'not installed' — when the integration output is unparseable", async () => {
+  it("goes problem/warning — not n/a — when herdr --version output is unparseable", async () => {
+    const cs = await versionChecks({
+      envs: [local("work")], ccVersionByEnv: {}, now: () => 1,
+      run: run({ ...HEALTHY, "herdr --version": "no digits here" }),
+    });
+    const c = byId(cs, "herdr-version");
+    expect(c?.state).toBe("problem");
+    expect(c?.severity).toBe("warning");
+    expect(c?.title).toMatch(/could not be read|unparseable/i);
+  });
+
+  it("goes problem/warning — not n/a — when the integration output is unparseable", async () => {
     const cs = await versionChecks({
       envs: [local("work")], ccVersionByEnv: {}, now: () => 1,
       run: run({ ...HEALTHY, "herdr integration status": "usage: herdr integration status [--outdated-only]" }),
     });
-    expect(byId(cs, "herdr-claude-integration")?.state).toBe("pending");
+    const c = byId(cs, "herdr-claude-integration");
+    expect(c?.state).toBe("problem");
+    expect(c?.severity).toBe("warning");
   });
 
   it("runs the integration probe once per config dir, with distinct keys", async () => {
