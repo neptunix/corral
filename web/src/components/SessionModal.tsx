@@ -6,7 +6,9 @@ import { useEffect, useRef, useState, type JSX } from "react";
 import { SessionMeta } from "./SessionMeta";
 import { useTheme } from "./ThemeProvider";
 import {
-  ATTACH_LIVE_AFTER_MS, ATTACH_RETRY_DELAY_MS, shouldRetryAttach,
+  ATTACH_LIVE_AFTER_MS, ATTACH_RETRY_DELAY_MS, jitter, RECONNECT_BASE_MS, RECONNECT_COLD_ATTEMPTS,
+  RECONNECT_LIMIT_DELAY_MS, RECONNECT_MAX_MS, reconnectNominalMs, RECONNECT_STABLE_MS,
+  RESUME_PROBE_MS, type ResumeTrigger, resumeAction, shouldReconnectAfterClose, shouldRetryAttach,
 } from "../lib/attach";
 import { formatDropInjection, formatPaste } from "../lib/paste";
 import { closeMessage } from "../lib/protocol";
@@ -68,9 +70,20 @@ export function SessionModal({
   // was given — see the render for why those are never the same thing.
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [closeInfo, setCloseInfo] = useState<{ code: number; reason: string } | null>(null);
+  // Monotonic effect key. Bumping it re-runs the terminal effect, which is how both the boot-race
+  // retry and a reconnect open a new socket. NEVER reset — resetting is also a bump, so it would
+  // tear down the very socket that just succeeded.
   const [attempt, setAttempt] = useState(0);
   const [starting, setStarting] = useState(awaitAgent);
   const startedAtRef = useRef(0);
+  // Recovery state, all of it deliberately outside the effect so it survives the re-run that a
+  // reconnect IS.
+  const [reconnectInfo, setReconnectInfo] = useState<{ attempts: number; reason: string } | null>(null);
+  const backoffRef = useRef(0); // exponent for the next delay; safe to reset, unlike `attempt`
+  const everOpenRef = useRef(false); // a handshake completed at least once — see the cold-start gate
+  const everLiveRef = useRef(false); // output has flowed once, so a reconnect must not re-buffer
+  const lastAttemptAtRef = useRef(0); // floor between attach attempts, whichever trigger fired
+  const closeCodeRef = useRef<number | null>(null); // the verdict a resume must respect
   const { resolved } = useTheme();
   const resolvedRef = useRef<"light" | "dark">(resolved);
   resolvedRef.current = resolved;
@@ -161,13 +174,25 @@ export function SessionModal({
 
     let disposed = false;
     if (startedAtRef.current === 0) startedAtRef.current = Date.now();
+    lastAttemptAtRef.current = Date.now();
+    closeCodeRef.current = null;
     // When awaiting the agent, hold output until the connection proves live so a fast-fail (4001)
     // attempt's herdr error blob is discarded, not flashed. A normal (non-await) attach writes at once.
-    let live = !awaitAgent;
+    // `everLiveRef` exempts a RECONNECT: output has already flowed, so re-buffering it (and dropping
+    // keystrokes for ATTACH_LIVE_AFTER_MS) on a session the operator has been using is just a stall.
+    let live = !awaitAgent || everLiveRef.current;
     liveRef.current = live;
     const buffered: (string | Uint8Array)[] = [];
     let liveTimer: ReturnType<typeof setTimeout> | undefined;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let probeTimer: ReturnType<typeof setTimeout> | undefined;
+    let stableTimer: ReturnType<typeof setTimeout> | undefined;
+    // Single-flight. `visibilitychange`, `pageshow` and an `onclose` can all land in the same tick,
+    // and until the bump re-runs this effect the listeners below are still registered — so without
+    // this a bfcache restore opens two attaches against one pane, which then fight for herdr's
+    // takeover lock. Effect-local is the right scope: the next run genuinely starts fresh.
+    let pending: "none" | "backoff" | "resume" | "probe" = "none";
 
     function sendResize(): void {
       fit.fit();
@@ -180,13 +205,41 @@ export function SessionModal({
       if (live) return;
       live = true;
       liveRef.current = true;
+      everLiveRef.current = true;
       setStarting(false);
       for (const d of buffered) term.write(d);
       buffered.length = 0;
     }
 
+    /**
+     * Arm the next attach. `delayMs` is what the caller wants; the floor is what pacing demands —
+     * no two attempts within RECONNECT_BASE_MS of each other, whichever trigger fired. A zero
+     * effective delay bumps synchronously rather than through a pointless macrotask.
+     */
+    function scheduleReconnect(delayMs: number, kind: "backoff" | "resume", reason: string): void {
+      if (pending !== "none") return;
+      pending = kind;
+      setCloseInfo(null);
+      setReconnectInfo({ attempts: backoffRef.current, reason });
+      const wait = Math.max(delayMs, lastAttemptAtRef.current + RECONNECT_BASE_MS - Date.now());
+      if (wait <= 0) {
+        setAttempt((a) => a + 1);
+        return;
+      }
+      reconnectTimer = setTimeout(() => { setAttempt((a) => a + 1); }, wait);
+    }
+
     ws.onopen = () => {
+      setReconnectInfo(null);
       sendResize();
+      // Completing a handshake is not the same as having a connection. The limiter accepts the
+      // upgrade and only then closes 1013, and a flapping server accepts every attach and drops it
+      // — treating either as success would clear the backoff and switch on the unlimited retry for
+      // a link that never worked. Surviving RECONNECT_STABLE_MS is the proof.
+      stableTimer = setTimeout(() => {
+        everOpenRef.current = true;
+        backoffRef.current = 0;
+      }, RECONNECT_STABLE_MS);
       if (awaitAgent) liveTimer = setTimeout(goLive, ATTACH_LIVE_AFTER_MS);
     };
     ws.onmessage = (e: MessageEvent<string | ArrayBuffer>) => {
@@ -203,6 +256,10 @@ export function SessionModal({
       // Only the ref is cleared, not the effect-local `live`, which shouldRetryAttach below still reads.
       liveRef.current = false;
       if (liveTimer !== undefined) clearTimeout(liveTimer);
+      if (stableTimer !== undefined) clearTimeout(stableTimer); // died before it counted as working
+      // Recorded BEFORE the boot-race branch, so a tab switch during that 1.2 s wait sees a 4001 and
+      // leaves it alone instead of collapsing the retry to the attempt floor.
+      closeCodeRef.current = e.code;
       // Boot race: retry a not-yet-live post-spawn attach (4001) until Claude registers or the window
       // elapses — the buffered error blob is dropped so the user only ever sees "starting…" then Claude.
       // `starting` is already true across the whole retry loop (init from awaitAgent, cleared only by
@@ -211,10 +268,79 @@ export function SessionModal({
         retryTimer = setTimeout(() => { setAttempt((a) => a + 1); }, ATTACH_RETRY_DELAY_MS);
         return;
       }
+      // The transport died — re-attach. Gated on having connected once, because a REJECTED UPGRADE
+      // (bad origin, unknown env, malformed pane: rejectUpgrade in server/ws-attach.ts) never
+      // becomes a WebSocket and so also reports 1006. Retrying that forever would bury a permanent
+      // misconfiguration under a spinner; a socket that did connect is a corral restart or a frozen
+      // phone, and those come back.
+      if (shouldReconnectAfterClose(e.code)
+        && (everOpenRef.current || backoffRef.current < RECONNECT_COLD_ATTEMPTS)) {
+        // 1013 waits out the limiter rather than the backoff curve: the delay is sized to outlast
+        // the server's reap of whatever is holding the slots.
+        const nominal = e.code === 1013 ? RECONNECT_LIMIT_DELAY_MS : reconnectNominalMs(backoffRef.current);
+        backoffRef.current += 1;
+        scheduleReconnect(jitter(nominal, Math.random()), "backoff", closeMessage(e.code, e.reason));
+        return;
+      }
       if (!live) { for (const d of buffered) term.write(d); buffered.length = 0; } // real failure → show what came
       setStarting(false);
+      setReconnectInfo(null);
       setCloseInfo({ code: e.code, reason: e.reason });
     };
+
+    /**
+     * The tab came back. `resumeAction` decides; this wires the decision up.
+     *
+     * A resume arriving mid-backoff cancels the wait instead of being swallowed by single-flight —
+     * otherwise a phone picked up 5 s into a 30 s delay would sit out the other 25 for nothing.
+     */
+    function onResume(trigger: ResumeTrigger, persisted: boolean): void {
+      if (disposed) return;
+      const decision = resumeAction({
+        trigger, persisted, readyState: ws.readyState, closeCode: closeCodeRef.current,
+      });
+      if (decision === "none") return;
+      if (decision === "reconnect") {
+        if (pending === "resume") return;
+        if (pending === "backoff" || pending === "probe") {
+          clearTimeout(reconnectTimer);
+          clearTimeout(probeTimer);
+          pending = "none";
+        }
+        backoffRef.current = 0;
+        scheduleReconnect(0, "resume", "connection closed");
+        return;
+      }
+      if (pending !== "none") return;
+      pending = "probe";
+      // Poke the socket: WebKit updates a stale readyState on send, so this is what makes a dead
+      // connection admit it. Folklore from bug reports rather than specified behaviour: if a device
+      // ever shows it is not enough, the accurate replacement is an application-level ping/pong over
+      // the existing text-control channel, which costs a protocol change on both sides.
+      sendResize();
+      probeTimer = setTimeout(() => {
+        pending = "none";
+        if (disposed) return;
+        // Ask the same question again rather than just re-reading readyState: a close can land
+        // INSIDE the probe window, and its code decides. A 1009 paste or a 1000 exit arriving here
+        // would otherwise be re-attached — and the setCloseInfo(null) below would wipe the reason
+        // the operator needs, or cancel the auto-dismiss that a clean exit had already armed.
+        if (resumeAction({
+          trigger: "visible", persisted: false, readyState: ws.readyState, closeCode: closeCodeRef.current,
+        }) !== "reconnect") return;
+        backoffRef.current = 0;
+        scheduleReconnect(0, "resume", "connection closed");
+      }, RESUME_PROBE_MS);
+    }
+
+    const onVisibility = (): void => {
+      if (document.visibilityState === "visible") onResume("visible", false);
+    };
+    // `persisted` says Safari restored this page from bfcache — where it force-closed the socket on
+    // the way in, so the answer needs no probing.
+    const onPageShow = (e: PageTransitionEvent): void => { onResume("pageshow", e.persisted); };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pageshow", onPageShow);
 
     // Keystrokes → binary frame (the bridge treats binary as raw input); resize → text frame (JSON control).
     const dataSub = term.onData((d) => {
@@ -312,6 +438,11 @@ export function SessionModal({
       disposed = true;
       if (liveTimer !== undefined) clearTimeout(liveTimer);
       if (retryTimer !== undefined) clearTimeout(retryTimer);
+      if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
+      if (probeTimer !== undefined) clearTimeout(probeTimer);
+      if (stableTimer !== undefined) clearTimeout(stableTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onPageShow);
       ro.disconnect();
       frameObserver.disconnect();
       detachTouchScroll();
@@ -409,10 +540,28 @@ export function SessionModal({
           {statusline?.session_name !== null && statusline?.session_name !== undefined && statusline.session_name !== "" && (
             <span className="hidden text-xs text-muted-foreground/60 truncate sm:inline" title={statusline.session_name}>· {statusline.session_name}</span>
           )}
-          {starting && (
+          {starting && reconnectInfo === null && (
             <span className="min-w-0 truncate text-xs text-warning">· starting session…</span>
           )}
-          {closeInfo !== null && !starting && (
+          {/* Recovery is automatic, so this row is the whole of its surface — no button, nothing to
+              press. It still has to SAY something: a terminal sitting out a backoff and a hung one
+              look identical otherwise. Once the delay has reached its cap the bare word stops being
+              enough — a corral that is merely down and a permanent 403 both spin forever — so the
+              attempt count and the close reason join it.
+
+              Precedence in this one-line row: reconnecting > starting > closed. Reconnecting wins
+              over "starting session…" because an awaitAgent session whose transport dies before
+              output ever flowed keeps `starting` true for the whole outage — ranking it first left
+              the recovery, its attempt count and its reason invisible for exactly as long as they
+              mattered. */}
+          {reconnectInfo !== null && (
+            <span className="min-w-0 truncate text-xs text-warning">
+              · {reconnectNominalMs(reconnectInfo.attempts) < RECONNECT_MAX_MS
+                ? "reconnecting…"
+                : `reconnecting… (attempt ${String(reconnectInfo.attempts)}, ${reconnectInfo.reason})`}
+            </span>
+          )}
+          {closeInfo !== null && !starting && reconnectInfo === null && (
             <span className="min-w-0 truncate text-xs text-warning" title={closeMessage(closeInfo.code, closeInfo.reason)}>
               · {closeMessage(closeInfo.code, closeInfo.reason)}
             </span>

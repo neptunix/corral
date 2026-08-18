@@ -1,5 +1,5 @@
-// Client half of two server↔web contracts, kept in a plain module so vitest can pin them (there is
-// no React component runner): the WS close codes minted in server/ws-attach.ts + server/pty-bridge.ts,
+// Client half of two server↔web contracts, kept in a plain module so vitest can pin them as
+// contracts rather than through a component: the WS close codes minted in server/ws-attach.ts + server/pty-bridge.ts,
 // and the attention-map key format minted in server/attention-store.ts. If either side drifts, the
 // tests in test/web-protocol.test.ts fail under the same signal as the server suite.
 
