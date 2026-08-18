@@ -68,7 +68,7 @@ function extractVersion(text: string): string | null {
  * upper "verified ceiling": the current release is already past it, so every operator on a
  * current herdr would carry a permanent `info` row that only a source edit clears.
  */
-async function herdrVersionCheck(opts: VersionCheckOpts, env: HerdrEnv, now: number): Promise<Check> {
+export async function herdrVersionCheck(opts: VersionCheckOpts, env: HerdrEnv, now: number): Promise<Check> {
   const scope: CheckScope = { kind: "env", envId: env.id };
   const base = {
     id: "herdr-version", key: checkKey("herdr-version", scope), scope,
@@ -114,7 +114,7 @@ async function herdrVersionCheck(opts: VersionCheckOpts, env: HerdrEnv, now: num
  * ceiling, so a newer Claude Code is not a problem — this row stays `severity: "info"` even when
  * it fires, because it is a recommendation, not a failure.
  */
-async function claudeCliVersionCheck(opts: VersionCheckOpts, env: HerdrEnv, now: number): Promise<Check> {
+export async function claudeCliVersionCheck(opts: VersionCheckOpts, env: HerdrEnv, now: number): Promise<Check> {
   const scope: CheckScope = { kind: "env", envId: env.id };
   const base = {
     id: "claude-cli-version", key: checkKey("claude-cli-version", scope), scope,
@@ -150,7 +150,7 @@ async function claudeCliVersionCheck(opts: VersionCheckOpts, env: HerdrEnv, now:
 }
 
 /** One `herdr-claude-integration` row for the given scope, running `herdr integration status` with `extraEnv`. */
-async function integrationCheckAt(
+export async function integrationCheckAt(
   opts: VersionCheckOpts, env: HerdrEnv, scope: CheckScope, extraEnv: Readonly<Record<string, string>> | undefined, now: number,
 ): Promise<Check> {
   const base = {
