@@ -23,6 +23,10 @@ you work on, and lets you respond in place.
 - **Multi-environment** — local sockets and remote boxes over SSH, in one view.
 - **Multi-account Claude** — work and personal Claude accounts side by side, each with its
   own rate-limit windows (see below).
+- **Self-diagnostics** — the 🛟 health panel in the side rail runs install and connectivity
+  checks (local, remote, and a corral-update check) on a schedule and folds anything worth
+  seeing into a badge; a real problem opens the panel once, everything else stays one click
+  away.
 
 ## Quick start
 
@@ -367,10 +371,10 @@ equivalent of a symlink for a remote config dir.
 Install the theme only **after** upgrading to ≥ v0.3.2 — the theme-sync-on-mount fix landed
 there, so installing it against an older build means testing the old behaviour.
 
-corral watches for this itself. The health panel's `update-check` row asks GitHub for this
-repository's latest release — once every six hours after an answer, once every fifteen minutes after
-a failure — and shows "Update available" when there is one, linking the releases page so you can read
-everything published since your build. It is a recommendation, so it lights the rail's muted dot
+You don't have to track releases by hand: the health panel's `update-check` row asks GitHub for
+this repository's latest release — once every six hours after an answer, once every fifteen minutes
+after a failure — and shows "Update available" when there is one, linking the releases page so you
+can read everything published since your build. It is a recommendation, so it lights the rail's muted dot
 rather than the problem count. Every way the check can fail to answer — GitHub unreachable, rate-limited, or the
 check switched off — reads `n/a` and says which in the row's own title. Turn it off with
 `UPDATE_CHECK_ENABLED=false`; [`docs/adr/0006`](docs/adr/0006-corral-asks-github-for-its-own-latest-release.md)
@@ -640,9 +644,11 @@ The dirs you install into must match each environment's `claudeConfigDirs` in
 - **All herdr/SSH calls use `execFile` with argument arrays** — no shell string
   interpolation; remote commands quote user tokens with `shell-quote`.
 - **Environments are trusted startup config** — never writable through the API.
-- **Outbound traffic is two things, both nameable** — `ssh` to the remote environments you
-  configured (`REMOTE_PROBE_ENABLED`), and one request to `api.github.com` asking whether this
-  repository has a newer release (`UPDATE_CHECK_ENABLED`). It carries no body, no query and nothing
+- **Outbound traffic is nameable** — `ssh` to whichever remote environments you configured is
+  inherent to using them and has no switch; on top of that, two optional checks can be turned off
+  independently: the self-diagnostics remote probe's own SSH round (`REMOTE_PROBE_ENABLED`), and
+  one request to `api.github.com` asking whether this repository has a newer release
+  (`UPDATE_CHECK_ENABLED`). The GitHub request carries no body, no query and nothing
   about your fleet, and never follows a redirect; GitHub sees the request and your IP, as it would
   for a `git fetch`. Behind a cache it runs once every six hours after an answer and once every
   fifteen minutes after a failure — so a repository GitHub cannot answer for at all, such as a fork

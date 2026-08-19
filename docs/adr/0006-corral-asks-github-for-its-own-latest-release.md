@@ -22,6 +22,8 @@ The terms of that request are the operator-facing promise, and the README states
 - **Bounded frequency.** Six hours after an answer, fifteen minutes after a failure.
 - **Owner and repository come from `package.json`**, not a constant, so a fork reports its own
   releases. A field naming a non-GitHub host means no request at all.
+- **Never follows a redirect.** `api.github.com` is the only host corral is willing to talk to for
+  this; an intercepted or misbehaving endpoint does not get a second hop to reach further.
 - **Every failure is `n/a`, never red**, and names itself in the row.
 - **An available update is a recommendation, not an alarm** — it lights the rail's muted dot,
   never the problem count.
