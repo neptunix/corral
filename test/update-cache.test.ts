@@ -1,4 +1,6 @@
-import { lstatSync, mkdirSync, mkdtempSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, symlinkSync, writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -113,4 +115,31 @@ describe("createUpdateCache", () => {
     cache.write(SLUG, entry({ tag: "v9.9.9" }));
     expect(cache.read(SLUG)?.tag).toBe("v9.9.9");
   });
+
+  /**
+   * Every case above is caught by `vetDir` at construction, so `write` returns before it ever opens
+   * a file — the branch that degrades on a write that FAILS LATER was never executed. It is the one
+   * a read-only TMPDIR actually takes, and a version of it that swallowed the error without
+   * recording a reason would send corral to GitHub on every launch while looking perfectly healthy.
+   */
+  // Skipped as root, where the directory mode is not enforced and the write would simply succeed.
+  it.skipIf(process.getuid?.() === 0)(
+    "degrades permanently when a WRITE fails, not only when the directory is bad up front", () => {
+    const dir = path.join(freshRoot(), "cache");
+    const cache = createUpdateCache(dir);
+    expect(cache.degraded()).toBe(null);
+
+    chmodSync(dir, 0o500);
+    cache.write(SLUG, entry({ tag: "v9.9.9" }));
+    chmodSync(dir, 0o700);
+
+    expect(cache.degraded()).not.toBe(null);
+    expect(readdirSync(dir)).toEqual([]);
+    // Memory answers for the rest of the run, and a later write does not retry the disk.
+    expect(cache.read(SLUG)?.tag).toBe("v9.9.9");
+    cache.write(OTHER, entry({ tag: "v8.8.8" }));
+    expect(readdirSync(dir)).toEqual([]);
+    expect(cache.read(OTHER)?.tag).toBe("v8.8.8");
+  },
+  );
 });

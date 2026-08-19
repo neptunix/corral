@@ -57,13 +57,11 @@ const na = (at: number, title: string, io: UpdateCheckIo): UpdateCheckResult =>
 
 /** The repo-scoped half of the rule. Host-only would admit any attacker-controlled github.com repo. */
 function isOwnReleaseUrl(raw: string, slug: RepoSlug): boolean {
+  // No catch: `isReleaseUrl` returns true only after `new URL` succeeded on this exact string, and
+  // parsing the same string twice cannot differ.
   if (!isReleaseUrl(raw)) return false;
-  try {
-    return new URL(raw).pathname.toLowerCase()
-      .startsWith(`/${slug.owner.toLowerCase()}/${slug.repo.toLowerCase()}/`);
-  } catch {
-    return false;
-  }
+  return new URL(raw).pathname.toLowerCase()
+    .startsWith(`/${slug.owner.toLowerCase()}/${slug.repo.toLowerCase()}/`);
 }
 
 function reasonFor(res: ReleaseFetch): string {

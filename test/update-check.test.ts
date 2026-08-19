@@ -209,6 +209,22 @@ describe("updateCheck — the cache", () => {
     expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
+  /**
+   * The live-header test below cannot reach this: `parseRetryAfter` clamps before the value is ever
+   * stored, so the entry it writes already holds the cap and `fresh`'s own `Math.min` is a no-op.
+   * A file written by another version — or a corrupted one — is the only way an unclamped backoff
+   * arrives, and without the ceiling one would park the row at n/a for decades.
+   */
+  it("clamps a backoff that arrived from the cache FILE, not from a live header", async () => {
+    const stale: CacheEntry = {
+      at: 0, ok: false, tag: null, url: null,
+      reason: "GitHub rate-limited the update check", retryAfterMs: 1e12,
+    };
+    const fetchFn = vi.fn<FetchFn>(body("v0.7.0", URL_OK));
+    await updateCheck(io({ cache: memoryCache(stale), fetch: fetchFn }), () => 21_600_001);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
   it("never lets an absurd Retry-After suppress the check beyond the cap", async () => {
     const cache = memoryCache();
     const fetchFn = vi.fn<FetchFn>(() =>
