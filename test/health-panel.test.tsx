@@ -131,14 +131,14 @@ describe("HealthPanel header", () => {
 
   it("shows the plate as a link when stage 3 supplies a release url", () => {
     render(panel(snap({ checks: [check()], answered: ["cheap"],
-      self: { version: "0.6.8", latest: "0.7.0", releaseUrl: "https://example.invalid/r", latestCheckedAt: 1 } })));
+      self: { version: "0.6.8", latest: "0.7.0", releaseUrl: "https://example.invalid/r" } })));
     expect(screen.getByRole("link", { name: /0\.7\.0/ }).getAttribute("href")).toBe("https://example.invalid/r");
   });
 
   // releaseUrl is nullable independently of latest — never render an anchor with a null href.
   it("shows the plate as plain text when there is a version but no url", () => {
     render(panel(snap({ checks: [check()], answered: ["cheap"],
-      self: { version: "0.6.8", latest: "0.7.0", releaseUrl: null, latestCheckedAt: 1 } })));
+      self: { version: "0.6.8", latest: "0.7.0", releaseUrl: null } })));
     expect(screen.getByText(/0\.7\.0/)).toBeTruthy();
     expect(screen.queryByRole("link", { name: /0\.7\.0/ })).toBe(null);
   });

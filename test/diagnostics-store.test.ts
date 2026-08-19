@@ -1,5 +1,5 @@
 import type { Check } from "@shared/diagnostics-schema";
-import { DiagnosticsSnapshotSchema } from "@shared/diagnostics-schema";
+import { computeRollup, DiagnosticsSnapshotSchema } from "@shared/diagnostics-schema";
 import { describe, it, expect } from "vitest";
 
 import { createDiagnosticsStore } from "../server/diagnostics-store.ts";
@@ -30,7 +30,7 @@ describe("createDiagnosticsStore", () => {
     const s = createDiagnosticsStore({ selfVersion: null });
     s.put("cheap", [check({ state: "problem", severity: "fatal" })]);
     s.put("cheap", [check({})]);
-    expect(s.snapshot().rollup).toEqual({ fatal: 0, warning: 0, info: 0, pending: 0 });
+    expect(computeRollup(s.snapshot().checks)).toEqual({ fatal: 0, warning: 0, info: 0, pending: 0 });
   });
 
   it("keeps classes independent — a cheap sweep must not clear version rows", () => {
@@ -47,7 +47,7 @@ describe("createDiagnosticsStore", () => {
       check({ id: "a", key: "a", state: "problem", severity: "fatal" }),
       check({ id: "b", key: "b", state: "pending", checkedAt: null }),
     ]);
-    expect(s.snapshot().rollup).toEqual({ fatal: 1, warning: 0, info: 0, pending: 1 });
+    expect(computeRollup(s.snapshot().checks)).toEqual({ fatal: 1, warning: 0, info: 0, pending: 1 });
   });
 
   it("carries the last sweep error, and clears it", () => {
@@ -62,9 +62,12 @@ describe("createDiagnosticsStore", () => {
   it("patches self without touching checks", () => {
     const s = createDiagnosticsStore({ selfVersion: "0.6.5" });
     s.put("cheap", [check({})]);
-    s.patchSelf({ latest: "0.7.0", releaseUrl: "https://example.test/r", latestCheckedAt: 9 });
+    s.patchSelf({ latest: "0.7.0", releaseUrl: "https://github.com/neptunix/corral/releases/tag/v0.7.0" });
     const snap = s.snapshot();
-    expect(snap.self).toEqual({ version: "0.6.5", latest: "0.7.0", releaseUrl: "https://example.test/r", latestCheckedAt: 9 });
+    expect(snap.self).toEqual({
+      version: "0.6.5", latest: "0.7.0",
+      releaseUrl: "https://github.com/neptunix/corral/releases/tag/v0.7.0",
+    });
     expect(snap.checks).toHaveLength(1);
   });
 });

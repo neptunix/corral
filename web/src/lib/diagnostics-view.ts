@@ -51,8 +51,8 @@ const SYNTHETIC_IDS = new Set(["backend-unreachable", "sweep-failed"]);
  * Both are minted as ordinary `Check` values so they flow through ONE code path into grouping, the
  * rollup, the badge digit and the auto-open trigger.
  *
- * `scope` and `class` are forced to existing enum members because the wire schema is frozen this
- * stage; the grouper lifts these two ids out by id, not by scope.
+ * `scope` and `class` are forced to existing enum members because a view-only concern must not widen
+ * either enum; the grouper lifts these two ids out by id, not by scope.
  */
 export function syntheticChecks(snapshot: DiagnosticsSnapshot, streamDown: boolean): Check[] {
   const rows: Check[] = [];

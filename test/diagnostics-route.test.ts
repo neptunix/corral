@@ -87,9 +87,9 @@ describe("GlobalStateSchema", () => {
   });
 
   it("carries a real snapshot through, on the board shape too", () => {
-    const snap = { ...EMPTY_DIAGNOSTICS, answered: ["cheap"], rollup: { fatal: 1, warning: 2, info: 0, pending: 0 } };
+    const snap = { ...EMPTY_DIAGNOSTICS, answered: ["cheap"], lastError: "boom" };
     const g = GlobalStateSchema.safeParse({ unassigned: [], envs: {}, attention: {}, diagnostics: snap });
-    expect(g.success && g.data.diagnostics.rollup.warning).toBe(2);
+    expect(g.success && g.data.diagnostics.lastError).toBe("boom");
     expect(BoardStateSchema.shape.diagnostics).toBeDefined();
   });
 
@@ -108,7 +108,7 @@ describe("the board response — the only one the client fetches", () => {
     const body: unknown = await res.json();
     const parsed = BoardStateSchema.safeParse(body);
     expect(parsed.success).toBe(true);
-    expect(parsed.success && parsed.data.diagnostics.rollup.fatal).toBe(1);
+    expect(parsed.success && parsed.data.diagnostics.checks.some((c) => c.state === "problem")).toBe(true);
     expect(parsed.success && parsed.data.diagnostics.answered).toEqual(["cheap"]);
   });
 
