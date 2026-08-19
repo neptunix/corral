@@ -5,9 +5,9 @@
 corral's health panel carries an "Update available" plate wired to the diagnostics snapshot, and
 nothing filled it: an operator running a months-old checkout had no way to learn that from corral.
 
-Filling it means talking to a third party. corral already makes outbound connections — `ssh` to the
-remote environments named in the operator's own configuration, and the README's security model has
-always said so. What it has never done is reach a host the operator did not name.
+Filling it means talking to a third party. corral already makes outbound connections — `ssh` to
+the remote environments named in the operator's own configuration, and the README's security model
+has always said so. What it has never done is reach a host the operator did not name.
 
 ## Decision
 
@@ -23,8 +23,8 @@ The terms of that request are the operator-facing promise, and the README states
 - **Owner and repository come from `package.json`**, not a constant, so a fork reports its own
   releases. A field naming a non-GitHub host means no request at all.
 - **Every failure is `n/a`, never red**, and names itself in the row.
-- **An available update is a recommendation, not an alarm** — it lights the rail's muted dot, never
-  the problem count.
+- **An available update is a recommendation, not an alarm** — it lights the rail's muted dot,
+  never the problem count.
 
 ## Rationale
 
