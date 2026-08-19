@@ -1,5 +1,5 @@
 import type { Snapshot } from "@shared/schema";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 import type { HerdrEnv } from "../environments.ts";
 import { createNodeDeps } from "../server/diagnostics/deps.ts";
@@ -7,7 +7,9 @@ import { buildManifest } from "../server/diagnostics/remote/manifest.ts";
 import type { ProbeManifest } from "../server/diagnostics/remote/manifest.ts";
 import { buildRoundT } from "../server/diagnostics/remote/script.ts";
 import type { RemoteEnv, ToolRequest } from "../server/diagnostics/remote/script.ts";
+import type { CacheEntry } from "../server/diagnostics/update/cache.ts";
 import type { UpdateCheckIo } from "../server/diagnostics/update/check.ts";
+import type { FetchFn } from "../server/diagnostics/update/github.ts";
 import type { DiagnosticsStore } from "../server/diagnostics-store.ts";
 import { createDiagnosticsStore } from "../server/diagnostics-store.ts";
 import { createDiagnosticsSweep, type SweepOpts } from "../server/diagnostics-sweep.ts";
@@ -505,6 +507,23 @@ describe("the network class", () => {
     await createDiagnosticsSweep(opts({ store, updateIo: io })).tick();
     expect(store.snapshot().self).toEqual({ version: "0.6.8", latest: null, releaseUrl: null });
     expect(store.snapshot().checks.find((c) => c.id === "update-check")?.state).toBe("n/a");
+  });
+
+  it("a Recheck does not bypass the cache — the refresh route is unauthenticated", async () => {
+    const url = "https://github.com/neptunix/corral/releases/tag/v0.7.0";
+    let held: CacheEntry | null = null;
+    const fetchFn = vi.fn<FetchFn>(
+      () => Promise.resolve(new Response(JSON.stringify({ tag_name: "v0.7.0", html_url: url }))));
+    const sweep = createDiagnosticsSweep(opts({
+      updateIo: {
+        ...releaseIo(url), fetch: fetchFn,
+        cache: { read: () => held, write: (_slug, e) => { held = e; }, degraded: () => null },
+      },
+    }));
+    await sweep.tick();
+    await sweep.refresh();
+    await sweep.refresh();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
   it("a failing update check does not take the sweep, or any other class, down", async () => {

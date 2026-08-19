@@ -132,6 +132,23 @@ describe("SelfInfo guards degrade, never reject", () => {
   });
 });
 
+describe("the rollup and latestCheckedAt deletions", () => {
+  // Scoped promise, and only this one: the releaseUrl and latest guards above ARE deliberate new
+  // rejections. What the deletions themselves must not do is reject a frame from a build that still
+  // sends the old fields — z.object strips what it does not declare.
+  it("still parses a frame carrying the deleted fields", () => {
+    const parsed = DiagnosticsSnapshotSchema.safeParse({
+      ...EMPTY_DIAGNOSTICS,
+      rollup: { fatal: 1, warning: 2, info: 0, pending: 0 },
+      self: { version: "0.6.8", latest: null, releaseUrl: null, latestCheckedAt: 9 },
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.self).toEqual({
+      version: "0.6.8", latest: null, releaseUrl: null,
+    });
+  });
+});
+
 describe("isReleaseUrl", () => {
   it("accepts https github.com only", () => {
     expect(isReleaseUrl("https://github.com/o/r/releases/tag/v1")).toBe(true);
