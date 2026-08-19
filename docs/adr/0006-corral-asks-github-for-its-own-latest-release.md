@@ -13,8 +13,13 @@ always said so. What it has never done is reach a host the operator did not name
 ## Decision
 
 corral asks `api.github.com` for the latest release of the repository named in its own
-`package.json`, at most once every six hours, behind an on-disk cache, and reports the answer as one
-diagnostics row in a `network` class. `UPDATE_CHECK_ENABLED=false` stops it entirely.
+`package.json`, behind an on-disk cache, and reports the answer as one diagnostics row in a
+`network` class. `UPDATE_CHECK_ENABLED=false` stops it entirely.
+
+The cache holds an answer for six hours and a failure for fifteen minutes, so a repository GitHub
+answers costs four requests a day and one it cannot answer for — a fork with no releases yet, whose
+`releases/latest` is a 404 — costs about a hundred. Both numbers are the operator-facing promise,
+and the README states both.
 
 Specifically:
 
@@ -46,7 +51,7 @@ Specifically:
 
 **Why on by default.** A diagnostics panel that reports what is broken today but never that the
 operator is running code with a fixed bug in it answers half the question it exists for. The cost is
-one request every six hours to a host that already serves this repository.
+a handful of requests a day to a host that already serves this repository.
 
 **Why the strict validation lives at the producer, not in the schema.** The schema cannot be the
 control here, for three independent reasons. The response that seeds the very first render of a

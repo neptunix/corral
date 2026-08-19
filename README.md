@@ -368,8 +368,8 @@ Install the theme only **after** upgrading to ≥ v0.3.2 — the theme-sync-on-m
 there, so installing it against an older build means testing the old behaviour.
 
 corral watches for this itself. The health panel's `update-check` row asks GitHub for this
-repository's latest release, at most once every six hours behind a cache, and shows "Update
-available" when there is one — a recommendation, so it lights the rail's muted dot rather than the
+repository's latest release — once every six hours after an answer, once every fifteen minutes after
+a failure — and shows "Update available" when there is one — a recommendation, so it lights the rail's muted dot rather than the
 problem count. Every way the check can fail to answer — GitHub unreachable, rate-limited, or the
 check switched off — reads `n/a` and says which in the row's own title. Turn it off with
 `UPDATE_CHECK_ENABLED=false`; [`docs/adr/0006`](docs/adr/0006-corral-asks-github-for-its-own-latest-release.md)
@@ -641,9 +641,11 @@ The dirs you install into must match each environment's `claudeConfigDirs` in
 - **Environments are trusted startup config** — never writable through the API.
 - **Outbound traffic is two things, both nameable** — `ssh` to the remote environments you
   configured (`REMOTE_PROBE_ENABLED`), and one request to `api.github.com` asking whether this
-  repository has a newer release (`UPDATE_CHECK_ENABLED`). The update check runs at most once
-  every six hours behind a cache, carries no body, no query and nothing about your fleet, and
-  never follows a redirect; GitHub sees the request and your IP, as it would for a `git fetch`.
+  repository has a newer release (`UPDATE_CHECK_ENABLED`). It carries no body, no query and nothing
+  about your fleet, and never follows a redirect; GitHub sees the request and your IP, as it would
+  for a `git fetch`. Behind a cache it runs once every six hours after an answer and once every
+  fifteen minutes after a failure — so a repository GitHub cannot answer for at all, such as a fork
+  with no releases yet, costs about a hundred requests a day rather than four.
   Set either variable to `false` to stop that half. See [`docs/adr/0006`](docs/adr/0006-corral-asks-github-for-its-own-latest-release.md).
 
 ## Configuration (env vars)
