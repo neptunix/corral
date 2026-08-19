@@ -37,6 +37,34 @@ describe("parseRepoSlug", () => {
     expect(parseRepoSlug("https://github.com/../corral")).toBe(null);
     expect(parseRepoSlug("not a url at all")).toBe(null);
   });
+
+  /**
+   * The URL case above does NOT cover this: `new URL` normalizes dot segments away, so
+   * `https://github.com/../corral` is already `/corral` by the time the split runs and is refused
+   * for having one segment. The shorthand branch does no such normalizing, so the explicit `.`/`..`
+   * rejection is the only thing standing between a `repository` field and a request path that
+   * climbs out of `/repos/`.
+   */
+  it("refuses a dot segment through the shorthand branch, which does not normalize", () => {
+    expect(parseRepoSlug("../corral")).toBe(null);
+    expect(parseRepoSlug("./corral")).toBe(null);
+    expect(parseRepoSlug("github:../corral")).toBe(null);
+    expect(parseRepoSlug("corral/..")).toBe(null);
+  });
+
+  it("reads the scp remote form a fork is most likely to paste", () => {
+    expect(parseRepoSlug("git@github.com:neptunix/corral.git"))
+      .toEqual({ owner: "neptunix", repo: "corral" });
+    expect(parseRepoSlug("github.com:neptunix/corral"))
+      .toEqual({ owner: "neptunix", repo: "corral" });
+  });
+
+  it("refuses an scp form whose host only looks like github", () => {
+    expect(parseRepoSlug("git@evilgithub.com:neptunix/corral.git")).toBe(null);
+    expect(parseRepoSlug("git@github.com.evil.example:neptunix/corral.git")).toBe(null);
+    expect(parseRepoSlug("git@gitlab.com:neptunix/corral.git")).toBe(null);
+    expect(parseRepoSlug("git@github.com:../corral.git")).toBe(null);
+  });
 });
 
 describe("readRepoSlug", () => {

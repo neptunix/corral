@@ -45,6 +45,10 @@ export function parseRepoSlug(field: string): RepoSlug | null {
       return null;
     }
   }
+  // `git@github.com:owner/repo.git` — what `git clone git@…` leaves in a remote, and what a fork is
+  // most likely to paste into `repository`. It carries no `://`, so the URL branch never sees it.
+  const scp = /^(?:[^@\s]+@)?github\.com:(.+)$/.exec(raw);
+  if (scp !== null) return split(`/${scp[1] ?? ""}`);
   // The bare shorthand means GitHub; any other `host:` prefix (`gitlab:o/r`) must not.
   const match = /^(?:github:)?([^:/\s]+\/[^:\s]+)$/.exec(raw);
   return match === null ? null : split(`/${match[1] ?? ""}`);
