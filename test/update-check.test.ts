@@ -7,6 +7,8 @@ import type { FetchFn } from "../server/diagnostics/update/github.ts";
 
 const SLUG = { owner: "neptunix", repo: "corral" };
 const URL_OK = "https://github.com/neptunix/corral/releases/tag/v0.7.0";
+/** What the producer COMPOSES — the releases index anchored at the tag — never what GitHub sent. */
+const INDEX_URL = "https://github.com/neptunix/corral/releases#release-v0.7.0";
 
 const memoryCache = (seed: CacheEntry | null = null, degraded: string | null = null): UpdateCache => {
   let held = seed;
@@ -37,7 +39,7 @@ describe("updateCheck — the happy paths", () => {
     expect(r.check.startupOkLine).toBe(false);
     expect(r.check.haltsStartup).toBe(false);
     expect(r.check.title).toContain("0.7.0");
-    expect(r.self).toEqual({ latest: "0.7.0", releaseUrl: URL_OK });
+    expect(r.self).toEqual({ latest: "0.7.0", releaseUrl: INDEX_URL });
   });
 
   it("writes neither latest nor releaseUrl when the release is not strictly newer", async () => {
@@ -59,29 +61,27 @@ describe("updateCheck — the happy paths", () => {
 });
 
 describe("updateCheck — the release URL never reaches the store unvalidated", () => {
-  it("rejects a javascript: url at the producer", async () => {
-    const r = await run({ fetch: body("v0.7.0", "javascript:alert(1)") });
-    expect(r.check.state).toBe("n/a");
-    expect(r.self).toEqual({ latest: null, releaseUrl: null });
+  /**
+   * Stronger than the rejection this replaces: the producer does not read `html_url` at all, so a
+   * hostile one is not refused — it is never consulted. The link is composed from the slug and tag,
+   * both of which passed their own shape rules before getting here.
+   */
+  it("ignores whatever html_url GitHub sends, however hostile", async () => {
+    for (const hostile of [
+      "javascript:alert(1)",
+      "https://github.com/attacker/corral/releases/tag/v0.7.0",
+      "https://evil.example/neptunix/corral/r",
+      "http://github.com/neptunix/corral/r",
+    ]) {
+      const r = await run({ fetch: body("v0.7.0", hostile) });
+      expect(r.check.state).toBe("problem");
+      expect(r.self.releaseUrl).toBe(INDEX_URL);
+    }
   });
 
-  it("rejects a github.com url under the WRONG owner or repo — host-only would admit a phishing repo", async () => {
-    const wrongOwner = await run({
-      fetch: body("v0.7.0", "https://github.com/attacker/corral/releases/tag/v0.7.0"),
-    });
-    expect(wrongOwner.check.state).toBe("n/a");
-    expect(wrongOwner.self.releaseUrl).toBe(null);
-    const wrongRepo = await run({
-      fetch: body("v0.7.0", "https://github.com/neptunix/corral-evil/releases/tag/v0.7.0"),
-    });
-    expect(wrongRepo.self.releaseUrl).toBe(null);
-  });
-
-  it("rejects a non-github host and a plaintext scheme", async () => {
-    expect((await run({ fetch: body("v0.7.0", "https://evil.example/neptunix/corral/r") })).self.releaseUrl)
-      .toBe(null);
-    expect((await run({ fetch: body("v0.7.0", "http://github.com/neptunix/corral/r") })).self.releaseUrl)
-      .toBe(null);
+  it("composes the link from the slug, so another repo's slug cannot borrow this one's", async () => {
+    const r = await run({ repoSlug: () => ({ owner: "someone", repo: "fork" }) });
+    expect(r.self.releaseUrl).toBe("https://github.com/someone/fork/releases#release-v0.7.0");
   });
 });
 
@@ -163,7 +163,7 @@ describe("updateCheck — every n/a reason is distinguishable in the TITLE", () 
 
 describe("updateCheck — the cache", () => {
   const hit: CacheEntry = {
-    at: 1000, ok: true, tag: "v0.7.0", url: URL_OK, reason: null, retryAfterMs: null,
+    at: 1000, ok: true, tag: "v0.7.0", reason: null, retryAfterMs: null,
   };
 
   it("answers from a fresh entry without asking GitHub, and dates the row when it last asked", async () => {
@@ -217,7 +217,7 @@ describe("updateCheck — the cache", () => {
    */
   it("clamps a backoff that arrived from the cache FILE, not from a live header", async () => {
     const stale: CacheEntry = {
-      at: 0, ok: false, tag: null, url: null,
+      at: 0, ok: false, tag: null,
       reason: "GitHub rate-limited the update check", retryAfterMs: 1e12,
     };
     const fetchFn = vi.fn<FetchFn>(body("v0.7.0", URL_OK));

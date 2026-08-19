@@ -1,5 +1,5 @@
 import type { Check, CheckState, SelfInfo } from "@shared/diagnostics-schema";
-import { checkKey, isReleaseUrl, isStableTag } from "@shared/diagnostics-schema";
+import { checkKey, isStableTag } from "@shared/diagnostics-schema";
 
 import type { CacheEntry, UpdateCache } from "./cache.ts";
 import type { FetchFn, ReleaseFetch } from "./github.ts";
@@ -55,13 +55,18 @@ const tail = (io: UpdateCheckIo): string => {
 const na = (at: number, title: string, io: UpdateCheckIo): UpdateCheckResult =>
   ({ check: make(at, "n/a", `${title}${tail(io)}`, ""), self: { latest: null, releaseUrl: null } });
 
-/** The repo-scoped half of the rule. Host-only would admit any attacker-controlled github.com repo. */
-function isOwnReleaseUrl(raw: string, slug: RepoSlug): boolean {
-  // No catch: `isReleaseUrl` returns true only after `new URL` succeeded on this exact string, and
-  // parsing the same string twice cannot differ.
-  if (!isReleaseUrl(raw)) return false;
-  return new URL(raw).pathname.toLowerCase()
-    .startsWith(`/${slug.owner.toLowerCase()}/${slug.repo.toLowerCase()}/`);
+/**
+ * The releases INDEX, anchored at this release. Not the single-release page: an operator several
+ * versions behind needs every release between their build and the latest one, and the index is the
+ * page that shows them all. `#release-<tag>` is GitHub's own anchor on that page, and the latest
+ * release is always its first entry, so the anchor always resolves.
+ *
+ * COMPOSED, never taken from the response. `html_url` is not read at all, so there is no
+ * attacker-influenced string to validate: `owner` and `repo` already passed repo-slug's
+ * `[A-Za-z0-9._-]+` rule and `tag` passed `isStableTag`, so every part of this URL is constrained.
+ */
+function releaseIndexUrl(slug: RepoSlug, tag: string): string {
+  return `https://github.com/${slug.owner}/${slug.repo}/releases#release-${tag}`;
 }
 
 function reasonFor(res: ReleaseFetch): string {
@@ -89,10 +94,10 @@ function reasonFor(res: ReleaseFetch): string {
 
 function toEntry(res: ReleaseFetch, at: number): CacheEntry {
   if (res.kind === "release") {
-    return { at, ok: true, tag: res.tag, url: res.url, reason: null, retryAfterMs: null };
+    return { at, ok: true, tag: res.tag, reason: null, retryAfterMs: null };
   }
   return {
-    at, ok: false, tag: null, url: null, reason: reasonFor(res),
+    at, ok: false, tag: null, reason: reasonFor(res),
     retryAfterMs: res.kind === "rate-limited" ? res.retryAfterMs : null,
   };
 }
@@ -118,9 +123,6 @@ function verdict(entry: CacheEntry, version: string, slug: RepoSlug, io: UpdateC
   if (tag === null || !isStableTag(tag)) {
     return na(at, "GitHub's latest release is not a plain version tag", io);
   }
-  if (entry.url === null || !isOwnReleaseUrl(entry.url, slug)) {
-    return na(at, "GitHub's release link did not point at this repository", io);
-  }
   const latest = tag.replace(/^v/, "");
   // `latest` is written ONLY when the release is strictly newer: the panel renders its update plate
   // on `latest !== null` with no comparison of its own, so writing it every time would announce an
@@ -134,7 +136,7 @@ function verdict(entry: CacheEntry, version: string, slug: RepoSlug, io: UpdateC
   return {
     check: make(at, "problem", `corral ${latest} is available — this build is ${version}${tail(io)}`,
       "Pull and reinstall to upgrade — see the README's Upgrading section."),
-    self: { latest, releaseUrl: entry.url },
+    self: { latest, releaseUrl: releaseIndexUrl(slug, tag) },
   };
 }
 

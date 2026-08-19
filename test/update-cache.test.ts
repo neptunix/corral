@@ -12,9 +12,7 @@ const SLUG = { owner: "neptunix", repo: "corral" };
 const OTHER = { owner: "someone-else", repo: "corral" };
 
 const entry = (over: Partial<CacheEntry> = {}): CacheEntry => ({
-  at: 1000, ok: true, tag: "v0.7.0",
-  url: "https://github.com/neptunix/corral/releases/tag/v0.7.0",
-  reason: null, retryAfterMs: null, ...over,
+  at: 1000, ok: true, tag: "v0.7.0", reason: null, retryAfterMs: null, ...over,
 });
 
 const freshRoot = (): string => mkdtempSync(path.join(os.tmpdir(), "corral-cache-test-"));
@@ -72,13 +70,14 @@ describe("createUpdateCache", () => {
     expect(createUpdateCache(dir).read(SLUG)).toBe(null);
   });
 
-  it("coerces a tampered cached url to null on read — the same guard the wire uses", () => {
+  it("ignores a url left in an entry by an older build — the link is composed, not stored", () => {
     const dir = path.join(freshRoot(), "cache");
     createUpdateCache(dir).write(SLUG, entry());
     writeFileSync(onlyFile(dir), JSON.stringify({ ...entry(), url: "javascript:alert(1)" }), "utf8");
     const read = createUpdateCache(dir).read(SLUG);
-    expect(read).not.toBe(null);
-    expect(read?.url).toBe(null);
+    // The stale key is dropped rather than rejected, so an upgrade costs no extra request.
+    expect(read?.tag).toBe("v0.7.0");
+    expect(read).not.toHaveProperty("url");
   });
 
   it("refuses a symlinked cache directory, writing nothing through it", () => {

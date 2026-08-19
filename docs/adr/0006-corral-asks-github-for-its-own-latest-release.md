@@ -40,10 +40,13 @@ Specifically:
 - **An available update is a recommendation, not an alarm.** The row is `problem`/`info`, which the
   rail's badge digit — fatal and warning only — ignores, leaving the muted dot. A routine version
   bump must not light the same indicator as a broken install.
-- **The release URL is validated at the producer**, before it reaches the store: `https:`, host
-  exactly `github.com`, and a path under this repository's own owner and repository. The shared wire
-  schema carries a second, repository-independent guard that coerces a non-conforming value to
-  `null` instead of rejecting it, and the panel checks once more before it renders an `href`.
+- **The release link is composed, not accepted.** The response's `html_url` is never read. The link
+  is built from the slug and tag corral already validated — `https://github.com/<owner>/<repo>/releases#release-<tag>`
+  — so no string GitHub sends can reach an `href`. It points at the releases index rather than the
+  single-release page because an operator several versions behind needs every release between their
+  build and the latest one; `#release-<tag>` is GitHub's own anchor there. The shared wire schema
+  still coerces a non-conforming value to `null` instead of rejecting it, and the panel checks once
+  more before it renders an `href`.
 - **A tag that is not a plain version yields `n/a`**, decided before the version comparison rather
   than inside it.
 
@@ -53,19 +56,14 @@ Specifically:
 operator is running code with a fixed bug in it answers half the question it exists for. The cost is
 a handful of requests a day to a host that already serves this repository.
 
-**Why the strict validation lives at the producer, not in the schema.** The schema cannot be the
-control here, for three independent reasons. The response that seeds the very first render of a
-board is not schema-parsed at all, and that seed is what renders the link. Where the schema does
-parse, a rejection discards the entire frame — sessions, environments, attention and the board —
-rather than the one bad field, because the diagnostics snapshot is nested inside the frame schema.
-And the shared schema ships in the browser bundle, where it cannot read `package.json` and therefore
-cannot express the owner/repository rule at all. Validating at the producer means the store never
-holds a value nothing checked, which covers every reader including the unparsed one.
-
-**Why the path prefix and not just the host.** A host-only rule admits any attacker-controlled
-repository on github.com. React escapes markup, so the exposure is a plausible-looking link rather
-than script execution — but this origin has unauthenticated access to corral's whole API, and a link
-is enough to be worth closing.
+**Why the link is composed rather than validated.** Validating a URL from the response was the
+earlier design, and composing one is strictly better: there is no untrusted string left to get the
+rules wrong about. It also removes the reason the check had to live at the producer in the first
+place — the shared schema ships in the browser bundle, cannot read `package.json`, and so could
+never have expressed the owner/repository rule itself. The schema's guard stays, but only as a sink
+check: it coerces rather than rejects, because a rejection there discards the entire frame —
+sessions, environments, attention and the board — rather than the one bad field, and the response
+that seeds a board's first render is not schema-parsed at all.
 
 **Why the tag is filtered before the comparison.** The version comparison deliberately drops a
 prerelease suffix and coerces a non-numeric segment to zero, which is right for the `--version`
@@ -92,8 +90,9 @@ own doing.
   upstream's releases as if they were the operator's own.
 - **Off by default.** A check nobody enables reports nothing, and the operator most likely to be far
   behind is the one least likely to go looking for the switch.
-- **Validating the release URL only in the shared schema.** Covered above: it misses the first
-  render, it costs the whole frame where it does fire, and it cannot express the repository rule.
+- **Linking the single-release page (the response's `html_url`).** It shows one release, and the
+  operator who needs the link is behind by several. It also means trusting and then validating a
+  string from the response, where composing one needs neither.
 - **Following redirects.** The release endpoint has no legitimate cross-host redirect, and following
   one silently is how an intercepted endpoint reaches past the single host this check will talk to.
 - **A manual recheck that bypasses the cache.** The refresh route is unauthenticated and throttled

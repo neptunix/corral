@@ -5,7 +5,7 @@ import type { RepoSlug } from "./repo-slug.ts";
 export type FetchFn = (url: string, init: RequestInit) => Promise<Response>;
 
 export type ReleaseFetch =
-  | { readonly kind: "release"; readonly tag: string; readonly url: string }
+  | { readonly kind: "release"; readonly tag: string }
   | { readonly kind: "rate-limited"; readonly retryAfterMs: number | null }
   | { readonly kind: "redirect"; readonly status: number }
   | { readonly kind: "status"; readonly status: number }
@@ -24,8 +24,9 @@ export const REQUEST_TIMEOUT_MS = 8_000;
 
 const USER_AGENT = "corral-self-diagnostics";
 
-// Only the two fields actually used. Anything else GitHub sends is ignored rather than trusted.
-const ReleaseSchema = z.object({ tag_name: z.string(), html_url: z.string() });
+// The ONLY field used. `html_url` is deliberately not read: the link corral renders is composed
+// from its own validated slug and tag, so no string GitHub sends ever reaches an `href`.
+const ReleaseSchema = z.object({ tag_name: z.string() });
 
 /**
  * Delta-seconds only — the HTTP-date form is ignored — and clamped. Every other external input here
@@ -103,7 +104,7 @@ export async function fetchLatestRelease(
     }
     const parsed = ReleaseSchema.safeParse(json);
     if (!parsed.success) return { kind: "malformed" };
-    return { kind: "release", tag: parsed.data.tag_name, url: parsed.data.html_url };
+    return { kind: "release", tag: parsed.data.tag_name };
   } catch (err) {
     if (controller.signal.aborted) return { kind: "timeout" };
     return { kind: "unreachable", message: err instanceof Error ? err.message : String(err) };

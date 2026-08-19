@@ -369,7 +369,8 @@ there, so installing it against an older build means testing the old behaviour.
 
 corral watches for this itself. The health panel's `update-check` row asks GitHub for this
 repository's latest release — once every six hours after an answer, once every fifteen minutes after
-a failure — and shows "Update available" when there is one — a recommendation, so it lights the rail's muted dot rather than the
+a failure — and shows "Update available" when there is one, linking the releases page so you can read
+everything published since your build — a recommendation, so it lights the rail's muted dot rather than the
 problem count. Every way the check can fail to answer — GitHub unreachable, rate-limited, or the
 check switched off — reads `n/a` and says which in the row's own title. Turn it off with
 `UPDATE_CHECK_ENABLED=false`; [`docs/adr/0006`](docs/adr/0006-corral-asks-github-for-its-own-latest-release.md)

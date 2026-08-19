@@ -1,4 +1,3 @@
-import { ReleaseUrlSchema } from "@shared/diagnostics-schema";
 import { createHash, randomBytes } from "node:crypto";
 import { closeSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
 import os from "node:os";
@@ -19,8 +18,6 @@ export const CacheEntrySchema = z.object({
   at: z.number(),
   ok: z.boolean(),
   tag: z.string().nullable(),
-  /** The same degrading guard the wire uses — a tampered file costs the link, not the read. */
-  url: ReleaseUrlSchema,
   reason: z.string().nullable(),
   retryAfterMs: z.number().nullable(),
 });

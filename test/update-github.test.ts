@@ -6,6 +6,7 @@ import { MAX_BODY_BYTES, fetchLatestRelease, parseRetryAfter } from "../server/d
 const SLUG = { owner: "neptunix", repo: "corral" };
 const LIMITS = { retryMinMs: 900_000, retryMaxMs: 21_600_000, timeoutMs: 8_000 };
 const RELEASE = { tag_name: "v0.7.0", html_url: "https://github.com/neptunix/corral/releases/tag/v0.7.0" };
+// `html_url` stays in the fixture on purpose: GitHub still sends it, and the parse must ignore it.
 
 const respond = (body: string, init?: ResponseInit): FetchFn => () =>
   Promise.resolve(new Response(body, init));
@@ -30,7 +31,7 @@ describe("fetchLatestRelease", () => {
   it("asks the releases/latest endpoint with a User-Agent and no automatic redirect", async () => {
     const fetchFn = vi.fn<FetchFn>(() => Promise.resolve(new Response(JSON.stringify(RELEASE))));
     const res = await fetchLatestRelease(fetchFn, SLUG, LIMITS);
-    expect(res).toEqual({ kind: "release", tag: "v0.7.0", url: RELEASE.html_url });
+    expect(res).toEqual({ kind: "release", tag: "v0.7.0" });
     const call = fetchFn.mock.calls[0];
     expect(call?.[0]).toBe("https://api.github.com/repos/neptunix/corral/releases/latest");
     expect(call?.[1].redirect).toBe("manual");

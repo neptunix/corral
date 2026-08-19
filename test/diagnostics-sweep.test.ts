@@ -494,16 +494,24 @@ describe("the network class", () => {
     expect(row?.title).toContain("UPDATE_CHECK_ENABLED");
   });
 
-  it("patches self from the producer, so the store holds only what the producer validated", async () => {
+  it("patches self from the producer, so the store holds only what the producer composed", async () => {
     const store = createDiagnosticsStore({ selfVersion: "0.6.8" });
-    const url = "https://github.com/neptunix/corral/releases/tag/v0.7.0";
-    await createDiagnosticsSweep(opts({ store, updateIo: releaseIo(url) })).tick();
-    expect(store.snapshot().self).toEqual({ version: "0.6.8", latest: "0.7.0", releaseUrl: url });
+    await createDiagnosticsSweep(opts({
+      store, updateIo: releaseIo("https://github.com/attacker/corral/releases/tag/v0.7.0"),
+    })).tick();
+    // The hostile html_url above is not consulted at all — the link is built from the slug and tag.
+    expect(store.snapshot().self).toEqual({
+      version: "0.6.8", latest: "0.7.0",
+      releaseUrl: "https://github.com/neptunix/corral/releases#release-v0.7.0",
+    });
   });
 
-  it("leaves self null when the producer refuses the release link", async () => {
+  it("leaves self null when the tag is not a plain version", async () => {
     const store = createDiagnosticsStore({ selfVersion: "0.6.8" });
-    const io = releaseIo("https://github.com/attacker/corral/releases/tag/v0.7.0");
+    const io: UpdateCheckIo = {
+      ...releaseIo("https://github.com/neptunix/corral/releases/tag/v0.7.0"),
+      fetch: () => Promise.resolve(new Response(JSON.stringify({ tag_name: "nightly" }))),
+    };
     await createDiagnosticsSweep(opts({ store, updateIo: io })).tick();
     expect(store.snapshot().self).toEqual({ version: "0.6.8", latest: null, releaseUrl: null });
     expect(store.snapshot().checks.find((c) => c.id === "update-check")?.state).toBe("n/a");
