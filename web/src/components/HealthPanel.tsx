@@ -1,5 +1,5 @@
 import type { Check, DiagnosticsSnapshot } from "@shared/diagnostics-schema";
-import { computeRollup } from "@shared/diagnostics-schema";
+import { computeRollup, isReleaseUrl } from "@shared/diagnostics-schema";
 import { useState, type JSX } from "react";
 
 import { api } from "../lib/api";
@@ -136,7 +136,10 @@ export function HealthPanel({ snapshot, streamDown, labelFor, onClose, onSnapsho
         {latest !== null && (
           <p className="text-xs text-muted-foreground">
             Update available:{" "}
-            {releaseUrl === null
+            {/* Checked again at the sink, though the producer already refused anything else: this
+                origin has unauthenticated access to the whole API, session spawn and terminal
+                attach included, and the REST seed this can render from is never Zod-parsed. */}
+            {releaseUrl === null || !isReleaseUrl(releaseUrl)
               ? <span className="text-foreground">{latest}</span>
               : <a className="text-primary hover:underline" href={releaseUrl} target="_blank"
                    rel="noopener noreferrer">{latest}</a>}

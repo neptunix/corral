@@ -165,6 +165,10 @@ describe("badgeCount", () => {
     expect(badgeCount(computeRollup(rows))).toBe(2);
   });
 
+  it("counts an info-only problem as zero — an available update lights the dot, never the digit", () => {
+    expect(badgeCount(computeRollup([check({ state: "problem", severity: "info" })]))).toBe(0);
+  });
+
   it("includes a synthetic fatal the wire rollup cannot see", () => {
     expect(badgeCount(computeRollup(renderedChecks(emptyDiagnostics(), true)))).toBe(1);
   });

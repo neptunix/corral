@@ -129,10 +129,23 @@ describe("HealthPanel header", () => {
     expect(screen.queryByText(/Update available/)).toBe(null);
   });
 
-  it("shows the plate as a link when stage 3 supplies a release url", () => {
+  it("shows the plate as a link when the update check supplies a release url", () => {
+    const url = "https://github.com/neptunix/corral/releases/tag/v0.7.0";
     render(panel(snap({ checks: [check()], answered: ["cheap"],
-      self: { version: "0.6.8", latest: "0.7.0", releaseUrl: "https://example.invalid/r" } })));
-    expect(screen.getByRole("link", { name: /0\.7\.0/ }).getAttribute("href")).toBe("https://example.invalid/r");
+      self: { version: "0.6.8", latest: "0.7.0", releaseUrl: url } })));
+    expect(screen.getByRole("link", { name: /0\.7\.0/ }).getAttribute("href")).toBe(url);
+  });
+
+  // Defense in depth: the producer already refuses anything else, but the REST seed this can render
+  // from is never Zod-parsed, and this origin reaches session spawn and terminal attach.
+  it("renders plain text, never an anchor, for a url that is not an https github.com link", () => {
+    for (const releaseUrl of ["javascript:alert(1)", "https://evil.example/r", "http://github.com/o/r"]) {
+      const { unmount } = render(panel(snap({ checks: [check()], answered: ["cheap"],
+        self: { version: "0.6.8", latest: "0.7.0", releaseUrl } })));
+      expect(screen.getByText(/0\.7\.0/)).toBeTruthy();
+      expect(screen.queryByRole("link", { name: /0\.7\.0/ })).toBe(null);
+      unmount();
+    }
   });
 
   // releaseUrl is nullable independently of latest — never render an anchor with a null href.
