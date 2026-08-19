@@ -301,11 +301,18 @@ export function createDiagnosticsSweep(opts: SweepOpts): DiagnosticsSweep {
         });
         versionsAt = now;
       }
-      const remoteRows = await remoteLeg(snapshot, now, manual);
+      // Together, not one after the other: the two legs share no I/O, and `publish` below is the
+      // single write for every class, so a serial update check would put GitHub's 8 s deadline on
+      // top of the remote budget before ANY row reached the panel — worst on the first tick after a
+      // launch, which is the moment this feature exists for.
+      //
       // The update check rides the tick behind its own cache, and a Recheck deliberately does not
       // bypass it: /api/diagnostics/refresh is unauthenticated and floored at 2 s, which is 30
       // requests a minute against a 60/hour budget.
-      const update = await updateCheck(opts.updateIo, opts.deps.now);
+      const [remoteRows, update] = await Promise.all([
+        remoteLeg(snapshot, now, manual),
+        updateCheck(opts.updateIo, opts.deps.now),
+      ]);
       opts.store.patchSelf(update.self);
       publish(opts.store, [...cheap, ...versionRows, ...remoteRows, update.check],
         unreachableIds(opts.envs, snapshot), now);
