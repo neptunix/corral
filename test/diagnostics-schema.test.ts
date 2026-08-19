@@ -130,6 +130,23 @@ describe("SelfInfo guards degrade, never reject", () => {
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data.self.latest).toBe(null);
   });
+
+  /**
+   * The guards have to degrade on the TYPE too, not only on the content. `z.string()` would reject a
+   * number before the transform ever ran, and a rejection here discards the whole frame — sessions,
+   * envs, attention and the board — because this snapshot is nested inside `GlobalStateSchema`.
+   */
+  it("coerces a wrong-typed or absent latest to null instead of failing the whole frame", () => {
+    for (const self of [
+      { version: "0.6.8", latest: 7, releaseUrl: null },
+      { version: "0.6.8", latest: "0.7.0", releaseUrl: { href: "https://github.com/o/r/x" } },
+      { version: "0.6.8" },
+    ]) {
+      const parsed = DiagnosticsSnapshotSchema.safeParse(frame(self));
+      expect(parsed.success).toBe(true);
+      expect(parsed.success && parsed.data.self.releaseUrl).toBe(null);
+    }
+  });
 });
 
 describe("the rollup and latestCheckedAt deletions", () => {

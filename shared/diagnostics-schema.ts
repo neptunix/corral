@@ -65,17 +65,19 @@ export function isStableTag(value: string): boolean {
 }
 
 /**
- * DEGRADING on purpose: a non-conforming value becomes `null`, it never fails the parse. Rejecting
- * would discard the WHOLE frame — sessions, envs, attention and the board — because this schema is
- * nested inside `GlobalStateSchema` (see `web/src/useEventSource.ts`). A hostile value must cost the
- * link, not the dashboard.
+ * DEGRADING on purpose: ANYTHING that is not a conforming string — a hostile url, the wrong type, an
+ * absent field — becomes `null`, and the parse never fails. Rejecting would discard the WHOLE frame
+ * — sessions, envs, attention and the board — because this schema is nested inside
+ * `GlobalStateSchema` (see `web/src/useEventSource.ts`). A bad value must cost the link, not the
+ * dashboard. `z.unknown()` and not `z.string().nullable()`, because the latter rejects a non-string
+ * BEFORE the transform runs, which is the one case the degradation exists for.
  */
-export const ReleaseUrlSchema = z.string().nullable()
-  .transform((v) => (v !== null && isReleaseUrl(v) ? v : null));
+export const ReleaseUrlSchema = z.unknown()
+  .transform((v) => (typeof v === "string" && isReleaseUrl(v) ? v : null));
 
 /** Same contract as `ReleaseUrlSchema`: the panel renders `latest` as the anchor's own text. */
-export const LatestTagSchema = z.string().nullable()
-  .transform((v) => (v !== null && isStableTag(v) ? v : null));
+export const LatestTagSchema = z.unknown()
+  .transform((v) => (typeof v === "string" && isStableTag(v) ? v : null));
 
 export const SelfInfoSchema = z.object({
   version: z.string().nullable(),
