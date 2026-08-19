@@ -1,5 +1,5 @@
 import type { Check, DiagnosticsSnapshot } from "@shared/diagnostics-schema";
-import { computeRollup, isReleaseUrl } from "@shared/diagnostics-schema";
+import { computeRollup, isReleaseUrl, isStableTag } from "@shared/diagnostics-schema";
 import { useState, type JSX } from "react";
 
 import { api } from "../lib/api";
@@ -133,12 +133,14 @@ export function HealthPanel({ snapshot, streamDown, labelFor, onClose, onSnapsho
           </button>
         </div>
         {error !== null && <p className="text-xs text-red-500">{error}</p>}
-        {latest !== null && (
+        {latest !== null && isStableTag(latest) && (
           <p className="text-xs text-muted-foreground">
             Update available:{" "}
-            {/* Checked again at the sink, though the producer already refused anything else: this
-                origin has unauthenticated access to the whole API, session spawn and terminal
-                attach included, and the REST seed this can render from is never Zod-parsed. */}
+            {/* Both fields are checked again at the sink, though the producer already refused
+                anything else: this origin has unauthenticated access to the whole API, session
+                spawn and terminal attach included, and the REST response that seeds a board's
+                first render is never Zod-parsed. `latest` is the anchor's own text, so it gets
+                the same treatment as the href. */}
             {releaseUrl === null || !isReleaseUrl(releaseUrl)
               ? <span className="text-foreground">{latest}</span>
               : <a className="text-primary hover:underline" href={releaseUrl} target="_blank"

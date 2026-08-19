@@ -136,6 +136,14 @@ describe("HealthPanel header", () => {
     expect(screen.getByRole("link", { name: /0\.7\.0/ }).getAttribute("href")).toBe(url);
   });
 
+  it("suppresses the whole plate when latest is not a plain version — it is the anchor's own text", () => {
+    render(panel(snap({ checks: [check()], answered: ["cheap"],
+      self: { version: "0.6.8", latest: "999.0.0 — install from evil.example",
+        releaseUrl: "https://github.com/neptunix/corral/releases/tag/v1" } })));
+    expect(screen.queryByText(/Update available/)).toBe(null);
+    expect(screen.queryByText(/evil\.example/)).toBe(null);
+  });
+
   // Defense in depth: the producer already refuses anything else, but the REST seed this can render
   // from is never Zod-parsed, and this origin reaches session spawn and terminal attach.
   it("renders plain text, never an anchor, for a url that is not an https github.com link", () => {
