@@ -5,12 +5,15 @@ import path from "node:path";
 import {
   BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, CORRAL_HOME, DIAGNOSTICS_INTERVAL_MS,
   DIAGNOSTICS_VERSION_TTL_MS, FLEET_RESTORE_STAGGER_MS, HOST, LIST_TIMEOUT, PORT,
-  REMOTE_PROBE_ENABLED, UPLOAD_ROOT, WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED, ZOMBIE_REAP_GRACE_MS,
+  REMOTE_PROBE_ENABLED, UPDATE_CHECK_ENABLED, UPLOAD_ROOT, WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED,
+  ZOMBIE_REAP_GRACE_MS,
 } from "../config.ts";
 import { createApi } from "./api.ts";
 import { createAttentionStore } from "./attention-store.ts";
 import { sweepBriefRoot } from "./brief.ts";
 import { createNodeDeps } from "./diagnostics/deps.ts";
+import { createUpdateCache } from "./diagnostics/update/cache.ts";
+import { readRepoSlug } from "./diagnostics/update/repo-slug.ts";
 import { createDiagnosticsStore } from "./diagnostics-store.ts";
 import { createDiagnosticsSweep } from "./diagnostics-sweep.ts";
 import { runLocalTool } from "./exec-tool.ts";
@@ -62,7 +65,8 @@ void (async () => {
   poller.start();
   // Self-diagnostics: every check corral runs about its own install, on one contained tick. After
   // poller.start() because the sweep reads the poller's snapshot for reachability and session state.
-  const diagnostics = createDiagnosticsStore({ selfVersion: readSelfVersion() });
+  const selfVersion = readSelfVersion();
+  const diagnostics = createDiagnosticsStore({ selfVersion });
   const diagnosticsSweep = createDiagnosticsSweep({
     store: diagnostics, poller, envs: ENVS,
     deps: createNodeDeps({ repoRoot: path.join(import.meta.dirname, "..") }),
@@ -75,6 +79,15 @@ void (async () => {
     intervalMs: DIAGNOSTICS_INTERVAL_MS, versionTtlMs: DIAGNOSTICS_VERSION_TTL_MS,
     warn: (m) => { console.error(m); },
     probeExec: defaultExec, remoteProbeEnabled: REMOTE_PROBE_ENABLED,
+    // The cache is vetted once, here, rather than on every tick: a hostile or unusable directory is a
+    // permanent condition for this run, and re-deciding it 1440 times a day would only add noise.
+    updateIo: {
+      enabled: UPDATE_CHECK_ENABLED,
+      version: selfVersion,
+      repoSlug: () => readRepoSlug(),
+      fetch: (url, init) => fetch(url, init),
+      cache: createUpdateCache(),
+    },
   });
   if (DIAGNOSTICS_INTERVAL_MS > 0) diagnosticsSweep.start();
   // Backfill stored links' Claude sessionId once the poller sees it (spawned links start null) — the

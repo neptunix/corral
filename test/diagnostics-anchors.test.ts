@@ -48,6 +48,12 @@ describe("README anchors", () => {
     expect(anchors.has("0-prerequisite-check--without-jq-the-metrics-capture-silently-does-nothing")).toBe(false);
   });
 
+  // The whole file's `beforeAll` would fail if enumeration ever reached the network: the stub it
+  // passes the update check throws on any request.
+  it("registers update-check, so its README anchor is guarded — and enumerates without a request", () => {
+    expect(checks.map((c) => c.id)).toContain("update-check");
+  });
+
   it("gives every check a doc link", () => {
     const missing = checks.filter((c) => c.doc === null && c.id !== "env-unrunnable").map((c) => c.id);
     expect(missing).toEqual([]);

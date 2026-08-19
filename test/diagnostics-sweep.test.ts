@@ -7,6 +7,7 @@ import { buildManifest } from "../server/diagnostics/remote/manifest.ts";
 import type { ProbeManifest } from "../server/diagnostics/remote/manifest.ts";
 import { buildRoundT } from "../server/diagnostics/remote/script.ts";
 import type { RemoteEnv, ToolRequest } from "../server/diagnostics/remote/script.ts";
+import type { UpdateCheckIo } from "../server/diagnostics/update/check.ts";
 import type { DiagnosticsStore } from "../server/diagnostics-store.ts";
 import { createDiagnosticsStore } from "../server/diagnostics-store.ts";
 import { createDiagnosticsSweep, type SweepOpts } from "../server/diagnostics-sweep.ts";
@@ -94,6 +95,13 @@ function bodyCounter(): {
   };
 }
 
+/** No network, no disk: any request from a sweep test is a bug in the sweep, not a fixture gap. */
+const inertUpdateIo: UpdateCheckIo = {
+  enabled: false, version: "0.0.0", repoSlug: () => null,
+  fetch: () => { throw new Error("no request in tests"); },
+  cache: { read: () => null, write: () => undefined, degraded: () => null },
+};
+
 const opts = (over: Partial<SweepOpts>): SweepOpts => ({
   store: createDiagnosticsStore({ selfVersion: "0.0.0" }),
   poller: { getSnapshot: () => snapshot({ work: { reachable: true } }) },
@@ -104,22 +112,23 @@ const opts = (over: Partial<SweepOpts>): SweepOpts => ({
   run: () => Promise.resolve(null),
   intervalMs: 60_000, versionTtlMs: 600_000,
   probeExec: () => Promise.reject(new Error("no ssh in tests")), remoteProbeEnabled: true,
+  updateIo: inertUpdateIo,
   ...over,
 });
 
 describe("createDiagnosticsSweep", () => {
-  it("fills all three classes on the first tick", async () => {
+  it("fills every class on the first tick", async () => {
     const store = createDiagnosticsStore({ selfVersion: null });
     const sweep = createDiagnosticsSweep(opts({ store }));
     await sweep.tick();
-    expect(store.snapshot().answered.sort()).toEqual(["cheap", "remote", "versions"]);
+    expect(store.snapshot().answered.sort()).toEqual(["cheap", "network", "remote", "versions"]);
   });
 
   it("publishes the remote class unconditionally — an all-local fleet still answers it", async () => {
     const store = createDiagnosticsStore({ selfVersion: null });
     const sweep = createDiagnosticsSweep(opts({ store })); // envs: [local("work")]
     await sweep.tick();
-    expect(store.snapshot().answered.sort()).toEqual(["cheap", "remote", "versions"]);
+    expect(store.snapshot().answered.sort()).toEqual(["cheap", "network", "remote", "versions"]);
     expect(store.snapshot().checks.filter((c) => c.class === "remote")).toEqual([]);
   });
 
@@ -457,5 +466,54 @@ describe("createDiagnosticsSweep", () => {
     const themeKeys = rows.filter((c) => c.id === "theme-installed").map((c) => c.key);
     expect(themeKeys).toHaveLength(2); // a blanket first-wins dedupe would silently leave 1
     expect(new Set(themeKeys).size).toBe(1);
+  });
+});
+
+describe("the network class", () => {
+  const releaseIo = (url: string): UpdateCheckIo => ({
+    ...inertUpdateIo, enabled: true, version: "0.6.8",
+    repoSlug: () => ({ owner: "neptunix", repo: "corral" }),
+    fetch: () => Promise.resolve(new Response(JSON.stringify({ tag_name: "v0.7.0", html_url: url }))),
+  });
+
+  it("answers even with the update check off, in ONE put that never blanks a live row", async () => {
+    const puts: string[] = [];
+    const inner = createDiagnosticsStore({ selfVersion: "0.6.8" });
+    const store: DiagnosticsStore = {
+      put: (cls, checks) => { puts.push(cls); inner.put(cls, checks); },
+      patchSelf: (patch) => { inner.patchSelf(patch); },
+      setLastError: (message) => { inner.setLastError(message); },
+      snapshot: () => inner.snapshot(),
+    };
+    await createDiagnosticsSweep(opts({ store })).tick();
+    expect(puts.filter((c) => c === "network")).toHaveLength(1);
+    const row = inner.snapshot().checks.find((c) => c.id === "update-check");
+    expect(row?.state).toBe("n/a");
+    expect(row?.title).toContain("UPDATE_CHECK_ENABLED");
+  });
+
+  it("patches self from the producer, so the store holds only what the producer validated", async () => {
+    const store = createDiagnosticsStore({ selfVersion: "0.6.8" });
+    const url = "https://github.com/neptunix/corral/releases/tag/v0.7.0";
+    await createDiagnosticsSweep(opts({ store, updateIo: releaseIo(url) })).tick();
+    expect(store.snapshot().self).toEqual({ version: "0.6.8", latest: "0.7.0", releaseUrl: url });
+  });
+
+  it("leaves self null when the producer refuses the release link", async () => {
+    const store = createDiagnosticsStore({ selfVersion: "0.6.8" });
+    const io = releaseIo("https://github.com/attacker/corral/releases/tag/v0.7.0");
+    await createDiagnosticsSweep(opts({ store, updateIo: io })).tick();
+    expect(store.snapshot().self).toEqual({ version: "0.6.8", latest: null, releaseUrl: null });
+    expect(store.snapshot().checks.find((c) => c.id === "update-check")?.state).toBe("n/a");
+  });
+
+  it("a failing update check does not take the sweep, or any other class, down", async () => {
+    const store = createDiagnosticsStore({ selfVersion: "0.6.8" });
+    const io: UpdateCheckIo = {
+      ...inertUpdateIo, enabled: true, fetch: () => { throw new Error("boom"); },
+    };
+    await createDiagnosticsSweep(opts({ store, updateIo: io })).tick();
+    expect(store.snapshot().lastError).toBe(null);
+    expect(store.snapshot().answered.sort()).toEqual(["cheap", "network", "remote", "versions"]);
   });
 });
