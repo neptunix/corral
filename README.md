@@ -367,6 +367,14 @@ equivalent of a symlink for a remote config dir.
 Install the theme only **after** upgrading to ≥ v0.3.2 — the theme-sync-on-mount fix landed
 there, so installing it against an older build means testing the old behaviour.
 
+corral watches for this itself. The health panel's `update-check` row asks GitHub for this
+repository's latest release, at most once every six hours behind a cache, and shows "Update
+available" when there is one — a recommendation, so it lights the rail's muted dot rather than the
+problem count. Every way the check can fail to answer — GitHub unreachable, rate-limited, or the
+check switched off — reads `n/a` and says which in the row's own title. Turn it off with
+`UPDATE_CHECK_ENABLED=false`; [`docs/adr/0006`](docs/adr/0006-corral-asks-github-for-its-own-latest-release.md)
+records what the request does and does not carry.
+
 ## Environments
 
 Environments live in a JSON config file, **not** in source — everyone runs their own boxes.
@@ -631,6 +639,12 @@ The dirs you install into must match each environment's `claudeConfigDirs` in
 - **All herdr/SSH calls use `execFile` with argument arrays** — no shell string
   interpolation; remote commands quote user tokens with `shell-quote`.
 - **Environments are trusted startup config** — never writable through the API.
+- **Outbound traffic is two things, both nameable** — `ssh` to the remote environments you
+  configured (`REMOTE_PROBE_ENABLED`), and one request to `api.github.com` asking whether this
+  repository has a newer release (`UPDATE_CHECK_ENABLED`). The update check runs at most once
+  every six hours behind a cache, carries no body, no query and nothing about your fleet, and
+  never follows a redirect; GitHub sees the request and your IP, as it would for a `git fetch`.
+  Set either variable to `false` to stop that half. See [`docs/adr/0006`](docs/adr/0006-corral-asks-github-for-its-own-latest-release.md).
 
 ## Configuration (env vars)
 
@@ -657,7 +671,10 @@ Self-diagnostics sweep: `DIAGNOSTICS_INTERVAL_MS` (60000 — set to `0` to turn 
 off entirely; `POST /api/diagnostics/refresh` still runs one on demand) · `DIAGNOSTICS_VERSION_TTL_MS`
 (600000, floor 1000 — how long a herdr/Claude version probe is cached before the sweep re-runs it) ·
 `REMOTE_PROBE_ENABLED` (true — set to `false` to disable the outbound SSH probe of remote
-environments' install health; their remote rows then read `n/a` naming this switch).
+environments' install health; their remote rows then read `n/a` naming this switch) ·
+`UPDATE_CHECK_ENABLED` (true — set to `false` to stop corral asking GitHub whether a newer release
+exists; the `update-check` row then reads `n/a` naming this switch, and no outbound HTTP request is
+made at all).
 It also reads `$CORRAL_HOME/config.json` for `hooks.ctxThresholds` — see [Claude context-pressure
 hook](#claude-context-pressure-hook).
 

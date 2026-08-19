@@ -1,0 +1,28 @@
+name: release-version
+
+# `package.json`'s `version` is the only source of the version corral reports about itself, and the
+# update check compares it against this repository's newest release tag. A tag pushed without the
+# matching bump makes the health panel report a build nobody is running, and — once the update check
+# is wired — a permanent false "update available". A checklist line is not enough; this is the gate.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version-matches-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: package.json version must equal the tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag $GITHUB_REF_NAME implies version $tag, package.json says $pkg"
+            exit 1
+          fi
+          echo "package.json $pkg matches tag $GITHUB_REF_NAME"
