@@ -14,7 +14,7 @@ const run = (out: Readonly<Record<string, string | null>>) =>
 const HEALTHY = {
   "herdr --version": "herdr 0.7.5",
   "herdr integration status": "claude: current (v7) (/p)",
-  "claude --version": "2.1.226 (Claude Code)",
+  "claude --version": "2.1.232 (Claude Code)",
 };
 
 describe("parseIntegrationStatus", () => {
