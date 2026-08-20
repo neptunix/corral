@@ -13,11 +13,20 @@ export function isExecutableFile(p: string): boolean {
   }
 }
 
+/** The candidate list resolveOnPath walks — one definition, so round 2's keys cannot misalign. Empty PATH entries are skipped rather than treated as the cwd — resolution must not depend on where the server was started. */
+export function pathCandidates(bin: string, pathEnv: string): string[] {
+  const out: string[] = [];
+  for (const dir of pathEnv.split(path.delimiter)) {
+    if (dir === "") continue;
+    out.push(path.join(dir, bin));
+  }
+  return out;
+}
+
 /**
  * Resolve a bare command name against PATH: each entry is tried in order and the first executable
- * wins. Empty PATH entries are skipped rather than treated as the cwd — resolution must not depend on
- * where the server was started. `isExecutable` is injected so the walk is testable without a
- * filesystem (`isExecutableFile` above has its own filesystem-backed tests).
+ * wins. `isExecutable` is injected so the walk is testable without a filesystem (`isExecutableFile`
+ * above has its own filesystem-backed tests).
  *
  * There is no verbatim branch for a name containing a separator: the only names reaching here are the
  * literals `findMissingBinaries` produces, and neither contains one. Add it back alongside whatever
@@ -28,9 +37,7 @@ export function resolveOnPath(
   pathEnv: string,
   isExecutable: (p: string) => boolean,
 ): string | null {
-  for (const dir of pathEnv.split(path.delimiter)) {
-    if (dir === "") continue;
-    const candidate = path.join(dir, bin);
+  for (const candidate of pathCandidates(bin, pathEnv)) {
     if (isExecutable(candidate)) return candidate;
   }
   return null;
@@ -104,7 +111,7 @@ export function resolveCommandPath(command: string, home: string | undefined): s
   return token;
 }
 
-const MAX_READABLE_BYTES = 1_048_576;
+export const MAX_READABLE_BYTES = 1_048_576;
 
 /**
  * Shared guard for `readText`/`hashFile`: `statSync` first, require a REGULAR file under the size cap,

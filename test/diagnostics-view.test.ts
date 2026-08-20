@@ -130,9 +130,9 @@ describe("headerStatus", () => {
     expect(headerStatus(computeRollup([]), 1, 0)).toBe("ok");
   });
 
-  // THE REGRESSION GUARD. A remote env's jq row is {state:"pending", severity:"fatal"}. Ranking by
-  // raw severity paints an ordinary remote install red.
-  it("ignores a pending row's severity, so a remote install stays green", () => {
+  // THE REGRESSION GUARD. A row's severity can be set regardless of state — ranking by raw
+  // severity instead of the rollup would paint a merely-pending row's install red.
+  it("ignores a pending row's severity, so an unanswered check stays green", () => {
     const rows = [check({ state: "pending", severity: "fatal", checkedAt: 1 })];
     expect(headerStatus(computeRollup(rows), 1, rows.length)).toBe("ok");
   });

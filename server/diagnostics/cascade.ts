@@ -10,6 +10,8 @@ const ENV_DOC = { anchor: "environments", title: "Environments" };
  * merely SCOPES to the same env (reading settings.json, stat'ing a script, hashing a file) still
  * runs: suppressing those on the strength of an unrelated socket outage would hide a real install
  * problem behind it, which is the silent-degradation failure this feature exists to kill, inverted.
+ * `remote`-class checks are never suppressed here either (R16) — their own probed outcome is their
+ * truth, not a herdr-reachability inference.
  */
 export const NEEDS_HERDR: ReadonlySet<string> = new Set(["herdr-version", "herdr-claude-integration"]);
 
@@ -36,12 +38,12 @@ export function envReachableChecks(envs: Readonly<Record<string, EnvState>>, now
   return checks;
 }
 
-/** Whether `c` needs an unreachable env's herdr to run at all, per `NEEDS_HERDR` / `remote`-class. */
+/** Whether `c` needs an unreachable env's herdr to run at all, per `NEEDS_HERDR`. */
 function needsUnreachableHerdr(c: Check, unreachableEnvIds: ReadonlySet<string>): boolean {
   if (c.id === "env-reachable") return false;
   if (c.scope.kind === "global") return false;
   if (!unreachableEnvIds.has(c.scope.envId)) return false;
-  return NEEDS_HERDR.has(c.id) || c.class === "remote";
+  return NEEDS_HERDR.has(c.id);
 }
 
 /**

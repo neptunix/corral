@@ -55,17 +55,14 @@ const JQ_DETAIL =
   "without jq the metrics capture pipeline cannot parse Claude Code's hook JSON, so the " +
   "statusline never writes a status file and the context-pressure protocol has nothing to read.";
 
-/** `jq` resolvability for one LOCAL environment; a remote environment's jq lives on the far host. */
-function jqPresentCheck(deps: CheckDeps, env: HerdrEnv, now: number): Check {
+/** `jq` resolvability, deps-only; `envChecks` calls this for local envs, the remote adapter for remote ones. */
+export function jqPresentCheck(deps: CheckDeps, env: HerdrEnv, now: number): Check {
   const scope = { kind: "env" as const, envId: env.id };
   const base = {
     id: "jq-present", key: checkKey("jq-present", scope), scope,
     doc: { anchor: "quick-start", title: "Quick start" },
     class: "cheap" as const, checkedAt: now, startupOkLine: false, haltsStartup: false,
   };
-  if (env.kind === "remote") {
-    return { ...base, title: `jq: environment "${env.id}" is remote — checked by the far host`, state: "pending", severity: "fatal", detail: "" };
-  }
   const located = locateTool("jq", deps);
   if (located.path === null) {
     return {
@@ -83,8 +80,8 @@ function jqPresentCheck(deps: CheckDeps, env: HerdrEnv, now: number): Check {
   };
 }
 
-/** One `config-dir-exists` row per configured dir of a LOCAL environment; remote dirs are `pending`. */
-function configDirExistsChecks(deps: CheckDeps, env: HerdrEnv, now: number): Check[] {
+/** One `config-dir-exists` row per configured dir, deps-only; `envChecks` calls this for local envs, the remote adapter for remote ones. */
+export function configDirExistsChecks(deps: CheckDeps, env: HerdrEnv, now: number): Check[] {
   return env.claudeConfigDirs.map((dir) => {
     const scope = { kind: "configDir" as const, envId: env.id, dir };
     const base = {
@@ -92,9 +89,6 @@ function configDirExistsChecks(deps: CheckDeps, env: HerdrEnv, now: number): Che
       doc: { anchor: "environments", title: "Environments" },
       class: "cheap" as const, checkedAt: now, startupOkLine: false, haltsStartup: false,
     };
-    if (env.kind === "remote") {
-      return { ...base, title: `${dir}: on a remote host — not checked here`, state: "pending" as const, severity: "warning" as const, detail: "" };
-    }
     if (deps.isDir(dir)) {
       return { ...base, title: `${dir} exists`, state: "ok" as const, severity: "warning" as const, detail: "" };
     }
@@ -172,8 +166,10 @@ export function envChecks(
   const now = deps.now();
   const checks: Check[] = [...configDirsChecks(envs, now)];
   for (const env of envs) {
-    checks.push(jqPresentCheck(deps, env, now));
-    checks.push(...configDirExistsChecks(deps, env, now));
+    if (env.kind !== "remote") {
+      checks.push(jqPresentCheck(deps, env, now));
+      checks.push(...configDirExistsChecks(deps, env, now));
+    }
     checks.push(statusReadableCheck(env, sessions, now));
   }
   return checks;

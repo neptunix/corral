@@ -1,5 +1,4 @@
-import type { Check, CheckClass, CheckDoc, CheckSeverity } from "@shared/diagnostics-schema";
-import { checkKey } from "@shared/diagnostics-schema";
+import type { Check, CheckClass } from "@shared/diagnostics-schema";
 import type { Snapshot } from "@shared/schema";
 
 import type { HerdrEnv } from "../environments.ts";
@@ -10,11 +9,17 @@ import { resolveOnPath } from "./diagnostics/deps.ts";
 import { driftCheck, themeCheck } from "./diagnostics/drift.ts";
 import { envChecks, nodeVersionCheck } from "./diagnostics/env.ts";
 import { metricsChecks } from "./diagnostics/metrics.ts";
+import { composeRemoteRows, planRound2For } from "./diagnostics/remote/adapter.ts";
+import type { RemoteRowsOpts } from "./diagnostics/remote/adapter.ts";
+import { runProbe } from "./diagnostics/remote/probe.ts";
+import type { ProbeFacts } from "./diagnostics/remote/probe.ts";
+import type { RemoteEnv } from "./diagnostics/remote/script.ts";
 import type { ReportLine } from "./diagnostics/render.ts";
 import { buildStartupChecks, findMissingBinaries } from "./diagnostics/startup.ts";
 import { versionChecks } from "./diagnostics/versions.ts";
 import type { DiagnosticsStore } from "./diagnostics-store.ts";
 import type { RunTool } from "./exec-tool.ts";
+import type { ExecFn } from "./herdr.ts";
 import { runGuarded } from "./scheduler.ts";
 
 export interface SweepOpts {
@@ -35,6 +40,10 @@ export interface SweepOpts {
   readonly intervalMs: number;
   readonly versionTtlMs: number;
   readonly warn?: (msg: string) => void;
+  /** SSH transport for the remote probe — injected so no test performs a real connection. */
+  readonly probeExec: ExecFn;
+  /** REMOTE_PROBE_ENABLED (config.ts). Off: remote rows compose as n/a naming the switch; no exec. */
+  readonly remoteProbeEnabled: boolean;
 }
 
 export interface DiagnosticsSweep {
@@ -44,55 +53,11 @@ export interface DiagnosticsSweep {
    * Recheck path: waits out any run in flight, then runs ONE more with the version TTL bypassed — so
    * the answer it returns post-dates the request. Joining the in-flight run would not do: that run
    * started before the operator asked, and is still inside the version TTL, so it would hand back the
-   * pre-upgrade verdict.
+   * pre-upgrade verdict. Subject to the remote floor — remote rows inside the 60-second floor answer
+   * from the cache; the panel's own `checkedAt` age is what the operator sees in that window.
    */
   readonly refresh: () => Promise<void>;
   readonly start: () => () => void;
-}
-
-/**
- * The per-config-dir subjects the LOCAL producers own (`metrics.ts`, `ctx-hook.ts`, `drift.ts`),
- * mirrored here as `pending` rows for a REMOTE config dir. Those producers stat and hash paths on the
- * machine they run on, so running them for a remote env's dirs would publish a verdict about THIS
- * disk under that environment's name — a green row for a file that is not there, which is the exact
- * silent lie this feature exists to remove.
- *
- * The ids, severities and doc anchors mirror the producers deliberately. `enumerateChecks()` includes
- * a remote environment, so Task 14's anchor guard reaches these rows too: a wrong anchor here fails
- * that guard rather than shipping a dead README link.
- *
- * Exported for the drift guard in `test/diagnostics-sweep.test.ts`, which runs the local producers for
- * one dir and requires their id set to equal this list's. TypeScript cannot see the relationship, so
- * without that test a per-dir check added to a producer would just stop appearing for every remote
- * environment — a silent absence in the surface with the least visibility.
- */
-export const REMOTE_DIR_SUBJECTS: readonly {
-  readonly id: string;
-  readonly label: string;
-  readonly severity: CheckSeverity;
-  readonly doc: CheckDoc;
-}[] = [
-  { id: "capture-script", label: "corral-status-capture.sh", severity: "warning", doc: { anchor: "installing-the-claude-helper-files-per-config-dir", title: "Installing the helper files" } },
-  { id: "statusline-registered", label: "statusline registration", severity: "warning", doc: { anchor: "claude-statusline-live-metrics", title: "Claude statusline" } },
-  { id: "ctx-hook-installed", label: "corral-claude-hook.sh", severity: "warning", doc: { anchor: "claude-context-pressure-hook", title: "Context-pressure hook" } },
-  { id: "ctx-hook-registered", label: "context-pressure hook registration", severity: "warning", doc: { anchor: "claude-context-pressure-hook", title: "Context-pressure hook" } },
-  { id: "corral-skill-installed", label: "corral SKILL.md", severity: "info", doc: { anchor: "claude-context-pressure-hook", title: "Context-pressure hook" } },
-  { id: "helper-drift", label: "installed helper files", severity: "warning", doc: { anchor: "upgrading", title: "Upgrading" } },
-  { id: "theme-installed", label: "corral theme preset", severity: "info", doc: { anchor: "claude-theme-optional", title: "Claude theme" } },
-];
-
-function remoteDirChecks(envId: string, dir: string, now: number): Check[] {
-  return REMOTE_DIR_SUBJECTS.map((s) => {
-    const scope = { kind: "configDir" as const, envId, dir };
-    return {
-      id: s.id, key: checkKey(s.id, scope), scope,
-      title: `${s.label}: ${dir} is on a remote host — not checked here`,
-      state: "pending" as const, severity: s.severity,
-      detail: `environment "${envId}" is remote — its config dir lives on the far host, so this can only be checked there.`,
-      doc: s.doc, class: "cheap" as const, checkedAt: now,
-      startupOkLine: false, haltsStartup: false,
-    };
-  });
 }
 
 /**
@@ -102,6 +67,16 @@ function remoteDirChecks(envId: string, dir: string, now: number): Check[] {
  * the module that composes them.
  */
 const EXPECTED_DUPLICATE_IDS: ReadonlySet<string> = new Set(["claude-config-dirs"]);
+
+const REMOTE_TTL_MS = 1_800_000;        // R11: 30-minute success TTL — the TTL IS the cache
+const REMOTE_FAILURE_TTL_MS = 300_000;  // 5 minutes: a transient blip must not cost 30 min of blindness
+const REMOTE_REFRESH_FLOOR_MS = 60_000; // Recheck bypasses the TTL but honours this per-env floor
+
+interface RemoteCacheEntry {
+  readonly rows: readonly Check[];
+  readonly at: number;
+  readonly ok: boolean;
+}
 
 /**
  * Drops a repeat of an EXPECTED duplicate id only — first occurrence wins, which keeps the startup
@@ -136,7 +111,8 @@ interface ComposeInput {
 /**
  * Every non-version row, in the order the design fixes: the startup set first (so the panel and the
  * launch report cannot disagree about it), then the global runtime rows, the per-environment rows, the
- * per-config-dir rows — local checked, remote `pending` — and finally the poller's reachability view.
+ * per-config-dir rows — local only, remote envs skipped (the remote class owns those) — and finally
+ * the poller's reachability view.
  */
 function cheapChecks(input: ComposeInput): Check[] {
   const { deps, envs } = input;
@@ -148,11 +124,8 @@ function cheapChecks(input: ComposeInput): Check[] {
     ...envChecks(deps, envs, input.snapshot.sessions),
   ];
   for (const env of envs) {
+    if (env.kind === "remote") continue; // the remote class owns these rows (adapter, Task 12)
     for (const dir of env.claudeConfigDirs) {
-      if (env.kind === "remote") {
-        checks.push(...remoteDirChecks(env.id, dir, now));
-        continue;
-      }
       checks.push(
         ...metricsChecks(deps, env.id, dir),
         ...ctxHookChecks(deps, env.id, dir),
@@ -185,8 +158,18 @@ function ccVersionByEnv(snapshot: Snapshot): Record<string, string> {
   return byEnv;
 }
 
-const unreachableIds = (snapshot: Snapshot): ReadonlySet<string> =>
-  new Set(Object.entries(snapshot.envs).filter(([, s]) => !s.reachable).map(([id]) => id));
+/**
+ * Local envs only — R16: the SSH attempt IS a remote env's own gate, so an unreachable remote never
+ * lands in this set (never collapses to `env-unrunnable`; its own probed rows are its truth).
+ * `envs` (the config), not `snapshot.envs[id].kind`, is the authority: `EnvState.kind` is optional
+ * and unset in fixtures, so filtering on the snapshot would silently treat every fixture env as
+ * local and defeat the regression this edit exists for.
+ */
+const unreachableIds = (envs: readonly HerdrEnv[], snapshot: Snapshot): ReadonlySet<string> => {
+  const remote = new Set(envs.filter((e) => e.kind === "remote").map((e) => e.id));
+  return new Set(Object.entries(snapshot.envs)
+    .filter(([id, s]) => !s.reachable && !remote.has(id)).map(([id]) => id));
+};
 
 /**
  * Files the composed rows under their own classes, after collapsing whatever an unreachable
@@ -194,13 +177,15 @@ const unreachableIds = (snapshot: Snapshot): ReadonlySet<string> =>
  * is the version probes that need herdr, and its one `env-unrunnable` summary row per environment
  * would be emitted twice — the same key twice in one snapshot — if each class were suppressed apart.
  *
- * `cheap` and `versions` are always written, even empty: presence of the key is what tells the rail
- * "this class has answered" apart from "nothing has run yet".
+ * `cheap`, `versions` and `remote` are always written, even empty: presence of the key is what
+ * tells the rail "this class has answered" apart from "nothing has run yet" — an all-local fleet
+ * must still be able to tell "no remote environments" from "the remote class has never run", so the
+ * seed lands unconditionally, in this one final pass rather than a separate early `put`.
  */
 function publish(
   store: DiagnosticsStore, rows: readonly Check[], unreachable: ReadonlySet<string>, now: number,
 ): void {
-  const byClass = new Map<CheckClass, Check[]>([["cheap", []], ["versions", []]]);
+  const byClass = new Map<CheckClass, Check[]>([["cheap", []], ["versions", []], ["remote", []]]);
   for (const c of suppressUnrunnable(rows, unreachable, now)) {
     const bucket = byClass.get(c.class);
     if (bucket === undefined) byClass.set(c.class, [c]);
@@ -219,9 +204,74 @@ export function createDiagnosticsSweep(opts: SweepOpts): DiagnosticsSweep {
   // change is reflected on the next tick without a probe.
   let versionRows: readonly Check[] = [];
   let versionsAt: number | null = null;
+  // Cached PRE-suppression, keyed by env id. Per-env cadence (TTL/floor) lives on `runOnce`'s own
+  // `now`/`manual`, not in here — the entry only remembers when it last actually ran and whether
+  // that run succeeded.
+  const remoteCache = new Map<string, RemoteCacheEntry>();
+
+  /**
+   * Probes each remote env per the cadence rules and composes its rows, reusing the cached rows when
+   * neither the TTL/floor is due. Every env's task is wrapped in its own catch resolving to the
+   * fact-free composition with the error as reason: `runProbe` already cannot reject (Task 7), but
+   * the composition around it must ALSO never escape — one dead environment must never take another
+   * env's rows, the cheap rows, or `publish` itself down. `Promise.all` below is safe only because
+   * every element is total by construction.
+   */
+  const remoteLeg = async (snapshot: Snapshot, now: number, manual: boolean): Promise<Check[]> => {
+    const remoteEnvs = opts.envs.filter((e): e is RemoteEnv => e.kind === "remote");
+    const ccByEnv = ccVersionByEnv(snapshot);
+
+    const isDue = (entry: RemoteCacheEntry): boolean => {
+      const threshold = manual ? REMOTE_REFRESH_FLOOR_MS : (entry.ok ? REMOTE_TTL_MS : REMOTE_FAILURE_TTL_MS);
+      return now - entry.at >= threshold;
+    };
+
+    const composeOpts = (env: RemoteEnv, probe: ProbeFacts | null, reason: string | null): RemoteRowsOpts => ({
+      env, probe, reason,
+      repoRoot: opts.deps.repoRoot, nodeVersion: opts.deps.nodeVersion,
+      now: opts.deps.now, localHash: opts.deps.hashFile,
+      ccVersion: ccByEnv[env.id] ?? null,
+    });
+
+    const perEnv = await Promise.all(remoteEnvs.map(async (env): Promise<readonly Check[]> => {
+      const cached = remoteCache.get(env.id);
+      if (cached !== undefined && !isDue(cached)) return cached.rows;
+      try {
+        if (!opts.remoteProbeEnabled) {
+          const rows = await composeRemoteRows(
+            composeOpts(env, null, "remote probe disabled (REMOTE_PROBE_ENABLED=false)"),
+          );
+          remoteCache.set(env.id, { rows, at: now, ok: true }); // nothing to retry faster for
+          return rows;
+        }
+        const probe = await runProbe(env, opts.probeExec, planRound2For(env));
+        const rows = await composeRemoteRows(composeOpts(env, probe, null));
+        // A permanently-partial host (e.g. no bash → $PATH never answers) stays ok:false forever by
+        // design — the 5-min retry and standing `problem` row are the honest state. Classifying on
+        // `arrived === 0` instead would hide an ongoing partial answer behind the 30-min TTL: the
+        // false-green this design exists to avoid.
+        const ok = probe.arrived === probe.expected && probe.expected > 0;
+        remoteCache.set(env.id, { rows, at: now, ok });
+        return rows;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        try {
+          const rows = await composeRemoteRows(composeOpts(env, null, msg));
+          remoteCache.set(env.id, { rows, at: now, ok: false });
+          return rows;
+        } catch {
+          // composeRemoteRows itself failing on the fallback path is a bug in that call, not a
+          // reason to take the whole sweep down — this env answers nothing THIS round, every other
+          // env (and the cheap rows, and publish) still runs.
+          return [];
+        }
+      }
+    }));
+    return perEnv.flat();
+  };
 
   /** Total by construction — the try/catch is inside it, so neither path can reject. */
-  const runOnce = async (bypassVersionTtl: boolean): Promise<void> => {
+  const runOnce = async (manual: boolean): Promise<void> => {
     try {
       const now = opts.deps.now();
       const snapshot = opts.poller.getSnapshot();
@@ -231,14 +281,15 @@ export function createDiagnosticsSweep(opts: SweepOpts): DiagnosticsSweep {
       };
       const cheap = cheapChecks(input);
       const stale = versionsAt === null || now - versionsAt >= opts.versionTtlMs;
-      if (bypassVersionTtl || stale) {
+      if (manual || stale) {
         versionRows = await versionChecks({
           envs: opts.envs, run: opts.run,
           ccVersionByEnv: ccVersionByEnv(snapshot), now: opts.deps.now,
         });
         versionsAt = now;
       }
-      publish(opts.store, [...cheap, ...versionRows], unreachableIds(snapshot), now);
+      const remoteRows = await remoteLeg(snapshot, now, manual);
+      publish(opts.store, [...cheap, ...versionRows, ...remoteRows], unreachableIds(opts.envs, snapshot), now);
       opts.store.setLastError(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -335,5 +386,10 @@ export async function enumerateChecks(): Promise<Check[]> {
   const versions = await versionChecks({
     envs: ENUMERATE_ENVS, run: () => Promise.resolve(null), ccVersionByEnv: {}, now: () => 0,
   });
-  return suppressUnrunnable([...cheap, ...versions], unreachableIds(snapshot), 0);
+  const remoteEnv = ENUMERATE_ENVS.find((e) => e.kind === "remote");
+  const remoteRows = remoteEnv === undefined ? [] : await composeRemoteRows({
+    env: remoteEnv, probe: null, reason: "enumeration — no probe",
+    repoRoot: "/repo", nodeVersion: "0.0.0", now: () => 0, localHash: () => null, ccVersion: null,
+  });
+  return suppressUnrunnable([...cheap, ...versions, ...remoteRows], unreachableIds(ENUMERATE_ENVS, snapshot), 0);
 }

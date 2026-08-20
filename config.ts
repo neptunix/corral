@@ -133,6 +133,11 @@ export const DIAGNOSTICS_INTERVAL_MS = intFromEnv("DIAGNOSTICS_INTERVAL_MS", 60_
 // Version probes shell out to herdr/claude, so they ride the same tick behind their own TTL rather
 // than running every minute. A Recheck bypasses this — see `refresh` in server/diagnostics-sweep.ts.
 export const DIAGNOSTICS_VERSION_TTL_MS = intFromEnv("DIAGNOSTICS_VERSION_TTL_MS", 600_000, { min: 1000 });
+// Outbound SSH probe for remote environments' diagnostics. The house convention (X_ENABLED !==
+// "false") on purpose: this is the knob whose whole job is stopping egress, so it must disable on
+// the spelling an operator will actually write. DIAGNOSTICS_INTERVAL_MS=0 is NOT an off switch —
+// the unauthenticated refresh route still sweeps.
+export const REMOTE_PROBE_ENABLED = process.env.REMOTE_PROBE_ENABLED !== "false";
 
 export const BOARD_DATA_DIR = process.env.BOARD_DATA_DIR ?? CORRAL_HOME;
 export const GIT_COMMIT_INTERVAL_MS = 10_000;

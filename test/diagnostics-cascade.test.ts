@@ -66,11 +66,11 @@ describe("suppressUnrunnable", () => {
     expect(out.map((c) => c.id)).toEqual(["env-reachable", "env-unrunnable"]);
   });
 
-  it("suppresses every remote-class check regardless of id", () => {
-    const out = suppressUnrunnable([
+  it("passes a remote-class check through untouched — its own probed outcome is its truth", () => {
+    const input = [
       check({ id: "capture-script", key: "k1", class: "remote", scope: { kind: "configDir", envId: "box", dir: "/d" } }),
-    ], new Set(["box"]), NOW);
-    expect(out[0]?.state).toBe("n/a");
+    ];
+    expect(suppressUnrunnable(input, new Set(["box"]), NOW)).toEqual(input);
   });
 
   it("leaves reachable environments and global checks untouched, and no-ops with nothing unreachable", () => {
