@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { HerdrEnv } from "../environments.ts";
 import { ctxHookChecks } from "../server/diagnostics/ctx-hook.ts";
 import { STANDARD_BIN_DIRS, pathCandidates } from "../server/diagnostics/deps.ts";
-import { driftCheck, themeCheck } from "../server/diagnostics/drift.ts";
+import { DRIFT_FILES, driftCheck, themeCheck } from "../server/diagnostics/drift.ts";
 import { jqPresentCheck, configDirExistsChecks } from "../server/diagnostics/env.ts";
 import { metricsChecks } from "../server/diagnostics/metrics.ts";
 import { buildManifest, PER_DIR_FILES } from "../server/diagnostics/remote/manifest.ts";
@@ -71,7 +71,10 @@ describe("the manifest guard — producers' asked paths equal the manifest, over
       const facts: FactSource = { lookup: (p) => m[p], home: "/far", pathEnv: "" };
       const rec = createDepsRecorder(facts, {
         repoRoot: "/repo", nodeVersion: "22.0.0", now: () => 1,
-        localHashPaths: new Set(["/repo/scripts/corral-status-capture.sh", "/repo/scripts/corral-claude-hook.sh", "/repo/skills/corral/SKILL.md"]),
+        // Derived from DRIFT_FILES exactly as the adapter does (adapter.ts) — a hand-listed copy
+        // silently stops matching the moment a tracked file is added, which is when this guard is
+        // most worth having.
+        localHashPaths: new Set(DRIFT_FILES.map(([, repo]) => `/repo/${repo}`)),
         localHash: () => "h",
       });
       metricsChecks(rec.deps, env.id, DIR);

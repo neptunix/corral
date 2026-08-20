@@ -572,13 +572,25 @@ cp scripts/statusline-command.sh    "$D/statusline-command.sh"    # skip if you 
 cp scripts/corral-claude-hook.sh   "$D/corral-claude-hook.sh"    # recommended — context-pressure hook
 chmod +x "$D/corral-status-capture.sh" "$D/statusline-command.sh" "$D/corral-claude-hook.sh"
 mkdir -p "$D/themes" && cp themes/corral.json "$D/themes/corral.json"   # optional theme
-mkdir -p "$D/skills" && cp -R skills/corral "$D/skills/corral"          # recommended with the MCP server
+mkdir -p "$D/skills" && ln -s "$(pwd)/skills/corral" "$D/skills/corral"   # recommended with the MCP server
 echo "corral-status/" >> "$D/.gitignore"    # if the config dir is version-controlled
 ```
 
-Locally, you can `ln -s "$(pwd)/scripts/corral-claude-hook.sh" "$D/corral-claude-hook.sh"`
-instead of `cp` if you don't want to re-copy after every `git pull` — there's no equivalent for
-the remote `scp` step below.
+**Prefer a symlink to a copy wherever the config dir sits on the same machine as the checkout.**
+A copy goes stale on the next `git pull` and has to be re-copied by hand; a symlink is simply
+correct again. `helper-drift` follows symlinks when it hashes, so a linked file is never reported
+as drifted — which is the point: nothing to notice, nothing to redo. The same applies to the hook
+and the capture script:
+
+```bash
+ln -s "$(pwd)/scripts/corral-claude-hook.sh"    "$D/corral-claude-hook.sh"
+ln -s "$(pwd)/scripts/corral-status-capture.sh" "$D/corral-status-capture.sh"
+```
+
+Use `cp` when a symlink cannot work: a remote config dir (the `scp` step below has no equivalent),
+a config dir that must survive the checkout being moved or deleted, or a checkout you switch
+branches in — a linked skill follows the branch you happen to be on. `statusline-command.sh` is
+the one file to keep copying regardless, since README's arrangement expects you to edit it.
 
 **Remote** (over SSH — `H` is the environment's `sshHost`, `D` its config dir, e.g.
 `/home/me/.claude`):
@@ -789,7 +801,7 @@ get the details wrong. Copy it into each config dir you registered the server in
 [the helper-file table](#installing-the-claude-helper-files-per-config-dir)):
 
 ```bash
-mkdir -p ~/.claude/skills && cp -R skills/corral ~/.claude/skills/corral
+mkdir -p ~/.claude/skills && ln -s "$(pwd)/skills/corral" ~/.claude/skills/corral
 ```
 
 It loads only when a session actually reaches for corral, so it costs nothing the rest of the time.
@@ -804,8 +816,13 @@ Run Claude themselves, through the same spawn path every other session starts fr
 same directory:
 
 ```bash
-cp -R skills/corral-doctor ~/.claude/skills/corral-doctor
+ln -s "$(pwd)/skills/corral-doctor" ~/.claude/skills/corral-doctor
 ```
+
+Linking matters a little more here than for the skill above: this one's instructions are about
+repairing your install, so a stale copy hands a fixer session repair steps for an older corral.
+`helper-drift` tracks it, but only once it is installed — an absent `corral-doctor` is not reported,
+because the skill is optional and the Fix issues prompt names its file directly as a fallback.
 
 ### Letting sessions talk to each other (recommended)
 
