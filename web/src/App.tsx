@@ -1,4 +1,4 @@
-import { StreamFrameSchema, type Board, type BoardState } from "@shared/board-schema";
+import { StreamFrameSchema, type Board, type BoardState, type SpawnPreset } from "@shared/board-schema";
 import type { RecapSource, RecapStatus, RegistryStatus, SessionRow, StatuslineData } from "@shared/schema";
 import { useState, useEffect, useCallback, useMemo, type JSX } from "react";
 
@@ -29,6 +29,10 @@ export function App(): JSX.Element {
   const [optimistic, setOptimistic] = useState<Map<string, OptimisticState>>(new Map());
   const [session, setSession] = useState<{ env: string; paneId: string; awaitAgent: boolean; title: string } | null>(null);
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  // The Health panel's "Fix issues" click, waiting for BoardView to create the ad-hoc task and consume
+  // it. Lives here, not in SideRail or BoardView, because it crosses from one sibling to the other.
+  const [fixIssuesRequest, setFixIssuesRequest] =
+    useState<{ title: string; description: string; preset: SpawnPreset } | null>(null);
   // Board-list load status: distinguishes not-yet-loaded / error / loaded so a failed or empty load
   // doesn't sit on a permanent misleading "Loading…".
   const [boardsLoaded, setBoardsLoaded] = useState(false);
@@ -51,6 +55,12 @@ export function App(): JSX.Element {
 
   const closeSession = useCallback((): void => {
     setSession(null);
+  }, []);
+
+  // Same stability requirement as refreshBoards above — the fix-issues effect in Board.tsx depends
+  // on this identity to stay put across an unrelated App re-render.
+  const consumeFixIssuesRequest = useCallback((): void => {
+    setFixIssuesRequest(null);
   }, []);
 
   // Load the board list (mount + Retry). Sets an error state on failure and marks loaded either way.
@@ -97,10 +107,13 @@ export function App(): JSX.Element {
     void api.state(bid).then(setLocalBoardState).catch(console.error);
   }, []);
 
-  function refreshBoards(): void {
+  // useCallback (not a plain function): passed to Board as onBoardStateChange, which the fix-issues
+  // effect depends on to guard against a duplicate api.tasks.create — an unrelated App re-render
+  // (any SSE frame) must not hand that effect a new identity and re-fire it mid-request.
+  const refreshBoards = useCallback((): void => {
     api.boards.list().then(setBoards).catch(console.error);
     if (activeBoardId !== null) fetchBoardState(activeBoardId);
-  }
+  }, [activeBoardId, fetchBoardState]);
 
   const markOptimistic = useCallback((key: string, state: OptimisticState): void => {
     setOptimistic((m) => { const next = new Map(m); next.set(key, state); return next; });
@@ -295,6 +308,8 @@ export function App(): JSX.Element {
                 onOpenSession={openSession}
                 onMarkOptimistic={markOptimistic}
                 onClearOptimistic={clearOptimistic}
+                pendingFixIssues={fixIssuesRequest}
+                onFixIssuesConsumed={consumeFixIssuesRequest}
               />
             </div>
           ) : boardsError !== null ? (
@@ -324,6 +339,7 @@ export function App(): JSX.Element {
           activeBoardId={activeBoardId}
           showUnassigned={showUnassigned}
           onOpen={openSession}
+          onFixIssues={setFixIssuesRequest}
         />
       </div>
 

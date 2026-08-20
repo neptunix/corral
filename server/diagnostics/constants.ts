@@ -6,4 +6,4 @@ export const HERDR_MIN = "0.7.1";
  * README "Quick start": corral's `--name` / `--model` / `--remote-control` launch flags are verified
  * against this Claude Code build. Bump this and the README line together, in one PR.
  */
-export const CLAUDE_VERIFIED = "2.1.226";
+export const CLAUDE_VERIFIED = "2.1.232";

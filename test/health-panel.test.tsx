@@ -76,6 +76,22 @@ describe("HealthPanel rows", () => {
   });
 });
 
+describe("HealthPanel — Fix issues", () => {
+  it("renders no button when the caller has nothing fixable (no board, or nothing outstanding)", () => {
+    render(panel(answered([check()])));
+    expect(screen.queryByRole("button", { name: "Fix issues" })).toBe(null);
+  });
+
+  it("renders the button and fires the caller's handler on click, with Recheck alongside it", () => {
+    const onFixIssues = vi.fn();
+    render(<HealthPanel snapshot={answered([check()])} streamDown={false} labelFor={(id) => id}
+      onClose={vi.fn()} onSnapshot={vi.fn()} onFixIssues={onFixIssues} />);
+    fireEvent.click(screen.getByRole("button", { name: "Fix issues" }));
+    expect(onFixIssues).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Recheck" })).toBeTruthy();
+  });
+});
+
 describe("HealthPanel header", () => {
   // "Checking…" asserts activity that is not happening; the empty state names an action instead.
   it("names an action instead of only describing a wait when nothing has answered", () => {

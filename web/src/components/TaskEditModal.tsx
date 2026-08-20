@@ -1,4 +1,4 @@
-import type { EnrichedTask, Board, Priority, SessionLink } from "@shared/board-schema";
+import type { EnrichedTask, Board, Priority, SessionLink, SpawnPreset } from "@shared/board-schema";
 import type { JSX } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -21,6 +21,10 @@ interface Props {
   readonly boards: readonly Board[];
   readonly onMove: (toBoardId: string) => Promise<void>;
   readonly onClose: () => void;
+  // Both set only by the fix-issues flow (Board.tsx): opens straight to Run with a generated,
+  // unsaved preset ahead of the board's own — never written to board.spawnPresets.
+  readonly initialTab?: Tab | undefined;
+  readonly extraPreset?: SpawnPreset | null | undefined;
 }
 
 // The description grows with its content instead of standing at a fixed 11 rows — an empty
@@ -32,8 +36,11 @@ const DESC_MAX_ROWS = 12;
 
 type Tab = "task" | "run";
 
-export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, onOpenSession, boards, onMove, onClose }: Props): JSX.Element {
-  const [tab, setTab] = useState<Tab>("task");
+export function TaskEditModal({
+  task, board, envs, onSave, onDelete, onSpawn, onOpenSession, boards, onMove, onClose,
+  initialTab, extraPreset,
+}: Props): JSX.Element {
+  const [tab, setTab] = useState<Tab>(initialTab ?? "task");
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [priority, setPriority] = useState<Priority>(task.priority);
@@ -52,8 +59,11 @@ export function TaskEditModal({ task, board, envs, onSave, onDelete, onSpawn, on
   // state survives switching tabs, which unmounts the fields.
   const spawn = useSpawnForm({
     envs,
-    presets: board.spawnPresets,
-    defaultPresetId: board.defaultSpawnPresetId,
+    // Ahead of the board's own presets and pre-selected below, so it renders through the SAME
+    // dropdown an operator already knows (SpawnFields renders extraPreset's full text, not the
+    // clamped preview it uses for a saved preset — see there for why).
+    presets: extraPreset === null || extraPreset === undefined ? board.spawnPresets : [extraPreset, ...board.spawnPresets],
+    defaultPresetId: extraPreset?.id ?? board.defaultSpawnPresetId,
     onSpawn,
     onSpawned: (link) => { onClose(); onOpenSession(link.env, link.paneId, true, task.title); },
   });

@@ -8,9 +8,9 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { useDroppable } from "@dnd-kit/core";
-import type { Board as BoardType, BoardState, EnrichedTask } from "@shared/board-schema";
+import type { Board as BoardType, BoardState, EnrichedTask, SpawnPreset } from "@shared/board-schema";
 import { defaultColumnId } from "@shared/board-schema";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import { z } from "zod";
 
@@ -114,11 +114,60 @@ interface Props {
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly onMarkOptimistic: (key: string, state: OptimisticState) => void;
   readonly onClearOptimistic: (key: string) => void;
+  // The Health panel's "Fix issues" click, relayed from App (SideRail is this component's sibling,
+  // not its child). Consumed once: creates an ad-hoc task, opens it straight to the Run tab with
+  // `preset` pre-selected, then calls onFixIssuesConsumed so a re-render never repeats the create.
+  readonly pendingFixIssues: { readonly title: string; readonly description: string; readonly preset: SpawnPreset } | null;
+  readonly onFixIssuesConsumed: () => void;
 }
 
-export function Board({ boardState, boards, onBoardStateChange, onOpenSession, onMarkOptimistic, onClearOptimistic }: Props): JSX.Element {
+export function Board({
+  boardState, boards, onBoardStateChange, onOpenSession, onMarkOptimistic, onClearOptimistic,
+  pendingFixIssues, onFixIssuesConsumed,
+}: Props): JSX.Element {
   const { board, tasks, envs } = boardState;
   const [editingTask, setEditingTask] = useState<EnrichedTask | null>(null);
+  // Set alongside editingTask only by the fix-issues flow below; TaskEditModal renders it as an
+  // ephemeral, unsaved preset ahead of `board.spawnPresets` and pre-selects it. Cleared with the modal.
+  const [fixPreset, setFixPreset] = useState<SpawnPreset | null>(null);
+
+  // Mutated during render, read inside the effect's async callback below — the "latest ref" pattern.
+  // NOT a dependency: reading a fresher board.id at resolve time is the point, not re-running on it.
+  const latestBoardId = useRef(board.id);
+  latestBoardId.current = board.id;
+
+  useEffect(() => {
+    if (pendingFixIssues === null) return;
+    const request = pendingFixIssues;
+    const requestBoardId = board.id;
+    // Consumed SYNCHRONOUSLY, before the request ever reaches the network. A consume tied to promise
+    // settlement (the previous shape here) left the request stuck in App's state forever whenever this
+    // effect's run never got to finish uncancelled (the operator navigates away mid-request) — the
+    // NEXT mount would then fire create AGAIN for the same click. Consuming here means the request is
+    // spent the instant it is seen, independent of how this run ends.
+    //
+    // That synchronous consume itself immediately re-renders App with pendingFixIssues cleared, which
+    // is a DEP CHANGE this same effect reacts to — an earlier version guarded the success path on a
+    // `cancelled` flag flipped by this effect's own cleanup, which that self-triggered re-render trips
+    // before the network call ever returns: the task got created, but the modal never opened and
+    // nothing else fired. `cancelled` conflated "this effect's deps changed" with "the operator moved
+    // to different board" — only the latter should block opening the modal.
+    onFixIssuesConsumed();
+    api.tasks.create(board.id, { title: request.title, description: request.description })
+      .then((created) => {
+        onBoardStateChange();
+        // A genuine board switch since the request was made — DON'T show board A's new task while
+        // this instance is now rendering board B. Anything else (this effect's own consume re-running
+        // it, or true unmount) is safe to fall through: React 18 no-ops a state update on an unmounted
+        // component, and a re-run with the SAME board must still open the modal.
+        if (latestBoardId.current !== requestBoardId) return;
+        setEditingTask({ ...created, sessions: [] });
+        setFixPreset(request.preset);
+      })
+      .catch((err: unknown) => {
+        window.alert(`Create task failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+  }, [pendingFixIssues, board.id, onBoardStateChange, onFixIssuesConsumed]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -180,6 +229,7 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
 
   function handleClose(): void {
     setEditingTask(null);
+    setFixPreset(null);
   }
 
   // Remove a single session link from a task (the ✕ on a session row). Uses the existing detach route;
@@ -254,7 +304,11 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
       </DndContext>
 
       {editingTask !== null && (
+        // Keyed on task id: without it, the fix-issues effect swapping editingTask while a DIFFERENT
+        // task's modal is already open reuses this instance instead of remounting it, so its
+        // useState(task.x) field initializers keep the old task's stale values under the new task's id.
         <TaskEditModal
+          key={editingTask.id}
           task={editingTask}
           board={board}
           envs={Object.entries(envs).map(([id, e]) => ({ id, label: e.label ?? id, kind: e.kind ?? null, reachable: e.reachable }))}
@@ -272,6 +326,8 @@ export function Board({ boardState, boards, onBoardStateChange, onOpenSession, o
             onBoardStateChange();
           }}
           onClose={handleClose}
+          initialTab={fixPreset === null ? undefined : "run"}
+          extraPreset={fixPreset}
         />
       )}
     </>

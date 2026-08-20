@@ -31,7 +31,7 @@ const worse = snap({
 
 function rail(over: Partial<Parameters<typeof SideRail>[0]> = {}): JSX.Element {
   return <SideRail diagnostics={clean} streamDown={false} attention={{}} boards={[]} envs={{}}
-    activeBoardId="b1" showUnassigned={false} onOpen={vi.fn()} {...over} />;
+    activeBoardId="b1" showUnassigned={false} onOpen={vi.fn()} onFixIssues={vi.fn()} {...over} />;
 }
 const bell = (): HTMLElement => screen.getByRole("button", { name: /Sessions needing attention/ });
 
@@ -143,6 +143,29 @@ describe("SideRail", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "System health: OK" })).toBeTruthy();
     });
+  });
+
+  it("offers Fix issues once the panel is open, and hands the caller a built preset on click", () => {
+    const onFixIssues = vi.fn();
+    render(rail({ diagnostics: broken, onFixIssues }));
+    fireEvent.click(screen.getByRole("button", { name: "Fix issues" }));
+    expect(onFixIssues).toHaveBeenCalledTimes(1);
+    const built = onFixIssues.mock.calls[0]?.[0] as { title: string; preset: { text: string } };
+    expect(built.title).toBe("Fix 1 corral issue");
+    expect(built.preset.text.startsWith("/corral-doctor")).toBe(true);
+  });
+
+  it("hides Fix issues with no active board — an ad-hoc task needs one to attach to", () => {
+    render(rail({ diagnostics: broken, activeBoardId: null }));
+    expect(screen.getByText("Health")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Fix issues" })).toBe(null);
+  });
+
+  it("hides Fix issues when the only trouble is synthetic — nothing a spawned session could fix", () => {
+    render(rail({ diagnostics: clean, streamDown: true }));
+    expect(screen.getByText("Health")).toBeTruthy();
+    expect(screen.getByText("corral is not answering")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Fix issues" })).toBe(null);
   });
 
   // A live region that enters the DOM with its content is routinely not announced.

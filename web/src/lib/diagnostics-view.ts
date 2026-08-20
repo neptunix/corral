@@ -1,3 +1,4 @@
+import type { SpawnPreset } from "@shared/board-schema";
 import type { Check, DiagnosticsSnapshot, Rollup } from "@shared/diagnostics-schema";
 
 /**
@@ -168,4 +169,99 @@ export function groupChecks(checks: readonly Check[], labelFor: (envId: string) 
       problems: [...g.problems].sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]),
       ok: g.ok, na: g.na, pending: g.pending,
     }));
+}
+
+/** The ad-hoc task title and the ephemeral spawn preset the "Fix issues" button seeds — never persisted
+ *  to `board.spawnPresets`, only handed to `useSpawnForm` for one modal instance. */
+export const FIX_ISSUES_PRESET_ID = "corral-doctor-fix";
+// Headroom under the server's 2000-char cap on `startCommand` (POST spawn), so composeFixBrief's own
+// truncation never lands exactly on that boundary and clips mid-line.
+const FIX_ISSUES_CHAR_CAP = 1900;
+const FIX_ISSUES_MAX_ROWS = 12;
+
+// A remote-probe check's detail can carry raw ssh stderr and run to thousands of characters on its
+// own — unbounded per shared/diagnostics-schema.ts. Capped and flattened here so one row can never eat
+// the whole brief, and a literal newline in it can never break the one-row-per-line format the skill's
+// own loop reads.
+const FIX_ISSUES_DETAIL_CAP = 200;
+
+function fixLine(c: Check, labelFor: (envId: string) => string): string {
+  const where = c.scope.kind === "global" ? null
+    : c.scope.kind === "env" ? labelFor(c.scope.envId)
+    : `${labelFor(c.scope.envId)} · ${c.scope.dir}`;
+  const prefix = where === null ? "" : `[${where}] `;
+  const flatDetail = c.detail.replace(/\s+/g, " ").trim();
+  const clippedDetail = flatDetail.length > FIX_ISSUES_DETAIL_CAP
+    ? `${flatDetail.slice(0, FIX_ISSUES_DETAIL_CAP - 1)}…` : flatDetail;
+  const detail = clippedDetail === "" ? "" : ` — ${clippedDetail}`;
+  const doc = c.doc === null ? "" : ` (README: ${c.doc.title})`;
+  return `- ${prefix}[${c.severity}] ${c.title}${detail}${doc}`;
+}
+
+function fixIssuesTitle(problemCount: number): string {
+  return problemCount === 1 ? "Fix 1 corral issue" : `Fix ${String(problemCount)} corral issues`;
+}
+
+/**
+ * `/corral-doctor` at position 0 is what makes this a skill invocation rather than plain text — the
+ * skill (installed alongside `corral`'s own) reads the listed checks, applies the fix each `doc`
+ * points at, and rechecks. Synthetic rows (`backend-unreachable`, `sweep-failed`) are excluded by the
+ * caller: neither names an install defect a spawned session could fix.
+ *
+ * The fallback line matters: an operator who never installed `skills/corral-doctor` gets a spawned
+ * session that greets `/corral-doctor` with "Unknown command" and stops there with nothing else to go
+ * on. Naming the file directly gives it a path to the same instructions without the skill.
+ */
+// Generous headroom for the "… N more" tail, reserved BEFORE rows are added rather than sliced off
+// the end afterward — a blind end-slice could cut a row in half AND drop the one line that says rows
+// were cut, which is what the old version did.
+const FIX_ISSUES_TAIL_MARGIN = 60;
+
+export function composeFixBrief(problems: readonly Check[], labelFor: (envId: string) => string): string {
+  const sorted = [...problems].sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
+  const intro = `/corral-doctor fix\n\n${String(sorted.length)} corral diagnostics `
+    + `${sorted.length === 1 ? "problem needs" : "problems need"} fixing. Use the corral-doctor skill `
+    + "(if that command was not recognized, read skills/corral-doctor/SKILL.md in this repo instead): "
+    + "for each row below, read the README section it names, apply the fix, then recheck "
+    + "(POST /api/diagnostics/refresh, or Recheck in the Health panel) before moving on.\n\n";
+  const budget = FIX_ISSUES_CHAR_CAP - intro.length - FIX_ISSUES_TAIL_MARGIN;
+  const lines: string[] = [];
+  let used = 0;
+  for (const c of sorted) {
+    if (lines.length >= FIX_ISSUES_MAX_ROWS) break;
+    const line = fixLine(c, labelFor);
+    const cost = line.length + (lines.length > 0 ? 1 : 0); // +1 for the joining newline
+    // The first row always lands regardless of budget — an empty body (every row skipped because the
+    // very first one alone exceeds what's left) is worse than one long row.
+    if (lines.length > 0 && used + cost > budget) break;
+    lines.push(line);
+    used += cost;
+  }
+  const omitted = sorted.length - lines.length;
+  const tail = omitted > 0 ? `\n… ${String(omitted)} more — open the Health panel for the rest.` : "";
+  return `${intro}${lines.join("\n")}${tail}`;
+}
+
+/**
+ * `null` when there is nothing a fixer session could act on — the button that calls this hides itself
+ * on that result rather than opening a task with an empty brief.
+ *
+ * `description` is the SAME text as `preset.text`, not a separate summary of it: the preset is
+ * ephemeral (cleared with the modal, never persisted — see TaskEditModal's extraPreset), so the
+ * description is the only durable copy. A separate hand-written description drifts from what the
+ * preset actually says and goes stale the moment the modal closes; a card with no session left behind
+ * still carries the real fix instructions this way, readable by a human or a session that resumes it.
+ */
+export function buildFixPreset(
+  checks: readonly Check[],
+  labelFor: (envId: string) => string,
+): { readonly title: string; readonly description: string; readonly preset: SpawnPreset } | null {
+  const problems = checks.filter((c) => c.state === "problem" && !SYNTHETIC_IDS.has(c.id));
+  if (problems.length === 0) return null;
+  const brief = composeFixBrief(problems, labelFor);
+  return {
+    title: fixIssuesTitle(problems.length),
+    description: brief,
+    preset: { id: FIX_ISSUES_PRESET_ID, text: brief },
+  };
 }
