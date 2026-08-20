@@ -2,7 +2,7 @@ import type { Snapshot } from "@shared/schema";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BRIEF_MAX_BYTES } from "../config.ts";
 import { ENVIRONMENTS } from "../environments.ts";
@@ -168,8 +168,9 @@ describe("brief file cleanup after spawn", () => {
     const briefPath = seen[0]?.briefPath;
     if (briefPath === undefined) throw new Error("expected briefPath");
     expect(existsSync(briefPath)).toBe(true); // still there the instant the route responds
-    await new Promise((resolve) => { setTimeout(resolve, 200); });
-    expect(existsSync(briefPath)).toBe(false); // gone once the bounded grace window has passed
+    // Poll rather than sleeping a multiple of briefCleanupDelayMs: the margin is a guess that either
+    // flakes under load or pads the run.
+    await vi.waitFor(() => { expect(existsSync(briefPath)).toBe(false); }); // gone once the grace window passed
   });
 
   it("still cleans up the brief file when the spawn attempt fails", async () => {
@@ -190,7 +191,6 @@ describe("brief file cleanup after spawn", () => {
     expect(res.status).toBe(500);
     const briefPath = seen[0]?.briefPath;
     if (briefPath === undefined) throw new Error("expected briefPath");
-    await new Promise((resolve) => { setTimeout(resolve, 100); });
-    expect(existsSync(briefPath)).toBe(false);
+    await vi.waitFor(() => { expect(existsSync(briefPath)).toBe(false); });
   });
 });
