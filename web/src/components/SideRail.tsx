@@ -1,4 +1,4 @@
-import type { Board } from "@shared/board-schema";
+import type { Board, SpawnPreset } from "@shared/board-schema";
 import type { DiagnosticsSnapshot } from "@shared/diagnostics-schema";
 import { computeRollup, emptyDiagnostics } from "@shared/diagnostics-schema";
 import type { AttentionMap, EnvState } from "@shared/schema";
@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, type JSX } from "react";
 import { AttentionFeed } from "./AttentionFeed";
 import { HealthPanel } from "./HealthPanel";
 import { boardAttention } from "../lib/attention";
-import { badgeCount, pickSnapshot, renderedChecks } from "../lib/diagnostics-view";
+import { badgeCount, buildFixPreset, pickSnapshot, renderedChecks } from "../lib/diagnostics-view";
 import { envLabel } from "../lib/env";
 
 type Open = "none" | "attention" | "health";
@@ -22,6 +22,10 @@ interface Props {
   readonly activeBoardId: string | null;
   readonly showUnassigned: boolean;
   readonly onOpen: (env: string, paneId: string) => void;
+  // Spawns a fixer session for the active board's task list — undefined would need no board to
+  // attach an ad-hoc task to. Fires only when the panel offers "Fix issues" (boardScoped and there
+  // is something fixable), same gating as the button itself.
+  readonly onFixIssues: (built: { readonly title: string; readonly description: string; readonly preset: SpawnPreset }) => void;
 }
 
 function healthPhrase(count: number, info: number): string {
@@ -40,7 +44,7 @@ function healthPhrase(count: number, info: number): string {
  * the digit and the rows it summarizes must be the same value by construction.
  */
 export function SideRail({
-  diagnostics, streamDown, attention, boards, envs, activeBoardId, showUnassigned, onOpen,
+  diagnostics, streamDown, attention, boards, envs, activeBoardId, showUnassigned, onOpen, onFixIssues,
 }: Props): JSX.Element {
   const [open, setOpen] = useState<Open>("none");
   const [held, setHeld] = useState<DiagnosticsSnapshot>(emptyDiagnostics());
@@ -55,10 +59,15 @@ export function SideRail({
 
   useEffect(() => { setHeld((cur) => pickSnapshot(cur, diagnostics)); }, [diagnostics]);
 
-  const rollup = computeRollup(renderedChecks(held, streamDown));
+  const labelFor = (id: string): string => envLabel(heldEnvs.current, id);
+  const rows = renderedChecks(held, streamDown);
+  const rollup = computeRollup(rows);
   const count = badgeCount(rollup);
 
   const boardScoped = !showUnassigned && activeBoardId !== null;
+  // Computed even when the panel is closed: an ad-hoc task needs an active board, so the button hides
+  // itself outside one rather than opening onto nothing (see 🔔's own boardScoped gate, same reason).
+  const fixBuilt = boardScoped ? buildFixPreset(rows, labelFor) : null;
   const entries = boardScoped ? boardAttention(attention, boards, activeBoardId) : [];
   // Pure derivation, not an effect: no render may contain a panel scoped to a board that is not shown.
   const shown: Open = open === "attention" && !boardScoped ? "none" : open;
@@ -86,9 +95,9 @@ export function SideRail({
                        onClose={() => { setOpen("none"); }} />
       )}
       {shown === "health" && (
-        <HealthPanel snapshot={held} streamDown={streamDown}
-                     labelFor={(id) => envLabel(heldEnvs.current, id)}
-                     onClose={() => { setOpen("none"); }} onSnapshot={setHeld} />
+        <HealthPanel snapshot={held} streamDown={streamDown} labelFor={labelFor}
+                     onClose={() => { setOpen("none"); }} onSnapshot={setHeld}
+                     onFixIssues={fixBuilt === null ? undefined : () => { onFixIssues(fixBuilt); }} />
       )}
       <div className="shrink-0 w-12 border-l border-border flex flex-col items-center pt-3 gap-3">
         {boardScoped && (

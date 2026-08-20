@@ -14,19 +14,15 @@ const REMOTE_CONTROL_HINT = "Connects this session outward to claude.ai, so it's
  * The spawn form's fields only. The submit button lives in TaskEditModal's footer — see useSpawnForm.
  */
 export function SpawnFields({ form, hasSessions }: Props): JSX.Element {
-  // Only the selected-preset branch can be long (up to 2000 chars, newlines and all) — the other
-  // three are fixed single-line strings, so only this one needs clamping + a hover title.
+  // The hint says where presets are edited; it does NOT preview the selected one. A preset's text runs
+  // to 2000 chars with newlines of its own, and a clamped copy of it under the select was three lines
+  // of whichever text happened to come first — for a multi-line preset, the command, a blank line, and
+  // a cut-off fragment. The full text is on the option's own hover title, which is where it belongs.
   const startCommandHint: JSX.Element = !form.commandAllowed
     ? <p className="text-xs text-muted-foreground mt-1">Start commands are available for local environments only — your pick is kept.</p>
     : form.presets.length === 0
       ? <p className="text-xs text-muted-foreground mt-1">No start commands on this board — add them in Board settings → Start commands.</p>
-      : form.selectedPreset === null
-        ? <p className="text-xs text-muted-foreground mt-1">Edited in Board settings → Start commands.</p>
-        : (
-          <p className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap line-clamp-3" title={form.selectedPreset.text}>
-            {form.selectedPreset.text} — edited in Board settings → Start commands.
-          </p>
-        );
+      : <p className="text-xs text-muted-foreground mt-1">Edited in Board settings → Start commands.</p>;
 
   return (
     <div>

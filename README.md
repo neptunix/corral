@@ -26,7 +26,8 @@ you work on, and lets you respond in place.
 - **Self-diagnostics** — the 🛟 health panel in the side rail runs install and connectivity
   checks (local, remote, and a corral-update check) on a schedule and folds anything worth
   seeing into a badge; a real problem opens the panel once, everything else stays one click
-  away.
+  away. **Fix issues** turns that into a spawned session: an ad-hoc card pre-filled with the
+  outstanding problems, ready for the `corral-doctor` skill to work through (see below).
 
 ## Quick start
 
@@ -792,6 +793,19 @@ mkdir -p ~/.claude/skills && cp -R skills/corral ~/.claude/skills/corral
 ```
 
 It loads only when a session actually reaches for corral, so it costs nothing the rest of the time.
+
+**A second skill, for corral's own health.** `skills/corral-doctor` covers configuring, running,
+upgrading and troubleshooting corral itself — the knowledge a session needs to act on a 🛟 Health
+panel row. The panel's **Fix issues** button (visible once something needs fixing) opens a new card
+with a `/corral-doctor` prompt pre-selected in its Run tab's start-command picker; without the skill
+installed, that command falls through as plain text instead — the prompt names the file directly as
+a fallback. Nothing runs on its own: the card and its prompt are prepared, and the operator clicks
+Run Claude themselves, through the same spawn path every other session starts from. Same install,
+same directory:
+
+```bash
+cp -R skills/corral-doctor ~/.claude/skills/corral-doctor
+```
 
 ### Letting sessions talk to each other (recommended)
 

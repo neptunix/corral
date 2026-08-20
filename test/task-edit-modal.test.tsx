@@ -238,6 +238,36 @@ describe("TaskEditModal — Task / Run Claude tabs", () => {
     render(<TaskEditModal task={makeTask()} board={board} {...baseProps} onSave={vi.fn()} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()} />);
     expect(screen.getByRole("tab", { name: "Task" }).getAttribute("aria-selected")).toBe("true");
   });
+
+  it("opens on Run Claude when initialTab says so — the fix-issues entry point", () => {
+    const board = makeBoard();
+    render(<TaskEditModal task={makeTask()} board={board} {...baseProps} onSave={vi.fn()} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()} initialTab="run" />);
+    expect(screen.getByRole("tab", { name: /Run Claude/ }).getAttribute("aria-selected")).toBe("true");
+  });
+});
+
+describe("TaskEditModal — fix-issues extraPreset", () => {
+  it("pre-selects the ephemeral preset ahead of the board's own, and never persists it", () => {
+    const board = makeBoard({ spawnPresets: [{ id: "p1", text: "/existing" }], defaultSpawnPresetId: "p1" });
+    const extraPreset = { id: "corral-doctor-fix", text: "/corral-doctor fix\n\nfix jq" };
+    render(<TaskEditModal task={makeTask()} board={board} {...baseProps}
+      envs={[{ id: "e1", label: "Env1", kind: "local", reachable: true }]}
+      onSave={vi.fn()} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()}
+      initialTab="run" extraPreset={extraPreset} />);
+    const option = screen.getByRole("option", { name: "/corral-doctor fix" });
+    expect((option as HTMLOptionElement).selected).toBe(true);
+    expect(board.spawnPresets).toEqual([{ id: "p1", text: "/existing" }]);
+  });
+
+  it("falls back to the board's own default preset when extraPreset is absent", () => {
+    const board = makeBoard({ spawnPresets: [{ id: "p1", text: "/existing" }], defaultSpawnPresetId: "p1" });
+    render(<TaskEditModal task={makeTask()} board={board} {...baseProps}
+      envs={[{ id: "e1", label: "Env1", kind: "local", reachable: true }]}
+      onSave={vi.fn()} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()} initialTab="run" />);
+    expect(screen.queryByRole("option", { name: "/corral-doctor fix" })).toBeNull();
+    const option = screen.getByRole("option", { name: "/existing" });
+    expect((option as HTMLOptionElement).selected).toBe(true);
+  });
 });
 
 describe("TaskEditModal — Board/Project row layout", () => {

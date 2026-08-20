@@ -3,7 +3,8 @@ import { computeRollup, emptyDiagnostics } from "@shared/diagnostics-schema";
 import { describe, expect, it } from "vitest";
 
 import {
-  badgeCount, groupChecks, headerStatus, maxCheckedAt, pickSnapshot, renderedChecks, syntheticChecks,
+  badgeCount, buildFixPreset, groupChecks, headerStatus, maxCheckedAt, pickSnapshot, renderedChecks,
+  syntheticChecks,
 } from "../web/src/lib/diagnostics-view";
 
 function check(over: Partial<Check> = {}): Check {
@@ -214,5 +215,77 @@ describe("groupChecks", () => {
       check({ key: "g", scope: { kind: "global" } }),
     ];
     expect(groupChecks(rows, label).map((x) => x.key)).toEqual(["global", "env:e1", "dir:e1:~/.claude"]);
+  });
+});
+
+describe("buildFixPreset", () => {
+  it("is null when nothing is a problem", () => {
+    expect(buildFixPreset([check({ state: "ok" }), check({ key: "b", state: "n/a" })], label)).toBe(null);
+  });
+
+  it("is null when the only problem is synthetic — nothing a spawned session could fix", () => {
+    const rows = syntheticChecks(snapshot({ lastError: "boom" }), true);
+    expect(buildFixPreset(rows, label)).toBe(null);
+  });
+
+  it("titles singular for one problem, plural for more than one", () => {
+    expect(buildFixPreset([check({ state: "problem" })], label)?.title).toBe("Fix 1 corral issue");
+    expect(buildFixPreset([check({ key: "a", state: "problem" }), check({ key: "b", state: "problem" })], label)?.title)
+      .toBe("Fix 2 corral issues");
+  });
+
+  it("the preset text opens with the skill invocation and excludes synthetic rows", () => {
+    const rows = [
+      ...syntheticChecks(snapshot({ lastError: "boom" }), true),
+      check({ key: "real", state: "problem", title: "jq missing", detail: "not on PATH", doc: { anchor: "quick-start", title: "Quick start" } }),
+    ];
+    const built = buildFixPreset(rows, label);
+    expect(built?.preset.text.startsWith("/corral-doctor")).toBe(true);
+    expect(built?.preset.text).toContain("jq missing");
+    expect(built?.preset.text).toContain("not on PATH");
+    expect(built?.preset.text).toContain("Quick start");
+    expect(built?.preset.text).not.toContain("corral is not answering");
+  });
+
+  // If the operator never installed skills/corral-doctor, the spawned session greets `/corral-doctor`
+  // with "Unknown command" and has nothing else to go on — the prompt must give it a way out.
+  it("names the skill file directly, so a session without the skill installed still has instructions", () => {
+    const text = buildFixPreset([check({ state: "problem" })], label)?.preset.text ?? "";
+    expect(text).toContain("skills/corral-doctor/SKILL.md");
+  });
+
+  // A human glancing at the board sees the card, not the Run tab — the description is what tells
+  // them there is something to click, independent of the Claude-facing preset text.
+  // The description IS the composed brief, not a separate hand-written claim about it — a claim like
+  // "the fix prompt is already filled in" goes false the moment the (never-persisted) preset is gone,
+  // e.g. the modal closes and reopens. The description is the durable copy; there is only one text.
+  it("gives the card a description that is the SAME text as the preset — nothing else to go stale", () => {
+    const built = buildFixPreset([check({ state: "problem" })], label);
+    expect(built?.description).toBe(built?.preset.text);
+    expect(built?.description).toContain("1 corral diagnostics problem");
+  });
+
+  it("orders rows fatal before warning before info, and names an env-scoped row's environment", () => {
+    const rows = [
+      check({ key: "i", state: "problem", severity: "info", title: "info row" }),
+      check({ key: "w", state: "problem", severity: "warning", title: "warning row" }),
+      check({ key: "f", state: "problem", severity: "fatal", title: "fatal row", scope: { kind: "env", envId: "e1" } }),
+    ];
+    const text = buildFixPreset(rows, label)?.preset.text ?? "";
+    const at = (s: string): number => text.indexOf(s);
+    expect(at("fatal row")).toBeGreaterThan(-1);
+    expect(at("fatal row")).toBeLessThan(at("warning row"));
+    expect(at("warning row")).toBeLessThan(at("info row"));
+    expect(at("[Work (local)] [fatal] fatal row")).toBeGreaterThan(-1);
+  });
+
+  it("never exceeds the server's 2000-char startCommand cap, however many rows are outstanding", () => {
+    const rows = Array.from({ length: 40 }, (_, i) => check({
+      key: `k${String(i)}`, state: "problem", title: `problem number ${String(i)}`,
+      detail: "some detail text that takes up real space in the composed brief",
+    }));
+    const text = buildFixPreset(rows, label)?.preset.text ?? "";
+    expect(text.length).toBeLessThan(2000);
+    expect(text).toContain("more — open the Health panel for the rest");
   });
 });

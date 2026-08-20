@@ -86,9 +86,12 @@ interface Props {
   readonly labelFor: (envId: string) => string;
   readonly onClose: () => void;
   readonly onSnapshot: (s: DiagnosticsSnapshot) => void;
+  // Undefined hides the button — no board is active (SideRail), or nothing here is fixable
+  // (buildFixPreset returned null: only synthetic client rows are outstanding).
+  readonly onFixIssues?: (() => void) | undefined;
 }
 
-export function HealthPanel({ snapshot, streamDown, labelFor, onClose, onSnapshot }: Props): JSX.Element {
+export function HealthPanel({ snapshot, streamDown, labelFor, onClose, onSnapshot, onFixIssues }: Props): JSX.Element {
   const rows = renderedChecks(snapshot, streamDown);
   const rollup = computeRollup(rows);
   const status = headerStatus(rollup, snapshot.answered.length, rows.length);
@@ -127,10 +130,17 @@ export function HealthPanel({ snapshot, streamDown, labelFor, onClose, onSnapsho
               {rollup.pending > 0 && ` · ${String(rollup.pending)} pending`}
             </span>
           )}
-          <button type="button" onClick={recheck} disabled={busy}
-                  className="ml-auto text-xs text-primary hover:underline disabled:text-muted-foreground">
-            {busy ? "Rechecking…" : "Recheck"}
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            {onFixIssues !== undefined && (
+              <button type="button" onClick={onFixIssues} className="text-xs text-primary hover:underline">
+                Fix issues
+              </button>
+            )}
+            <button type="button" onClick={recheck} disabled={busy}
+                    className="text-xs text-primary hover:underline disabled:text-muted-foreground">
+              {busy ? "Rechecking…" : "Recheck"}
+            </button>
+          </div>
         </div>
         {error !== null && <p className="text-xs text-red-500">{error}</p>}
         {latest !== null && isStableTag(latest) && (
