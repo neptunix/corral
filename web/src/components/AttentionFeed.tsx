@@ -1,9 +1,8 @@
-import type { Board } from "@shared/board-schema";
-import type { AttentionMap, EnvState } from "@shared/schema";
-import { useState, type JSX } from "react";
+import type { EnvState } from "@shared/schema";
+import type { JSX } from "react";
 
 import { SessionCard } from "./SessionCard";
-import { boardAttention } from "../lib/attention";
+import type { BoardAttentionEntry } from "../lib/attention";
 import { envLabel } from "../lib/env";
 import { parseKey } from "../lib/protocol";
 
@@ -16,43 +15,19 @@ function formatAge(epochMs: number): string {
 }
 
 interface Props {
-  readonly attention: AttentionMap;
-  readonly boards: readonly Board[];
+  readonly entries: readonly BoardAttentionEntry[];
   readonly envs: Readonly<Record<string, EnvState>>;
-  readonly activeBoardId: string | null;
   readonly onOpen: (env: string, paneId: string) => void;
+  readonly onClose: () => void;
 }
 
-// Attention feed, scoped to the active board (design 2026-07-10): only sessions bound to a task on
-// this board. Unassigned-attention items (bound to no board) surface via the "Unassigned sessions"
-// switcher badge + the Unassigned view instead — they never appear here.
-export function AttentionFeed({ attention, boards, envs, activeBoardId, onOpen }: Props): JSX.Element {
-  const [collapsed, setCollapsed] = useState(false);
-  const entries = activeBoardId !== null ? boardAttention(attention, boards, activeBoardId) : [];
+// Presentational only. Board scoping and the collapsed/expanded decision both live in SideRail, because
+// two independent open flags would let both panels show at once and there is room for one.
+export function AttentionFeed({ entries, envs, onOpen, onClose }: Props): JSX.Element {
   const count = entries.length;
 
-  if (collapsed) {
-    return (
-      <div className="shrink-0 w-12 border-l border-border flex flex-col items-center pt-3">
-        <button
-          type="button"
-          onClick={() => { setCollapsed(false); }}
-          className="relative text-muted-foreground hover:text-foreground"
-          title="Show attention feed"
-        >
-          <span className="text-lg" aria-hidden>🔔</span>
-          {count > 0 && (
-            <span className="absolute -top-1 -right-2 min-w-4 px-1 h-4 rounded-full bg-destructive text-destructive-foreground text-[10px] leading-4 text-center">
-              {count}
-            </span>
-          )}
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <aside className="shrink-0 w-80 border-l border-border flex flex-col overflow-hidden bg-card">
+    <aside id="attention-panel" className="shrink-0 w-80 border-l border-border flex flex-col overflow-hidden bg-card">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
         <span className="text-foreground text-sm font-semibold">Attention</span>
         <span className={`text-xs px-1.5 py-0.5 rounded-full ${count > 0 ? "bg-destructive text-destructive-foreground" : "bg-muted text-muted-foreground"}`}>
@@ -60,7 +35,7 @@ export function AttentionFeed({ attention, boards, envs, activeBoardId, onOpen }
         </span>
         <button
           type="button"
-          onClick={() => { setCollapsed(true); }}
+          onClick={onClose}
           className="ml-auto text-muted-foreground hover:text-foreground text-sm"
           title="Collapse"
         >⇥</button>

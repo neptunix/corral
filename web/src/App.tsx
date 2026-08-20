@@ -2,12 +2,12 @@ import { StreamFrameSchema, type Board, type BoardState } from "@shared/board-sc
 import type { RecapSource, RecapStatus, RegistryStatus, SessionRow, StatuslineData } from "@shared/schema";
 import { useState, useEffect, useCallback, useMemo, type JSX } from "react";
 
-import { AttentionFeed } from "./components/AttentionFeed";
 import { Board as BoardView } from "./components/Board";
 import { BoardSettingsModal } from "./components/BoardSettingsModal";
 import { BoardSwitcher } from "./components/BoardSwitcher";
 import { CreateTaskModal } from "./components/CreateTaskModal";
 import { SessionModal } from "./components/SessionModal";
+import { SideRail } from "./components/SideRail";
 import { UnassignedView } from "./components/UnassignedView";
 import { UsageFooter } from "./components/UsageFooter";
 import { api } from "./lib/api";
@@ -71,7 +71,7 @@ export function App(): JSX.Element {
 
   // The no-board stream sends GlobalState frames (no board/tasks) — parse the union, never drop them:
   // a dropped frame freezes the attention feed and unassigned list on that view.
-  const frame = useEventSource(streamUrl, StreamFrameSchema);
+  const { frame, streamDown } = useEventSource(streamUrl, StreamFrameSchema);
 
   // Clear the local override + optimistic overlay whenever SSE delivers a fresh snapshot. The optimistic
   // clear uses a functional guard so a zero-override poll (the steady state) doesn't force a re-render.
@@ -312,17 +312,19 @@ export function App(): JSX.Element {
           )}
         </div>
 
-        {/* The rail is per-board, so it accompanies a board view only — hidden on the global
-            Unassigned view (matches the design's State B) and before any board is selected. */}
-        {!showUnassigned && activeBoardId !== null && (
-          <AttentionFeed
-            attention={attention}
-            boards={boards}
-            envs={globalState?.envs ?? {}}
-            activeBoardId={activeBoardId}
-            onOpen={openSession}
-          />
-        )}
+        {/* Unconditional: 🛟 must be reachable on the Unassigned view, before any board is selected, and
+            on the "Failed to load boards" screen — the moment diagnostics matter most. 🔔 is board-scoped
+            and hides itself; unassigned attention surfaces through the switcher badge by design. */}
+        <SideRail
+          diagnostics={globalState?.diagnostics ?? null}
+          streamDown={streamDown}
+          attention={attention}
+          boards={boards}
+          envs={globalState?.envs ?? {}}
+          activeBoardId={activeBoardId}
+          showUnassigned={showUnassigned}
+          onOpen={openSession}
+        />
       </div>
 
       {showSettings && activeBoardId !== null && activeBoardState !== null && (

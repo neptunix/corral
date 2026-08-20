@@ -1,4 +1,6 @@
 import type { Board, BoardState, SessionLink, Task } from "@shared/board-schema";
+import type { DiagnosticsSnapshot } from "@shared/diagnostics-schema";
+import { DiagnosticsSnapshotSchema } from "@shared/diagnostics-schema";
 import type { PaneRead } from "@shared/schema";
 import { z } from "zod";
 
@@ -170,5 +172,12 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ mode }),
       }),
+  },
+  diagnostics: {
+    // Parsed here rather than trusted: `req` returns the body unvalidated, and this is a boundary.
+    // The route answers 503 when diagnostics are unwired, which `req` turns into a thrown Error —
+    // the caller renders that as an operator-facing line, never as silence.
+    refresh: async (): Promise<DiagnosticsSnapshot> =>
+      DiagnosticsSnapshotSchema.parse(await req<unknown>("/api/diagnostics/refresh", { method: "POST" })),
   },
 };
