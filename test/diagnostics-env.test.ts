@@ -107,6 +107,8 @@ describe("claude-config-dirs and config-dir-exists", () => {
     // sentence in `title` and leaves `detail: ""` — populating detail too would add an indented
     // continuation line to the startup report (render.ts), breaking parity with today's output.
     expect(c?.title).toMatch(/Remote Control/);
+    // The name mirror is the third thing this costs: card names stop following a Claude /rename.
+    expect(c?.title).toMatch(/rename/);
   });
 
   it("is ok when at least one dir is configured", () => {

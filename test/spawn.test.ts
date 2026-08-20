@@ -12,7 +12,7 @@ const localEnv: HerdrEnv = {
 const makeRow = (paneId: string, tab: string, workspace: string): SessionRow => ({
   env: "work-local", paneId, status: "idle", agent: "claude",
   cwd: "/proj", tab, workspace,
-  sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+  sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
 });
 
 function baseFns() {

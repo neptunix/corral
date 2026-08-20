@@ -238,8 +238,8 @@ export function configDirsChecks(envs: readonly HerdrEnv[], now: number): Check[
     return {
       ...base, id: "claude-config-dirs", key: checkKey("claude-config-dirs", scope), scope,
       title:
-        `registry: environment "${e.id}" — no "claudeConfigDirs" — live session state and Remote ` +
-        `Control do not function here`,
+        `registry: environment "${e.id}" — no "claudeConfigDirs" — live session state, Remote Control ` +
+        `and card names following a Claude rename do not function here`,
       state: "problem" as const, detail: "", startupOkLine: false,
     };
   });

@@ -6,7 +6,7 @@ import { detectTransitions, type WorkingMap } from "../server/transition.ts";
 const MIN = 600_000;
 const row = (paneId: string, status: string): SessionRow => ({
   env: "e", paneId, status, agent: "claude", cwd: "/x", tab: "t-" + paneId, workspace: "w",
-  sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+  sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
 });
 const key = (p: string): string => `e:${p}`;
 

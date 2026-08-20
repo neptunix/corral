@@ -172,6 +172,19 @@ describe("SessionRow — Claude's own session state", () => {
     expect(row.registryStatus).toBe("ok");
   });
 
+  it("defaults claudeName and claudeNameUserSet to null on a payload that predates them", () => {
+    const row = SessionRowSchema.parse({ ...base });
+    expect(row.claudeName).toBeNull();
+    // null, NOT false: "no record for this pane" is not "a record whose name is unusable".
+    expect(row.claudeNameUserSet).toBeNull();
+  });
+
+  it("carries a mirrored name and its provenance verdict", () => {
+    const row = SessionRowSchema.parse({ ...base, claudeName: "Fix the auth bug", claudeNameUserSet: true });
+    expect(row.claudeName).toBe("Fix the auth bug");
+    expect(row.claudeNameUserSet).toBe(true);
+  });
+
   it("carries remoteControl: false distinctly from the null default", () => {
     expect(SessionRowSchema.parse({ ...base, remoteControl: false }).remoteControl).toBe(false);
   });

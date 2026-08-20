@@ -25,9 +25,19 @@ async function hasChanges(cwd: string): Promise<boolean> {
 export function createGit(dataDir: string, intervalMs = GIT_COMMIT_INTERVAL_MS): {
   ensureRepo(): Promise<void>;
   start(): void;
-  stop(): void;
+  /** Resolves once the timer is cleared AND any commit already running has settled. */
+  stop(): Promise<void>;
 } {
   let timer: ReturnType<typeof setInterval> | null = null;
+  // setInterval fires whether or not the previous commit finished, and two concurrent `add -A`/
+  // `commit` runs on one repository collide on .git/index.lock — the loser exits non-zero and its
+  // changes simply do not get committed. So a tick is SKIPPED while one is already running: nothing is
+  // lost, because the next tick re-reads `git status --porcelain` and picks up whatever is still there.
+  //
+  // Holding that promise is also what lets stop() mean "done" rather than "timer cleared". A caller
+  // that tears dataDir down straight after stop() would otherwise race a live git subprocess, which
+  // then fails and logs from a promise nobody is watching.
+  let inFlight: Promise<void> | null = null;
 
   async function maybeCommit(): Promise<void> {
     try {
@@ -48,11 +58,15 @@ export function createGit(dataDir: string, intervalMs = GIT_COMMIT_INTERVAL_MS):
     },
 
     start() {
-      timer = setInterval(() => { void maybeCommit(); }, intervalMs);
+      timer = setInterval(() => {
+        if (inFlight !== null) return;
+        inFlight = maybeCommit().finally(() => { inFlight = null; });
+      }, intervalMs);
     },
 
-    stop() {
+    async stop() {
       if (timer !== null) { clearInterval(timer); timer = null; }
+      await inFlight; // maybeCommit swallows its own failures, so this never rejects
     },
   };
 }

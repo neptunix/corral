@@ -13,7 +13,7 @@ import { createStorage } from "../server/storage.ts";
 
 const snap: Snapshot = {
   envs: { "work-local": { reachable: true } },
-  sessions: [{ env: "work-local", paneId: "w1-1", status: "working", agent: "claude", cwd: "/x", tab: "t", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null }],
+  sessions: [{ env: "work-local", paneId: "w1-1", status: "working", agent: "claude", cwd: "/x", tab: "t", workspace: "w", sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null }],
 };
 const poller: Poller = {
   getSnapshot: () => snap,
@@ -52,7 +52,7 @@ describe("api", () => {
           ctx: { pct: 42, tokens: null, window: null }, cost: { usd: null, lines_added: null, lines_removed: null },
           rate: { five_hour: { used_percentage: 31, resets_at: 1 }, seven_day: null }, effort: null,
           thinking: null, cc_version: null }, statuslineStatus: "ok",
-        claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+        claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
       }],
     };
     const app = createApi({
