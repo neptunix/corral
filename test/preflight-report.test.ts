@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import type { HerdrEnv } from "../environments.ts";
 import type { MissingBinary, ReportLine } from "../server/preflight.ts";
-import { buildReport, checkRegistryDirs, formatReport, loadEnvironmentsOrReport } from "../server/preflight.ts";
+import { buildReport, formatReport, loadEnvironmentsOrReport } from "../server/preflight.ts";
 
 const pinned = (id: string): HerdrEnv => ({
   id, label: id.toUpperCase(), kind: "local", socket: `~/.config/herdr/sessions/${id}/herdr.sock`,
@@ -231,16 +231,16 @@ describe("formatReport", () => {
 
 describe("buildReport — the registry line", () => {
   it("says so once when every environment is readable", () => {
-    const r = buildReport(input({ registry: [{ envId: "work", state: "ok", detail: "" }] }));
+    const r = buildReport(input({ envs: [{ ...pinned("work"), claudeConfigDirs: ["/home/u/.claude"] }] }));
     expect(texts(r)).toContain("registry readable in every environment");
     expect(r.fatal).toBe(false);
   });
 
   it("warns per environment, naming the consequence, and never refuses to boot", () => {
     const r = buildReport(input({
-      registry: [
-        { envId: "work", state: "ok", detail: "" },
-        { envId: "box", state: "no-config-dirs", detail: "no \"claudeConfigDirs\" — live session state and Remote Control do not function here" },
+      envs: [
+        { ...pinned("work"), claudeConfigDirs: ["/home/u/.claude"] },
+        { ...unpinned("box"), claudeConfigDirs: [] },
       ],
     }));
     expect(texts(r)).toContain('environment "box"');
@@ -252,52 +252,17 @@ describe("buildReport — the registry line", () => {
   });
 
   it("emits nothing when the registry was not checked", () => {
-    expect(texts(buildReport(input()))).not.toContain("registry");
+    expect(texts(buildReport(input({ envs: [] })))).not.toContain("registry");
   });
 
   it("emits nothing about the registry when the config failed to load", () => {
     // envs: null is the config-failure path; nothing is known, so nothing may be claimed.
-    expect(texts(buildReport(input({ envs: null, registry: [{ envId: "work", state: "ok", detail: "" }] }))))
-      .not.toContain("registry");
-  });
-});
-
-describe("checkRegistryDirs", () => {
-  it("flags an environment with no config dirs at all", () => {
-    const out = checkRegistryDirs([unpinned("bare")], () => true);
-    expect(out[0]?.state).toBe("no-config-dirs");
-    expect(out[0]?.detail).toContain("do not function here");
+    expect(texts(buildReport(input({ envs: null })))).not.toContain("registry");
   });
 
-  it("flags a local config dir with no sessions/ directory", () => {
-    const env: HerdrEnv = { ...unpinned("work"), claudeConfigDirs: ["/home/u/.claude"] };
-    expect(checkRegistryDirs([env], () => false)[0]?.state).toBe("unreadable");
-    expect(checkRegistryDirs([env], () => true)[0]?.state).toBe("ok");
-  });
-
-  it("stats the sessions/ subdirectory, not the config dir itself", () => {
-    const seen: string[] = [];
-    const env: HerdrEnv = { ...unpinned("work"), claudeConfigDirs: ["/home/u/.claude"] };
-    checkRegistryDirs([env], (p) => { seen.push(p); return true; });
-    expect(seen).toEqual(["/home/u/.claude/sessions"]);
-  });
-
-  it("counts how many of several local dirs are missing", () => {
-    const env: HerdrEnv = { ...unpinned("work"), claudeConfigDirs: ["/a", "/b", "/c"] };
-    const out = checkRegistryDirs([env], (p) => p === "/a/sessions");
-    expect(out[0]?.state).toBe("unreadable");
-    expect(out[0]?.detail).toContain("2 of 3 config dir(s)");
-  });
-
-  it("does not stat a remote environment", () => {
-    let stats = 0;
-    const env: HerdrEnv = { ...remote("box"), claudeConfigDirs: ["/home/u/.claude"] };
-    expect(checkRegistryDirs([env], () => { stats++; return false; })[0]?.state).toBe("ok");
-    expect(stats).toBe(0);
-  });
-
-  it("reports one entry per environment, in order", () => {
-    const out = checkRegistryDirs([unpinned("a"), remote("b")], () => true);
-    expect(out.map((r) => r.envId)).toEqual(["a", "b"]);
+  it("still warns per environment with no claudeConfigDirs — the line the refactor must not lose", () => {
+    const r = buildReport(input({ envs: [{ ...unpinned("box"), claudeConfigDirs: [] }] }));
+    expect(r.lines.some((l) => l.level === "warning" && l.text.includes("box") && l.text.includes("do not function here"))).toBe(true);
+    expect(r.fatal).toBe(false);
   });
 });

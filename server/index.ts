@@ -1,13 +1,19 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import path from "node:path";
 
 import {
-  BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, FLEET_RESTORE_STAGGER_MS, HOST, LIST_TIMEOUT, PORT,
+  BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, CORRAL_HOME, DIAGNOSTICS_INTERVAL_MS,
+  DIAGNOSTICS_VERSION_TTL_MS, FLEET_RESTORE_STAGGER_MS, HOST, LIST_TIMEOUT, PORT,
   UPLOAD_ROOT, WS_ALLOWED_ORIGINS, ZOMBIE_REAP_ENABLED, ZOMBIE_REAP_GRACE_MS,
 } from "../config.ts";
 import { createApi } from "./api.ts";
 import { createAttentionStore } from "./attention-store.ts";
 import { sweepBriefRoot } from "./brief.ts";
+import { createNodeDeps } from "./diagnostics/deps.ts";
+import { createDiagnosticsStore } from "./diagnostics-store.ts";
+import { createDiagnosticsSweep } from "./diagnostics-sweep.ts";
+import { runLocalTool } from "./exec-tool.ts";
 import { createFleetMirror, ensureMirrorGitignore, mirrorPath } from "./fleet-mirror.ts";
 import { createFleetRestore } from "./fleet-restore.ts";
 import { createGit } from "./git.ts";
@@ -16,6 +22,7 @@ import { assertLoopback } from "./host-guard.ts";
 import { createPoller } from "./poller.ts";
 import { formatReport, resolveReapGrace, runPreflight } from "./preflight.ts";
 import { startReconciler } from "./reconcile.ts";
+import { readSelfVersion } from "./self-version.ts";
 import { spawnSession, type SpawnOpts, type SpawnResult } from "./spawn.ts";
 import { createStorage } from "./storage.ts";
 import { readLastActivity } from "./transcript.ts";
@@ -25,7 +32,7 @@ import { startZombieReaper } from "./zombie-reaper.ts";
 
 assertLoopback(HOST);
 
-const { report, envs: ENVS } = await runPreflight();
+const { report, envs: ENVS, configLine: preflightConfigLine } = await runPreflight();
 console.error(formatReport(report.lines));
 if (report.fatal || ENVS === null) {
   console.error("\nFATAL: refusing to start.");
@@ -53,6 +60,22 @@ void (async () => {
   const mirror = createFleetMirror({ dataDir: BOARD_DATA_DIR });
   mirror.start(poller);
   poller.start();
+  // Self-diagnostics: every check corral runs about its own install, on one contained tick. After
+  // poller.start() because the sweep reads the poller's snapshot for reachability and session state.
+  const diagnostics = createDiagnosticsStore({ selfVersion: readSelfVersion() });
+  const diagnosticsSweep = createDiagnosticsSweep({
+    store: diagnostics, poller, envs: ENVS,
+    deps: createNodeDeps({ repoRoot: path.join(import.meta.dirname, "..") }),
+    corralHome: CORRAL_HOME,
+    // The config line this process actually booted with, handed over from runPreflight. Loading
+    // environments.ts a second time would return the same cached module evaluation, so a re-derived
+    // line could only ever repeat this one or describe a config the server is not running.
+    configLine: preflightConfigLine,
+    run: runLocalTool,
+    intervalMs: DIAGNOSTICS_INTERVAL_MS, versionTtlMs: DIAGNOSTICS_VERSION_TTL_MS,
+    warn: (m) => { console.error(m); },
+  });
+  if (DIAGNOSTICS_INTERVAL_MS > 0) diagnosticsSweep.start();
   // Backfill stored links' Claude sessionId once the poller sees it (spawned links start null) — the
   // write-side half of persistent session identity; buildBoardState does the read-side churn-heal.
   startReconciler({ poller, storage });
@@ -85,6 +108,10 @@ void (async () => {
     allowedOrigins: WS_ALLOWED_ORIGINS,
     spawn,
     fleetRestore,
+    diagnostics,
+    // `sweep.refresh`, not `tick`: the operator's re-check must post-date the request, so it waits out
+    // the run in flight and then runs once more with the version TTL bypassed.
+    refreshDiagnostics: diagnosticsSweep.refresh,
   });
   app.use("/*", serveStatic({ root: "./web/dist" })); // built frontend (Task 13+); absent in dev — harmless
 

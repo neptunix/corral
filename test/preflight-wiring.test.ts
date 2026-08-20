@@ -112,16 +112,19 @@ describe("the config check cannot go inert again", () => {
     // A static `import { ENVIRONMENTS }` anywhere in the graph evaluates environments.ts before the
     // startup body runs, making the config try/catch unreachable — and it compiles and lints clean.
     const offenders = serverSources().filter((f) =>
-      /^import\s+\{[^}]*\}\s+from\s+"\.\.\/environments\.ts"/m.test(read(path.join("server", f))),
+      /^import\s+\{[^}]*\}\s+from\s+"(?:\.\.\/)+environments\.ts"/m.test(read(path.join("server", f))),
     );
     expect(offenders).toEqual([]);
   });
 });
 
 function serverSources(): string[] {
-  return execFileSync("ls", ["server"], { cwd: root, encoding: "utf8" })
+  // Walks subdirectories (server/diagnostics/ etc.) — a flat `ls` would leave nested modules outside
+  // this guard's reach, silently exempting them from the environments.ts import check.
+  return execFileSync("find", [".", "-name", "*.ts", "-type", "f"], { cwd: path.join(root, "server"), encoding: "utf8" })
     .split("\n")
-    .filter((f) => f.endsWith(".ts"));
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => f.replace(/^\.\//, ""));
 }
 
 function scriptsOf(parsed: unknown): Record<string, string> {

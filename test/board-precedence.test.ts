@@ -1,9 +1,10 @@
 import type { BoardState, GlobalState } from "@shared/board-schema";
+import { EMPTY_DIAGNOSTICS } from "@shared/diagnostics-schema";
 import { describe, expect, it } from "vitest";
 
 import { pickBoardState, pickGlobalState } from "../web/src/lib/board-precedence.ts";
 
-const global_: GlobalState = { unassigned: [], envs: {}, attention: {}, accounts: [] };
+const global_: GlobalState = { unassigned: [], envs: {}, attention: {}, accounts: [], diagnostics: EMPTY_DIAGNOSTICS };
 const board = (id: string): BoardState => ({
   ...global_, board: { id, label: id.toUpperCase(), columns: [], tasks: [], spawnPresets: [], defaultSpawnPresetId: null }, tasks: [],
 });

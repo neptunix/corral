@@ -123,6 +123,17 @@ export const SWEEP_INITIAL_DELAY_MS = intFromEnv("SWEEP_INITIAL_DELAY_MS", 5000,
 export const ZOMBIE_REAP_ENABLED = process.env.ZOMBIE_REAP_ENABLED !== "false";
 export const ZOMBIE_REAP_GRACE_MS = intFromEnv("ZOMBIE_REAP_GRACE_MS", 180_000, { min: 0 });
 
+// ---- self-diagnostics sweep (server/diagnostics-sweep.ts) ----
+/**
+ * 0 = do not run the background sweep. One knob, not a boolean beside it: a DIAGNOSTICS_ENABLED flag
+ * could only duplicate this value, and it would be a false promise anyway — it would gate the timer
+ * while POST /api/diagnostics/refresh still runs a full sweep on demand.
+ */
+export const DIAGNOSTICS_INTERVAL_MS = intFromEnv("DIAGNOSTICS_INTERVAL_MS", 60_000, { min: 0 });
+// Version probes shell out to herdr/claude, so they ride the same tick behind their own TTL rather
+// than running every minute. A Recheck bypasses this — see `refresh` in server/diagnostics-sweep.ts.
+export const DIAGNOSTICS_VERSION_TTL_MS = intFromEnv("DIAGNOSTICS_VERSION_TTL_MS", 600_000, { min: 1000 });
+
 export const BOARD_DATA_DIR = process.env.BOARD_DATA_DIR ?? CORRAL_HOME;
 export const GIT_COMMIT_INTERVAL_MS = 10_000;
 export const SPAWN_TIMEOUT_MS = 60_000;
