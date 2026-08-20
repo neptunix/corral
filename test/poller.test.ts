@@ -11,7 +11,7 @@ const A: HerdrEnv = { id: "a", label: "A", kind: "local", claudeConfigDirs: [], 
 const B: HerdrEnv = { id: "b", label: "B", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
 const row = (env: string, paneId: string): SessionRow => ({
   env, paneId, status: "working", agent: "claude", cwd: "/x", tab: "t", workspace: "w",
-  sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+  sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
 });
 
 describe("createPoller", () => {
@@ -117,7 +117,7 @@ describe("createPoller tab rename", () => {
     const rows = [{
       env: env.id, paneId: "p1", status: "working", agent: "claude", cwd: "/x",
       tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId: "11111111-2222-3333-4444-555555555555",
-      recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+      recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
     }];
     const statusline: StatuslineFn = () => Promise.resolve({
       data: {
@@ -151,7 +151,7 @@ const OTHER_UUID = "b24be66a-9f6a-5ca9-c531-3857fc1ca5e9";
 
 function rowWithSession(env: string, paneId: string, sessionId: string): SessionRow {
   return { env, paneId, status: "working", agent: "claude", cwd: "/x", tab: "t", workspace: "w",
-    sessionId, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null };
+    sessionId, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null };
 }
 
 describe("createPoller — recap sweep", () => {
@@ -316,7 +316,7 @@ const noop = (): void => {};
 const E: HerdrEnv = { id: "e1", label: "E1", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} };
 const mkRow = (status: string): SessionRow => ({
   env: "e1", paneId: "p", status, agent: "claude", cwd: "/x", tab: "t", workspace: "w",
-  sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+  sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
 });
 const NOOP_MAP: AttentionMap = {};
 
@@ -357,7 +357,7 @@ describe("createPoller initial sweep kick", () => {
   const liveRow: SessionRow = {
     env: A.id, paneId: "p1", status: "working", agent: "claude", cwd: "/x",
     tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId: SID,
-    recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+    recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
   };
   const userStatusline: StatuslineFn = () => Promise.resolve({
     data: {
@@ -479,6 +479,64 @@ describe("createPoller — registry join", () => {
     expect(patched?.waitingFor).toBe("input needed");
     expect(patched?.remoteControl).toBe(true);
     expect(patched?.registryStatus).toBe("ok");
+  });
+
+  it("lands claudeName and claudeNameUserSet from the record", async () => {
+    const p = createPoller({ envs: [A], list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]) });
+    await p.pollOnce();
+    p.applyRegistry(A, ok([{ sessionId: VALID_UUID, status: "busy", name: "fix the auth bug" }]));
+    const r = p.getSnapshot().sessions[0];
+    expect(r?.claudeName).toBe("fix the auth bug");
+    expect(r?.claudeNameUserSet).toBe(true);
+  });
+
+  it("closes the provenance gate on a derived name, and only on that value", async () => {
+    const p = createPoller({ envs: [A], list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]) });
+    await p.pollOnce();
+    p.applyRegistry(A, ok([{ sessionId: VALID_UUID, status: "busy", name: "corral-a1b2", nameSource: "derived" }]));
+    expect(p.getSnapshot().sessions[0]?.claudeNameUserSet).toBe(false);
+    // The name still rides across — only the gate closed.
+    expect(p.getSnapshot().sessions[0]?.claudeName).toBe("corral-a1b2");
+  });
+
+  it("treats an explicit \"user\" nameSource as user-set", async () => {
+    const p = createPoller({ envs: [A], list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]) });
+    await p.pollOnce();
+    p.applyRegistry(A, ok([{ sessionId: VALID_UUID, status: "busy", name: "n", nameSource: "user" }]));
+    expect(p.getSnapshot().sessions[0]?.claudeNameUserSet).toBe(true);
+  });
+
+  it("fails OPEN on an unrecognised nameSource — asserted so changing it is a decision", async () => {
+    const p = createPoller({ envs: [A], list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]) });
+    await p.pollOnce();
+    p.applyRegistry(A, ok([{ sessionId: VALID_UUID, status: "busy", name: "n", nameSource: "auto" }]));
+    expect(p.getSnapshot().sessions[0]?.claudeNameUserSet).toBe(true);
+  });
+
+  it("distinguishes a record with an empty name (false) from no record at all (null)", async () => {
+    const p = createPoller({ envs: [A], list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]) });
+    await p.pollOnce();
+    // No read yet: nothing has looked at this pane.
+    expect(p.getSnapshot().sessions[0]?.claudeName).toBeNull();
+    expect(p.getSnapshot().sessions[0]?.claudeNameUserSet).toBeNull();
+    // A record that exists but carries no name is a DIFFERENT state, and routes identically today.
+    p.applyRegistry(A, ok([{ sessionId: VALID_UUID, status: "busy", name: "" }]));
+    expect(p.getSnapshot().sessions[0]?.claudeName).toBeNull();
+    expect(p.getSnapshot().sessions[0]?.claudeNameUserSet).toBe(false);
+  });
+
+  it("keeps the last good name when a read degrades, and clears it only on a successful miss", async () => {
+    const p = createPoller({ envs: [A], list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]) });
+    await p.pollOnce();
+    p.applyRegistry(A, ok([{ sessionId: VALID_UUID, status: "busy", name: "kept" }]));
+    // ANY non-ok read retains the record — refusing it would freeze the mirror mid-rename over EACCES.
+    p.applyRegistry(A, { records: [], status: "read-error", truncated: false });
+    expect(p.getSnapshot().sessions[0]?.claudeName).toBe("kept");
+    expect(p.getSnapshot().sessions[0]?.registryStatus).toBe("read-error");
+    // Absence inside a SUCCESSFUL read is authoritative — every reader does a full directory read.
+    p.applyRegistry(A, ok([]));
+    expect(p.getSnapshot().sessions[0]?.claudeName).toBeNull();
+    expect(p.getSnapshot().sessions[0]?.claudeNameUserSet).toBeNull();
   });
 
   it("drops a record whose sessionId matches no live row", async () => {

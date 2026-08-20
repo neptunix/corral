@@ -93,7 +93,7 @@ function row(env: string, sessionId: string | null, over?: Partial<SessionRow>):
     env, paneId: `p-${sessionId ?? "x"}`, status: "working", agent: "claude", cwd: "/repo",
     tab: "my-tab", workspace: "acme:web", sessionId, recap: null, recapAt: null, recapStatus: null, recapSource: null,
     statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null,
-    remoteControl: null, registryStatus: null, ...over,
+    remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null, ...over,
   };
 }
 

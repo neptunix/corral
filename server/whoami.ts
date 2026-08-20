@@ -155,6 +155,9 @@ export async function resolveSelfViaPane(input: {
         waitingFor: null,
         remoteControl: null,
         registryStatus: null,
+        // Synthesized from a pane lookup, with no registry read behind it.
+        claudeName: null,
+        claudeNameUserSet: null,
       },
     };
   }

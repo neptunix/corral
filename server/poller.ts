@@ -8,7 +8,7 @@ import { createRecapCache, type RecapCache } from "./recap.ts";
 import { makeGuarded, runGuarded } from "./scheduler.ts";
 import {
   pickLatest, readRegistry as readRegistryDefault, type RegistryRead, type RegistryRecord,
-  remoteControlOf,
+  remoteControlOf, claudeNameOf, claudeNameUserSetOf,
 } from "./session-registry.ts";
 import { createStatuslineCache, type StatuslineCache } from "./statusline-cache.ts";
 import { readStatusline } from "./statusline.ts";
@@ -194,6 +194,8 @@ export function createPoller(opts: {
                   // is the one thing registryStatus exists to prevent. For a good read `reg.status`
                   // already is "ok".
                   registryStatus: reg.status,
+                  claudeName: claudeNameOf(reg.record),
+                  claudeNameUserSet: claudeNameUserSetOf(reg.record),
                 };
           }
           // A row whose pane has no cache entry keeps `registryStatus: null` — "nothing has read this

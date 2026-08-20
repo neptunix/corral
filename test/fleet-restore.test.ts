@@ -27,7 +27,7 @@ function liveRow(envId: string, sessionId: string | null): SessionRow {
     env: envId, paneId: `p-${sessionId ?? "x"}`, status: "working", agent: "claude", cwd: "/pane-cwd",
     tab: "t", workspace: "w", sessionId, recap: null, recapAt: null, recapStatus: null, recapSource: null,
     statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null,
-    remoteControl: null, registryStatus: null,
+    remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
   };
 }
 

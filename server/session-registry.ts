@@ -28,6 +28,32 @@ const REMOTE_NO_DIR_EXIT = 3;
  * `bridgeSessionId: null` on every Remote Control disconnect, and a plain `.optional()` would reject
  * the whole record the first time RC is turned off — dropping that session from the map entirely.
  */
+/**
+ * DRIFT NUDGE — the file holds more keys than corral models, and only a key with a NAMED CONSUMER is
+ * modeled. Unmodeled means STRIPPED: a Zod object drops unknown keys, so adding a consumer for one
+ * costs an entry here and, almost always, one in recordsEqual (server/poller.ts) beside it.
+ * `.passthrough()` was rejected — it retains fields nothing reads, and those keys would then have to
+ * be excluded from recordsEqual or they would dirty the cache for changes no consumer can observe.
+ *
+ * Known unmodeled keys, as observed on Claude Code 2.1.228-2.1.237 (2026-08-20):
+ *   cwd, entrypoint, formerNames, kind, messagingSocketPath, nameSince, peerFeatures, peerProtocol,
+ *   pid, procStart, startedAt, statusUpdatedAt, version
+ * A key NOT on that list and not modeled below is new and needs a decision. A key MISSING from the
+ * output is not drift: the union is per-directory, because an optional key appears only when some
+ * file in that directory happens to carry one — the same command over three config dirs on one
+ * machine returned twenty, seventeen and fourteen keys. Never write a count here.
+ *
+ *   jq -s 'map(keys) | add | unique' <claude-config-dir>/sessions/*.json
+ *   jq -r 'if has("nameSource") then (.nameSource|tostring) else "ABSENT" end' \
+ *      <claude-config-dir>/sessions/*.json | sort | uniq -c
+ *
+ * The first finds a new KEY, the second a new VALUE in nameSource — which the first cannot see, and
+ * which is what claudeNameUserSetOf's deny-list of one turns on. `has("nameSource")` rather than
+ * `// "ABSENT"`, because `//` also swallows an explicit null and a newly-appearing explicit null is a
+ * format change worth seeing; the probe is deliberately stricter than the rule, which collapses null
+ * and absent. Neither command runs itself, and bad-schema catches none of this: every candidate value
+ * is a valid string.
+ */
 export const RegistryRecordSchema = z.object({
   sessionId: z.string(),
   name: z.string().nullable().optional(),
@@ -55,6 +81,24 @@ export interface RegistryRead {
 export function remoteControlOf(record: RegistryRecord): boolean {
   const id = record.bridgeSessionId;
   return id !== undefined && id !== null && id !== "";
+}
+
+/** The session's name, for a record that EXISTS; empty collapses to null. */
+export function claudeNameOf(record: RegistryRecord): string | null {
+  const name = record.name;
+  return name === undefined || name === null || name === "" ? null : name;
+}
+
+/**
+ * Whether that name was set deliberately, for a record that EXISTS — "no record" is the caller's null.
+ * A DENY-LIST OF ONE: only `"derived"`, Claude's own auto-name, closes the gate. The alternative —
+ * treat any non-absent value as not-user-set — would switch the gate off silently the day Claude Code
+ * writes `"user"`, the literal server/tab-namer.ts already anticipates. The price is a fail-open: a
+ * marker we have not been told about is accepted, and the drift nudge at RegistryRecordSchema is how
+ * that gets noticed.
+ */
+export function claudeNameUserSetOf(record: RegistryRecord): boolean {
+  return claudeNameOf(record) !== null && record.nameSource !== "derived";
 }
 
 /**

@@ -1,6 +1,13 @@
+import type { SessionLink } from "@shared/board-schema";
+
+import { normalizeLinkName } from "./link-name.ts";
+import { buildLiveIndex, resolveLiveRow, type LiveIndex } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
 import type { Storage } from "./storage.ts";
 
+// Two writes onto stored SessionLinks, sharing one transaction per board: the sessionId BACKFILL, and
+// the name MIRROR that keeps link.name following the live Claude session's name.
+//
 // Backfill the stable Claude sessionId onto stored SessionLinks once it becomes available. A link is
 // created (especially at spawn) before Claude registers on the pane, so its sessionId starts null; the
 // live row gains the id a poll or two later. On each poller snapshot we copy that id onto the link —
@@ -20,6 +27,33 @@ import type { Storage } from "./storage.ts";
 // source of null links is a fresh spawn, which the poller backfills within one interval (~30 s), so
 // poisoning needs a herdr restart that reassigns the pane inside that window. Once a link has an id,
 // buildBoardState resolves by sessionId (not paneId), so the durable read path stays id-safe.
+
+// The name a stored link SHOULD carry, or null to leave it alone. Called from both the pre-scan and
+// the write callback rather than writing the condition twice, so the two cannot drift apart — and the
+// pre-scan must be exactly as strict as the write, because opening a board is ALWAYS a write
+// (server/storage.ts has no no-op return path), so a looser gate rewrites the file every 3 s.
+//
+// Resolution is by sessionId, never by the pane: a link poisoned onto the wrong id would otherwise be
+// renamed to a stranger's name on every snapshot, durably. `!== ""` as well as `!== null` because an
+// unset id is either in this codebase — "" passes a non-null test, and resolveLiveRow would then fall
+// back to plain paneId resolution, which is the hazard this keys on sessionId to avoid.
+//
+// One escalation worth knowing: pickLatest breaks an exact `updatedAt` tie by keeping the first
+// record read (server/session-registry.ts), so a stale dead-PID file tying with the live one is
+// resolved by directory order. That used to flicker a label; here it would rewrite the board and
+// commit it. Narrow — a live record's updatedAt moves — but the failure changed in kind.
+//
+// Normalize BEFORE both tests. Comparing the raw name and storing the normalized one never converges;
+// testing the raw name for non-emptiness lets a whitespace-only name normalize to "", the one value
+// server/api.ts says must never be stored.
+function mirrorNameFor(link: SessionLink, index: LiveIndex): string | null {
+  if (link.sessionId === null || link.sessionId === "") return null;
+  const row = resolveLiveRow(link, index);
+  if (row?.claudeNameUserSet !== true || row.claudeName === null) return null;
+  const next = normalizeLinkName(row.claudeName);
+  return next === "" || next === link.name ? null : next;
+}
+
 export function startReconciler(opts: { poller: Poller; storage: Storage }): () => void {
   const { poller, storage } = opts;
   const inFlight = new Set<string>();
@@ -30,13 +64,17 @@ export function startReconciler(opts: { poller: Poller; storage: Storage }): () 
     for (const s of snapshot.sessions) {
       if (s.sessionId !== null && s.sessionId !== "") idByPane.set(`${s.env}:${s.paneId}`, s.sessionId);
     }
+    // bySession is filled under the identical predicate, so the two indexes are empty together and
+    // this early return cannot skip a mirror that would otherwise have run.
     if (idByPane.size === 0) return;
+    const index = buildLiveIndex(snapshot.sessions);
 
     for (const board of storage.getAllBoards()) {
       if (inFlight.has(board.id)) continue;
-      const needs = board.tasks.some((t) =>
+      const needsBackfill = board.tasks.some((t) =>
         t.sessions.some((l) => (l.sessionId === null || l.sessionId === "") && idByPane.has(`${l.env}:${l.paneId}`)));
-      if (!needs) continue;
+      const needsMirror = board.tasks.some((t) => t.sessions.some((l) => mirrorNameFor(l, index) !== null));
+      if (!needsBackfill && !needsMirror) continue;
 
       inFlight.add(board.id);
       void storage.withBoard(board.id, (existing) => {
@@ -48,15 +86,26 @@ export function startReconciler(opts: { poller: Poller; storage: Storage }): () 
         const tasks = existing.tasks.map((t) => ({
           ...t,
           sessions: t.sessions.map((l) => {
-            if (l.sessionId !== null && l.sessionId !== "") return l;
-            const id = idByPane.get(`${l.env}:${l.paneId}`);
-            return id === undefined ? l : { ...l, sessionId: id };
+            // Backfill and mirror are exclusive per link, and backfill wins: a link that gains its id
+            // here is mirrored on the NEXT snapshot. Mirroring it in the same pass would inherit the
+            // backfill's paneId-poisoning caveat — which is bounded for a one-shot null -> value write
+            // but not for a name rewritten on every snapshot thereafter. The mirror is level-triggered,
+            // so the wait costs one tick and never loses the rename.
+            if (l.sessionId === null || l.sessionId === "") {
+              const id = idByPane.get(`${l.env}:${l.paneId}`);
+              return id === undefined ? l : { ...l, sessionId: id };
+            }
+            const next = mirrorNameFor(l, index);
+            if (next === null) return l;
+            console.warn(`[reconcile] name mirror: board ${existing.id} task ${t.id} session ${l.sessionId} "${l.name}" -> "${next}"`);
+            return { ...l, name: next };
           }),
         }));
         return { board: { ...existing, tasks }, result: undefined };
       })
         .catch((err: unknown) => {
-          console.warn(`[reconcile] backfill failed for board ${board.id}: ${err instanceof Error ? err.message : String(err)}`);
+          const what = needsBackfill && needsMirror ? "backfill+name mirror" : needsBackfill ? "backfill" : "name mirror";
+          console.warn(`[reconcile] ${what} failed for board ${board.id}: ${err instanceof Error ? err.message : String(err)}`);
         })
         .finally(() => { inFlight.delete(board.id); });
     }

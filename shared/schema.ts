@@ -110,6 +110,19 @@ export const SessionRowSchema = z.object({
   waitingFor: z.string().nullable().default(null),
   remoteControl: z.boolean().nullable().default(null),
   registryStatus: RegistryStatusSchema.nullable().default(null),
+  // The session's own name, and a DECISION about its provenance rather than a copy of `nameSource`.
+  // NOT the same field as WhoamiCardSession.claudeName (shared/whoami-schema.ts), which comes from the
+  // statusline capture on the 60 s sweep and carries no provenance — the two can differ in latency and
+  // in source, and only this one is registry-derived.
+  // The file's `nameSource` cannot ride across as-is: on the statusline path `null` means "registry
+  // miss" (server/tab-namer.ts), while on the registry path ABSENT means the opposite — set
+  // deliberately, by /rename or by corral's own `--name`. One field cannot carry both meanings, so
+  // rebuild() resolves it where both are in scope. `"derived"` — Claude's own auto-name — is the only
+  // value that closes the gate; a marker corral has not been told about fails OPEN (see the drift
+  // nudge at RegistryRecordSchema). null = no record for this pane; false = a record with no usable
+  // name; true = a record whose name was set deliberately.
+  claudeName: z.string().nullable().default(null),
+  claudeNameUserSet: z.boolean().nullable().default(null),
 });
 
 export const SnapshotSchema = z.object({

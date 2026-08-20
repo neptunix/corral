@@ -91,7 +91,7 @@ describe("aggregateAccounts", () => {
     statusline: { ...record, captured_at: capturedAt, account: { uuid, email: "a@b.c", org: "O", tier: "t" },
       rate: { five_hour: { used_percentage: pct, resets_at: 9 }, seven_day: null } },
     statuslineStatus: "ok",
-    claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+    claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
   });
 
   it("groups by account uuid, freshest capture wins, unions envs", () => {

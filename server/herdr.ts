@@ -213,6 +213,9 @@ export async function listSessions(env: HerdrEnv, exec?: ExecFn): Promise<Sessio
       waitingFor: null,
       remoteControl: null,
       registryStatus: null,
+      // Neither literal has registry access where it is built; rebuild() is the sole writer of real values.
+      claudeName: null,
+      claudeNameUserSet: null,
     };
   });
 }
