@@ -45,16 +45,48 @@ export const RollupSchema = z.object({
   fatal: z.number(), warning: z.number(), info: z.number(), pending: z.number(),
 });
 
+/**
+ * The repo-INDEPENDENT half of the release-URL rule — all this file can express, because it ships in
+ * the browser bundle and cannot read `package.json`. The `/<owner>/<repo>/` prefix is enforced by the
+ * producer (`server/diagnostics/update/check.ts`), which is where that knowledge lives.
+ */
+export function isReleaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.host === "github.com";
+  } catch {
+    return false;
+  }
+}
+
+/** Optional leading `v`, dotted digits, bounded. A prerelease or a word tag is not comparable. */
+export function isStableTag(value: string): boolean {
+  return value.length <= 32 && /^v?\d+(?:\.\d+){0,3}$/.test(value);
+}
+
+/**
+ * DEGRADING on purpose: ANYTHING that is not a conforming string — a hostile url, the wrong type, an
+ * absent field — becomes `null`, and the parse never fails. Rejecting would discard the WHOLE frame
+ * — sessions, envs, attention and the board — because this schema is nested inside
+ * `GlobalStateSchema` (see `web/src/useEventSource.ts`). A bad value must cost the link, not the
+ * dashboard. `z.unknown()` and not `z.string().nullable()`, because the latter rejects a non-string
+ * BEFORE the transform runs, which is the one case the degradation exists for.
+ */
+export const ReleaseUrlSchema = z.unknown()
+  .transform((v) => (typeof v === "string" && isReleaseUrl(v) ? v : null));
+
+/** Same contract as `ReleaseUrlSchema`: the panel renders `latest` as the anchor's own text. */
+export const LatestTagSchema = z.unknown()
+  .transform((v) => (typeof v === "string" && isStableTag(v) ? v : null));
+
 export const SelfInfoSchema = z.object({
   version: z.string().nullable(),
-  latest: z.string().nullable(),
-  releaseUrl: z.string().nullable(),
-  latestCheckedAt: z.number().nullable(),
+  latest: LatestTagSchema,
+  releaseUrl: ReleaseUrlSchema,
 });
 
 export const DiagnosticsSnapshotSchema = z.object({
   checks: z.array(CheckSchema),
-  rollup: RollupSchema,
   /**
    * Which cost classes have produced a result at least once. An empty snapshot's rollup is all zeros,
    * which reads as a clean bill of health — the exact lie this feature exists to remove. The rail
@@ -66,7 +98,7 @@ export const DiagnosticsSnapshotSchema = z.object({
    * The last sweep failure, or null. Without it a sweep that throws on every tick is invisible on the
    * wire: the store deliberately keeps the previous results, so the snapshot goes on publishing stale
    * rows that read as current. One nullable string is the difference between a panel that is quiet and
-   * a panel that lies, and the wire shape freezes in this stage.
+   * a panel that lies.
    */
   lastError: z.string().nullable(),
   self: SelfInfoSchema,
@@ -109,10 +141,9 @@ export function computeRollup(checks: readonly Check[]): Rollup {
 
 export const EMPTY_DIAGNOSTICS: DiagnosticsSnapshot = {
   checks: [],
-  rollup: { fatal: 0, warning: 0, info: 0, pending: 0 },
   answered: [],
   lastError: null,
-  self: { version: null, latest: null, releaseUrl: null, latestCheckedAt: null },
+  self: { version: null, latest: null, releaseUrl: null },
 };
 
 /**

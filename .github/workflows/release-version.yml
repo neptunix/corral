@@ -1,0 +1,33 @@
+name: release-version
+
+# `package.json`'s `version` is the only source of the version corral reports about itself, and the
+# update check compares it against this repository's newest release tag. A tag pushed without the
+# matching bump makes the health panel report a build nobody is running, and gives every operator a
+# permanent false "update available".
+#
+# This is an ALARM, not a gate: the job starts after the tag exists, so it cannot refuse the push,
+# and by the time it turns red `releases/latest` is already serving the mismatch. What it buys is
+# that the mismatch is found in minutes instead of by an operator's panel. Recovery is to bump
+# `package.json`, then move the tag and the release onto the corrected commit.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version-matches-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: package.json version must equal the tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag $GITHUB_REF_NAME implies version $tag, package.json says $pkg"
+            exit 1
+          fi
+          echo "package.json $pkg matches tag $GITHUB_REF_NAME"

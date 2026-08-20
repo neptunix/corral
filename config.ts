@@ -138,6 +138,10 @@ export const DIAGNOSTICS_VERSION_TTL_MS = intFromEnv("DIAGNOSTICS_VERSION_TTL_MS
 // the spelling an operator will actually write. DIAGNOSTICS_INTERVAL_MS=0 is NOT an off switch —
 // the unauthenticated refresh route still sweeps.
 export const REMOTE_PROBE_ENABLED = process.env.REMOTE_PROBE_ENABLED !== "false";
+// The one outbound HTTP request corral makes: asking GitHub whether this repository has a newer
+// release. Same house convention, for the same reason — an operator stopping egress writes `=false`,
+// and a knob answering only to some other spelling would leave egress on without saying so.
+export const UPDATE_CHECK_ENABLED = process.env.UPDATE_CHECK_ENABLED !== "false";
 
 export const BOARD_DATA_DIR = process.env.BOARD_DATA_DIR ?? CORRAL_HOME;
 export const GIT_COMMIT_INTERVAL_MS = 10_000;

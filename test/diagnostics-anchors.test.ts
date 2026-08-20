@@ -48,6 +48,22 @@ describe("README anchors", () => {
     expect(anchors.has("0-prerequisite-check--without-jq-the-metrics-capture-silently-does-nothing")).toBe(false);
   });
 
+  it("registers update-check, so its README anchor is guarded", () => {
+    expect(checks.map((c) => c.id)).toContain("update-check");
+  });
+
+  /**
+   * The row's own state is the assertion, not the absence of a throw: `updateCheck` catches
+   * everything, so a stub whose `fetch` throws would come back as an ordinary n/a and this file
+   * would stay green while `npm run check` called api.github.com on every run. A row that names the
+   * kill switch can only have come from the branch that returns before any request.
+   */
+  it("enumerates the row from the disabled branch, so no gate run performs a request", () => {
+    const row = checks.find((c) => c.id === "update-check");
+    expect(row?.state).toBe("n/a");
+    expect(row?.title).toContain("UPDATE_CHECK_ENABLED");
+  });
+
   it("gives every check a doc link", () => {
     const missing = checks.filter((c) => c.doc === null && c.id !== "env-unrunnable").map((c) => c.id);
     expect(missing).toEqual([]);

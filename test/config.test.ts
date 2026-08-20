@@ -7,8 +7,9 @@ import {
   FOCUS_TRANSLATION_ENABLED, intFromEnv,
   LIST_TIMEOUT, RECAP_ENABLED, RECAP_INTERVAL_MS, RECAP_TAIL_BYTES,
   RECAP_READ_TIMEOUT_MS, RECAP_CONTENT_MAX, REMOTE_PROBE_ENABLED,
-  TAB_RENAME_ENABLED, ZOMBIE_REAP_GRACE_MS,
+  TAB_RENAME_ENABLED, UPDATE_CHECK_ENABLED, ZOMBIE_REAP_GRACE_MS,
 } from "../config.ts";
+import { CACHE_DIR } from "../server/diagnostics/update/cache.ts";
 import { resolveReapGrace } from "../server/preflight.ts";
 
 describe("intFromEnv", () => {
@@ -92,6 +93,25 @@ describe("REMOTE_PROBE_ENABLED", () => {
     // writes =false, and under an exact === "off" test egress would stay ON with no warning.
     const src = readFileSync(path.join(import.meta.dirname, "..", "config.ts"), "utf8");
     expect(src).toMatch(/REMOTE_PROBE_ENABLED = process\.env\.REMOTE_PROBE_ENABLED !== "false"/);
+  });
+});
+
+describe("UPDATE_CHECK_ENABLED", () => {
+  it("UPDATE_CHECK_ENABLED defaults on", () => {
+    expect(UPDATE_CHECK_ENABLED).toBe(true);
+  });
+
+  it("UPDATE_CHECK_ENABLED is declared in the house spelling — !== \"false\", never === \"off\"", () => {
+    // Same reasoning as the switch above, and it matters more here: this is the knob whose entire
+    // purpose is stopping an outbound HTTP request.
+    const src = readFileSync(path.join(import.meta.dirname, "..", "config.ts"), "utf8");
+    expect(src).toMatch(/UPDATE_CHECK_ENABLED = process\.env\.UPDATE_CHECK_ENABLED !== "false"/);
+  });
+});
+
+describe("the update-check cache directory", () => {
+  it("does not live inside BOARD_DATA_DIR — server/git.ts commits that tree every 10 s", () => {
+    expect(CACHE_DIR.startsWith(BOARD_DATA_DIR)).toBe(false);
   });
 });
 

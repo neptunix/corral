@@ -1,5 +1,5 @@
 import type { Check, CheckClass, DiagnosticsSnapshot, SelfInfo } from "@shared/diagnostics-schema";
-import { CheckClassSchema, computeRollup } from "@shared/diagnostics-schema";
+import { CheckClassSchema } from "@shared/diagnostics-schema";
 
 /**
  * The in-memory home of every check result, keyed by COST CLASS rather than by check id.
@@ -30,7 +30,7 @@ const CLASS_ORDER: readonly CheckClass[] = CheckClassSchema.options;
 export function createDiagnosticsStore(opts: { selfVersion: string | null }): DiagnosticsStore {
   const byClass = new Map<CheckClass, readonly Check[]>();
   let self: SelfInfo = {
-    version: opts.selfVersion, latest: null, releaseUrl: null, latestCheckedAt: null,
+    version: opts.selfVersion, latest: null, releaseUrl: null,
   };
   let lastError: string | null = null;
 
@@ -51,10 +51,9 @@ export function createDiagnosticsStore(opts: { selfVersion: string | null }): Di
       // non-empty value, is what distinguishes "nothing is wrong" from "nothing has run yet".
       const answered = CLASS_ORDER.filter((cls) => byClass.has(cls));
       const checks = answered.flatMap((cls) => byClass.get(cls) ?? []);
-      // Recomputed here rather than maintained incrementally: one pass over a few dozen rows costs
-      // nothing, and an incremental counter is one missed `put` away from disagreeing with the rows
-      // it summarizes.
-      return { checks, rollup: computeRollup(checks), answered, lastError, self };
+      // No wire rollup: the web computes its own over the rows it actually renders (R7), so a second
+      // copy here could only ever disagree with the one on screen.
+      return { checks, answered, lastError, self };
     },
   };
 }

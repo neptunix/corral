@@ -16,6 +16,8 @@ import type { ProbeFacts } from "./diagnostics/remote/probe.ts";
 import type { RemoteEnv } from "./diagnostics/remote/script.ts";
 import type { ReportLine } from "./diagnostics/render.ts";
 import { buildStartupChecks, findMissingBinaries } from "./diagnostics/startup.ts";
+import type { UpdateCheckIo } from "./diagnostics/update/check.ts";
+import { updateCheck } from "./diagnostics/update/check.ts";
 import { versionChecks } from "./diagnostics/versions.ts";
 import type { DiagnosticsStore } from "./diagnostics-store.ts";
 import type { RunTool } from "./exec-tool.ts";
@@ -44,6 +46,12 @@ export interface SweepOpts {
   readonly probeExec: ExecFn;
   /** REMOTE_PROBE_ENABLED (config.ts). Off: remote rows compose as n/a naming the switch; no exec. */
   readonly remoteProbeEnabled: boolean;
+  /**
+   * The update check's I/O — `fetch`, the on-disk cache and the repository reader — injected for the
+   * same reason `probeExec` is: no test, and no `enumerateChecks` run, may perform a real request.
+   * `enabled` is UPDATE_CHECK_ENABLED.
+   */
+  readonly updateIo: UpdateCheckIo;
 }
 
 export interface DiagnosticsSweep {
@@ -177,15 +185,20 @@ const unreachableIds = (envs: readonly HerdrEnv[], snapshot: Snapshot): Readonly
  * is the version probes that need herdr, and its one `env-unrunnable` summary row per environment
  * would be emitted twice — the same key twice in one snapshot — if each class were suppressed apart.
  *
- * `cheap`, `versions` and `remote` are always written, even empty: presence of the key is what
- * tells the rail "this class has answered" apart from "nothing has run yet" — an all-local fleet
- * must still be able to tell "no remote environments" from "the remote class has never run", so the
- * seed lands unconditionally, in this one final pass rather than a separate early `put`.
+ * Every class is always written, even empty: presence of the key is what tells the rail "this class
+ * has answered" apart from "nothing has run yet" — an all-local fleet must still be able to tell "no
+ * remote environments" from "the remote class has never run".
+ *
+ * The seed lands here, in this one final pass, and NEVER as a separate early `put`. The store
+ * replaces a class wholesale, so an early `put(cls, [])` would blank that class's live row for the
+ * rest of the tick, and the empty window is observable over /api/diagnostics and /api/stream.
  */
 function publish(
   store: DiagnosticsStore, rows: readonly Check[], unreachable: ReadonlySet<string>, now: number,
 ): void {
-  const byClass = new Map<CheckClass, Check[]>([["cheap", []], ["versions", []], ["remote", []]]);
+  const byClass = new Map<CheckClass, Check[]>([
+    ["cheap", []], ["versions", []], ["remote", []], ["network", []],
+  ]);
   for (const c of suppressUnrunnable(rows, unreachable, now)) {
     const bucket = byClass.get(c.class);
     if (bucket === undefined) byClass.set(c.class, [c]);
@@ -288,8 +301,21 @@ export function createDiagnosticsSweep(opts: SweepOpts): DiagnosticsSweep {
         });
         versionsAt = now;
       }
-      const remoteRows = await remoteLeg(snapshot, now, manual);
-      publish(opts.store, [...cheap, ...versionRows, ...remoteRows], unreachableIds(opts.envs, snapshot), now);
+      // Together, not one after the other: the two legs share no I/O, and `publish` below is the
+      // single write for every class, so a serial update check would put GitHub's 8 s deadline on
+      // top of the remote budget before ANY row reached the panel — worst on the first tick after a
+      // launch, which is the moment this feature exists for.
+      //
+      // The update check rides the tick behind its own cache, and a Recheck deliberately does not
+      // bypass it: /api/diagnostics/refresh is unauthenticated and floored at 2 s, which is 30
+      // requests a minute against a 60/hour budget.
+      const [remoteRows, update] = await Promise.all([
+        remoteLeg(snapshot, now, manual),
+        updateCheck(opts.updateIo, opts.deps.now),
+      ]);
+      opts.store.patchSelf(update.self);
+      publish(opts.store, [...cheap, ...versionRows, ...remoteRows, update.check],
+        unreachableIds(opts.envs, snapshot), now);
       opts.store.setLastError(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -352,6 +378,19 @@ const INERT_DEPS: CheckDeps = {
   repoRoot: "/repo", now: () => 0,
 };
 
+/**
+ * The update check with its network and its disk taken away. `enumerateChecks` runs on every
+ * `npm run check` and every CI run, so a producer that reached api.github.com from here would make
+ * offline development wait out the deadline and spend the shared hourly budget from CI's own IP.
+ */
+const INERT_UPDATE_IO: UpdateCheckIo = {
+  enabled: false,
+  version: null,
+  repoSlug: () => null,
+  fetch: () => { throw new Error("enumerateChecks must never perform a request"); },
+  cache: { read: () => null, write: () => undefined, degraded: () => null },
+};
+
 const ENUMERATE_ENVS: readonly HerdrEnv[] = [
   { id: "local", label: "local", kind: "local", claudeConfigDirs: ["/cfg"], spawnCommand: "claude", repos: {} },
   { id: "remote", label: "remote", kind: "remote", sshHost: "host", socket: "/sock", herdrBin: "herdr", claudeConfigDirs: ["/cfg"], spawnCommand: "claude", repos: {} },
@@ -391,5 +430,8 @@ export async function enumerateChecks(): Promise<Check[]> {
     env: remoteEnv, probe: null, reason: "enumeration — no probe",
     repoRoot: "/repo", nodeVersion: "0.0.0", now: () => 0, localHash: () => null, ccVersion: null,
   });
-  return suppressUnrunnable([...cheap, ...versions, ...remoteRows], unreachableIds(ENUMERATE_ENVS, snapshot), 0);
+  const update = await updateCheck(INERT_UPDATE_IO, () => 0);
+  return suppressUnrunnable(
+    [...cheap, ...versions, ...remoteRows, update.check], unreachableIds(ENUMERATE_ENVS, snapshot), 0,
+  );
 }
