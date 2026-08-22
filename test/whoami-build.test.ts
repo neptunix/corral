@@ -149,7 +149,33 @@ describe("buildWhoami", () => {
     });
     if (!out.resolved) throw new Error("expected resolved");
     expect(out.session.sessionName).toBeNull();
+    // The other half of the split, and the whole point of it: the session must still be TOLD the name
+    // it answers to. Without this, re-gating the display field is invisible to the suite — and a
+    // session that reads "name not captured" hands out its tab label, which for a resumed session is
+    // the slugified card name and not an address (mcp/digest.ts).
+    expect(out.session.claudeName).toBe("auto-derived-title");
     expect(out.task?.sessions.find((s) => s.name === "api-refactor-a")?.claudeName).toBe("auto-derived-title");
+  });
+
+  it("normalizes the name it hands out to be STORED, and drops one that normalizes away", () => {
+    // This value reaches SessionLink.name through the MCP attach, whose body schema puts no bound on
+    // it — so the normalizer here is the boundary, not a nicety.
+    const localEnv = ENVIRONMENTS.find((e) => e.id === "work-local");
+    if (localEnv === undefined) throw new Error("fixture missing work-local");
+    const named = (claudeName: string): ReturnType<typeof buildWhoami> => {
+      const r = row({ statusline, statuslineStatus: "ok", claudeName, claudeNameUserSet: true });
+      return buildWhoami({
+        resolution: { ok: true, env: localEnv, row: r },
+        envs: ENVIRONMENTS, snapshot: { ...snapshot, sessions: [r, sibling] }, boards: [board],
+      });
+    };
+    const trimmed = named("  auth-fix  ");
+    if (!trimmed.resolved) throw new Error("expected resolved");
+    expect(trimmed.session.sessionName).toBe("auth-fix");
+
+    const blankAfterNormalize = named("   ");
+    if (!blankAfterNormalize.resolved) throw new Error("expected resolved");
+    expect(blankAfterNormalize.session.sessionName).toBeNull();
   });
 
   it("returns a null task for a session bound to nothing", () => {
