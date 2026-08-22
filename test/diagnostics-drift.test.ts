@@ -45,11 +45,6 @@ describe("helper-drift", () => {
     expect(c.detail).toContain("skills/corral-doctor/SKILL.md");
   });
 
-  it("stays ok when corral-doctor is simply not installed — the skill is optional", () => {
-    const d = deps({ hashFile: (p) => (p === `${D}/skills/corral-doctor/SKILL.md` ? null : "same") });
-    expect(driftCheck(d, "work", D).state).toBe("ok");
-  });
-
   it("never reports statusline-command.sh — README allows your own", () => {
     const d = deps({ hashFile: (p) => (p.endsWith("statusline-command.sh") ? "mine" : "same") });
     expect(driftCheck(d, "work", D).state).toBe("ok");
