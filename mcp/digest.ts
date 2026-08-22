@@ -222,15 +222,12 @@ export function formatFleet(input: {
     // The session's own name, not the tab label: they coincide for a corral-spawned session (one
     // string becomes both) but not for one started by hand or renamed since. The tab label is the
     // fallback, mirroring formatWhoami's "you are:" line.
-    // "" counts as absent, not as a name: a captured-but-empty session_name would otherwise render a
-    // blank column exactly where the reader is told to find an address.
+    // Read from the registry, not the statusline capture: the capture is only written when Claude
+    // renders its statusline, so an idle session's name there can be hours old. claudeNameOf already
+    // collapses "" to null, so absence is the single check.
     // Marked, not silent: the tab column this replaced is gone, so an unlabelled stand-in would leave
-    // no way to tell an address from a herdr label. "" counts as absent — a captured-but-empty name
-    // would otherwise render blank exactly where the reader is told to find an address.
-    const capturedName = r.statusline?.session_name;
-    const name = capturedName === null || capturedName === undefined || capturedName === ""
-      ? `${r.tab} (tab label, name not captured)`
-      : capturedName;
+    // no way to tell an address from a herdr label.
+    const name = r.claudeName ?? `${r.tab} (tab label, name not captured)`;
     // Account is shown ONLY when it differs from this session's own — the fleet spans every Claude
     // account on the machine, and the marked rows are exactly the ones outside this session's reach.
     // Printing it on every row would cost a column that reads identically for the common case.

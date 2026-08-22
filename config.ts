@@ -79,8 +79,10 @@ export const STATUSLINE_STALE_MS = intFromEnv("STATUSLINE_STALE_MS", 120000, { m
  */
 export const FOCUS_TRANSLATION_ENABLED = process.env.FOCUS_TRANSLATION_ENABLED !== "false";
 
-// Tab rename: corral renames a herdr tab to its Claude session name (user-set names only). Rides the
-// statusline sweep, so it is effective only when STATUSLINE_ENABLED is also on.
+// Tab rename: corral renames a herdr tab to its Claude session name (user-set names only). Runs on the
+// sweep but reads the session REGISTRY, not the statusline capture — the capture is written only when
+// Claude renders its statusline, so an idle session's copy goes stale and keeps the pre-rename name.
+// Independent of STATUSLINE_ENABLED: turning statusline capture off no longer turns renaming off.
 export const TAB_RENAME_ENABLED = process.env.TAB_RENAME_ENABLED !== "false";
 
 // Claude session registry (<claude-config-dir>/sessions/<pid>.json). Read directly rather than through

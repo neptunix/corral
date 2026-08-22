@@ -7,7 +7,7 @@ import { sessionStateLabel, sessionStateTone } from "../web/src/lib/session-stat
 const live = (over: Partial<LiveSessionData>): LiveSessionData => ({
   status: "working", model: null, ctxPct: null, detached: false,
   recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null,
-  claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null,
+  claudeStatus: null, claudeName: null, waitingFor: null, remoteControl: null, registryStatus: null,
   ...over,
 });
 

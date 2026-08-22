@@ -6,6 +6,7 @@ import { z } from "zod";
 import { writeAtomic } from "./atomic-store.ts";
 import { runGit } from "./git.ts";
 import { UUID_RE } from "./herdr.ts";
+import { normalizeLinkName } from "./link-name.ts";
 import type { Poller } from "./poller.ts";
 
 export const FLEET_MIRROR_FILENAME = "fleet-mirror.json";
@@ -129,7 +130,14 @@ export function createFleetMirror(opts: { readonly dataDir: string; readonly now
           if (r.env !== envId || r.sessionId === null) continue;
           if (!UUID_RE.test(r.sessionId) || liveIds.has(r.sessionId)) continue;
           liveIds.add(r.sessionId);
-          live.push({ sessionId: r.sessionId, name: r.tab, cwd: r.cwd, workspaceLabel: r.workspace });
+          // The session's own name when the operator set it, else the herdr tab label. Gated on
+          // claudeNameUserSet like every other projection of this value: fleet-restore slugifies this
+          // string into the restored session's TAB LABEL (server/fleet-restore.ts), so an ungated
+          // auto-derived name would relabel tabs on restore — the rename server/tab-namer.ts refuses
+          // to perform. Normalized here for the same reason it is everywhere else.
+          const name = r.claudeNameUserSet === true && r.claudeName !== null
+            ? normalizeLinkName(r.claudeName) : "";
+          live.push({ sessionId: r.sessionId, name: name !== "" ? name : r.tab, cwd: r.cwd, workspaceLabel: r.workspace });
         }
 
         const entry = state.envs[envId];

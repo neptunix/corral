@@ -46,6 +46,8 @@ interface Props {
   readonly recapStatus?: RecapStatus | null;
   readonly recapSource?: RecapSource | null;
   readonly statusline?: StatuslineData | null;
+  /** Claude's own name for the session, read live from its registry — not the herdr tab label. */
+  readonly claudeName?: string | null;
   // Enables drop-to-attach (upload + path injection). True for local envs only; remote needs SSH
   // byte transfer (v2), so the drop affordance is hidden there (the server also refuses remote uploads).
   readonly canAttachFiles?: boolean;
@@ -62,7 +64,7 @@ interface Props {
 
 export function SessionModal({
   env, envLabel, paneId, awaitAgent = false, title = "", workspace = "", recap = null,
-  recapStatus = null, recapSource = null, statusline = null,
+  recapStatus = null, recapSource = null, statusline = null, claudeName = null,
   canAttachFiles = false, status, claudeStatus, waitingFor, remoteControl, registryStatus, onClose,
 }: Props): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -537,8 +539,8 @@ export function SessionModal({
           {workspace !== "" && (
             <span className="hidden text-xs text-muted-foreground/60 truncate sm:inline" title={workspace}>· {workspace}</span>
           )}
-          {statusline?.session_name !== null && statusline?.session_name !== undefined && statusline.session_name !== "" && (
-            <span className="hidden text-xs text-muted-foreground/60 truncate sm:inline" title={statusline.session_name}>· {statusline.session_name}</span>
+          {claudeName !== null && (
+            <span className="hidden text-xs text-muted-foreground/60 truncate sm:inline" title={claudeName}>· {claudeName}</span>
           )}
           {starting && reconnectInfo === null && (
             <span className="min-w-0 truncate text-xs text-warning">· starting session…</span>

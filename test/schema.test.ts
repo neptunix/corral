@@ -71,7 +71,7 @@ describe("AttentionRecordSchema", () => {
 
 describe("StatuslineDataSchema", () => {
   const valid = {
-    v: 1, captured_at: 1752345678, session_id: "s1", session_name: "task-42-a", name_source: null,
+    v: 1, captured_at: 1752345678, session_id: "s1",
     account: { uuid: "u1", email: "a@b.c", org: "O", tier: "default_claude_max_20x" },
     model: "Opus", model_id: "claude-opus-4-8",
     ctx: { pct: 42, tokens: 84000, window: 200000 },
@@ -110,9 +110,9 @@ describe("StatuslineDataSchema", () => {
   });
 });
 
-describe("StatuslineDataSchema name_source", () => {
+describe("StatuslineDataSchema dropped name fields", () => {
   const base = {
-    v: 1, captured_at: 1, session_id: "s", session_name: "n",
+    v: 1, captured_at: 1, session_id: "s",
     account: null, model: null, model_id: null,
     ctx: { pct: null, tokens: null, window: null },
     cost: { usd: null, lines_added: null, lines_removed: null },
@@ -120,14 +120,13 @@ describe("StatuslineDataSchema name_source", () => {
     effort: null, thinking: null, cc_version: null,
   };
 
-  it("defaults name_source to null when absent (old captures parse)", () => {
-    const parsed = StatuslineDataSchema.parse(base);
-    expect(parsed.name_source).toBeNull();
-  });
-
-  it("round-trips a user-set source", () => {
-    const parsed = StatuslineDataSchema.parse({ ...base, name_source: "user" });
-    expect(parsed.name_source).toBe("user");
+  it("parses a capture written by an older script, stripping the name fields it still carries", () => {
+    // The installed script is upgraded separately from the server, so captures carrying the old keys
+    // outlive this change. A plain z.object strips unknown keys, so they simply do not survive.
+    const parsed = StatuslineDataSchema.parse({ ...base, session_name: "task-42-a", name_source: "user" });
+    expect(parsed).not.toHaveProperty("session_name");
+    expect(parsed).not.toHaveProperty("name_source");
+    expect(parsed.session_id).toBe("s");
   });
 });
 

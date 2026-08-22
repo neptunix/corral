@@ -374,8 +374,21 @@ export function createPoller(opts: {
       // (CHEAP_INTERVAL_MS), NOT by this sweep. It relies on CHEAP_INTERVAL_MS < RECAP_INTERVAL_MS so
       // the label is fresh by the next sweep; if that ordering is inverted (or herdr stores the label
       // non-verbatim) a rename re-fires each sweep — a redundant same-value SSH call, never incorrect.
-      if (tabRenameEnabled && STATUSLINE_ENABLED) {
-        const renames = computeRenames(rows, (r) => statuslineCache.get(`${env.id}:${r.paneId}`)?.data ?? null);
+      //
+      // The name comes from the REGISTRY, not the statusline: the capture is written only when Claude
+      // renders its statusline, so an idle session's file goes stale and keeps the pre-rename name —
+      // which made `/rename` invisible here. Hence no STATUSLINE_ENABLED half to this gate any more.
+      // `rows` come from `perEnv` and carry no claudeName (that is merged later, in rebuild), so the
+      // accessor reads registryCache directly, repeating rebuild's sessionId guard so a recycled pane
+      // never inherits the previous session's name.
+      if (tabRenameEnabled) {
+        const renames = computeRenames(rows, (r) => {
+          const reg = registryCache.get(`${env.id}:${r.paneId}`);
+          if (r.sessionId === null || reg?.sessionId !== r.sessionId || reg.record === null) {
+            return { name: null, userSet: null };
+          }
+          return { name: claudeNameOf(reg.record), userSet: claudeNameUserSetOf(reg.record) };
+        });
         for (const op of renames) {
           try {
             await tabRenameFn(env, op.tabId, op.label);

@@ -20,8 +20,6 @@ function fakeStatusline(over: Partial<StatuslineData> = {}): StatuslineData {
     v: 1,
     captured_at: 0,
     session_id: "s1",
-    session_name: null,
-    name_source: null,
     account: null,
     model: null,
     model_id: null,
@@ -152,18 +150,19 @@ describe("formatFleet", () => {
   };
 
   // The name a session answers to is its OWN name (`/rename`, `claude --name`), which the tab label
-  // only happens to match when corral spawned it. Falling back to the tab label keeps a session
-  // whose statusline has not been captured yet identifiable — same rule formatWhoami's "you are:".
+  // only happens to match when corral spawned it. Read from the registry, not the statusline capture:
+  // the capture is written on activity, so an idle session's name there goes stale.
   it("prints the session's own name, falling back to the tab label when unknown", () => {
-    const named = row({ paneId: "w1:p9", tab: "tab-label", statusline: fakeStatusline({ session_name: "real-name" }) });
+    const named = row({ paneId: "w1:p9", tab: "tab-label", claudeName: "real-name" });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [named] }, filter: "all" });
     expect(out).toContain("real-name");
     expect(out).not.toContain("tab-label");
     expect(formatFleet({ ...base, filter: "all" })).toContain("alpha");
   });
 
-  it("treats an empty captured name as absent rather than rendering a blank name column", () => {
-    const blank = row({ paneId: "w1:p9", tab: "tab-label", statusline: fakeStatusline({ session_name: "" }) });
+  it("treats an absent registry name as absent rather than rendering a blank name column", () => {
+    // claudeNameOf already collapses "" to null, so the row simply carries null here.
+    const blank = row({ paneId: "w1:p9", tab: "tab-label", claudeName: null });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [blank] }, filter: "all" });
     expect(out).toContain("tab-label (tab label, name not captured)");
   });
@@ -238,7 +237,7 @@ describe("formatFleet", () => {
   it.each(NEWLINE_VARIANTS)("keeps a %s-injected session name on a single line", (_label, sep) => {
     const sneaky = row({
       paneId: "w1:p7",
-      statusline: fakeStatusline({ session_name: `alpha${sep}work-local  fake  w9:p9  working` }),
+      claudeName: `alpha${sep}work-local  fake  w9:p9  working`,
     });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [sneaky] }, filter: "all" });
     expect(out.split("\n").filter((l) => l.includes("w9:p9") || l.includes("w1:p7"))).toHaveLength(1);

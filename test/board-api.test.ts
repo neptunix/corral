@@ -211,6 +211,60 @@ async function firstSessionLink(app: ReturnType<typeof createApi>): Promise<Stat
   return state.tasks[0]?.sessions[0];
 }
 
+describe("GET /api/state — the name a live card renders", () => {
+  // The live card shows `name`, not the tab label (web/src/components/TaskCard.tsx), so this chain is
+  // what the operator actually reads. Four steps: the operator's own Claude name, else the LIVE tab
+  // label, else the stored link name, else the paneId.
+  function snapshotWith(over: Partial<SessionRow>): Snapshot {
+    return {
+      envs: { "work-local": { reachable: true } },
+      sessions: [{
+        env: "work-local", paneId: "w1-1", status: "working", agent: "claude",
+        cwd: "/repo/x", tab: "live-tab", workspace: "demo-api",
+        sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null,
+        statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null,
+        remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null, ...over,
+      }],
+    };
+  }
+  async function nameFor(over: Partial<SessionRow>, body: Record<string, unknown>): Promise<string | undefined> {
+    const app = makeApiWithSnapshot(tmpDir, snapshotWith(over));
+    const tid = await createTaskOnTestBoard(app);
+    await app.request(`/api/boards/test/tasks/${tid}/attach`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", paneId: "w1-1", ...body }),
+    });
+    return (await firstSessionLink(app))?.name;
+  }
+
+  it("prefers the operator's own Claude name over the live tab label", async () => {
+    expect(await nameFor({ claudeName: "auth-fix", claudeNameUserSet: true }, {})).toBe("auth-fix");
+  });
+
+  it("keeps the LIVE tab label when Claude derived the name itself", async () => {
+    // Ungated, this would replace a label the operator set by hand with a Claude auto-name — and
+    // nothing would ever push that name onto the tab, so board and terminal would disagree for good.
+    expect(await nameFor({ claudeName: "Refactoring the poller", claudeNameUserSet: false }, {})).toBe("live-tab");
+  });
+
+  it("keeps the LIVE tab label when there is no registry record for the pane", async () => {
+    expect(await nameFor({ claudeName: null, claudeNameUserSet: null }, {})).toBe("live-tab");
+  });
+
+  it("normalizes the Claude name, and falls through to the tab label when it normalizes away", async () => {
+    expect(await nameFor({ claudeName: "  auth-fix  ", claudeNameUserSet: true }, {})).toBe("auth-fix");
+    // claudeNameOf rejects only the exact empty string, so a whitespace-only name reaches the
+    // normalizer and becomes "" — which must never render on a card.
+    expect(await nameFor({ claudeName: "   ", claudeNameUserSet: true }, {})).toBe("live-tab");
+  });
+
+  it("falls back to the live tab label even when the stored name is a bare paneId", async () => {
+    // The unassigned-view create path stores the paneId (no name is supplied), so without the tab
+    // label in the chain a live card would render "w1-1".
+    expect(await nameFor({}, { name: "" })).toBe("live-tab");
+  });
+});
+
 describe("POST /api/boards/:bid/tasks/:tid/attach — label enrichment", () => {
   it("fills tab/workspace/cwd labels from the live poller snapshot", async () => {
     const snapshot: Snapshot = {

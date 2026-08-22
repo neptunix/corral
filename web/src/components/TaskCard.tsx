@@ -177,9 +177,13 @@ function SessionRow({ s, title, onOpenSession, onCloseSession, onResumeSession, 
           ) : (
             <>
               <span className="text-muted-foreground">{sessionStateLabel(s.live)}</span>
-              {s.tabLabel !== "" && (
+              {s.name !== "" && (
+                // The session's own name, not the herdr tab label: a `/rename` reaches the registry in
+                // seconds but the tab only on the next sweep, and the two can diverge for good on a
+                // session corral did not spawn. server/api.ts resolves which string that is and
+                // guarantees it non-empty; the guard stays only to match the detached branch's shape.
                 // Workspace/repo label intentionally omitted here — it lives in the terminal header now.
-                <span className="text-muted-foreground/70"> · {s.tabLabel}</span>
+                <span className="text-muted-foreground/70"> · {s.name}</span>
               )}
             </>
           )}

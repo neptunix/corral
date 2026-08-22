@@ -13,7 +13,7 @@ const NOW_SEC = 1_776_000_000;
 
 function statusline(over: Partial<StatuslineData> = {}): StatuslineData {
   return {
-    v: 1, captured_at: NOW_SEC, session_id: "s1", session_name: null, name_source: null,
+    v: 1, captured_at: NOW_SEC, session_id: "s1",
     account: { uuid: null, email: null, org: null, tier: null },
     model: "Opus 5", model_id: null,
     ctx: { pct: 18, tokens: 185_000, window: null },

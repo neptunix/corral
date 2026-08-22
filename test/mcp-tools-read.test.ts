@@ -153,7 +153,7 @@ describe("fleetHandler", () => {
   // rendered row. Asserting only the "no marker" case (below) would pass with the plumbing deleted.
   it("carries this session's own account into the digest, marking only the rows that differ", async () => {
     const statusline = (email: string): StatuslineData => ({
-      v: 1, captured_at: 0, session_id: "s1", session_name: null, name_source: null,
+      v: 1, captured_at: 0, session_id: "s1",
       account: { uuid: null, email, org: null, tier: null },
       model: null, model_id: null,
       ctx: { pct: null, tokens: null, window: null },

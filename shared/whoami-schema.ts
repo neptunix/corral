@@ -19,10 +19,14 @@ export const WhoamiCardSessionSchema = z.object({
   /** The LINK's name — what the card is labelled with, i.e. the name corral was asked for. */
   name: z.string(),
   /**
-   * The name the Claude session itself answers to, when the statusline has been captured. It is NOT
-   * always `name`: a resumed session is launched without `--name` and derives its own from the cwd,
-   * so the card can read `s0-orchestrator-spec` while the session is really `github-private-e5`.
-   * Null when unknown, which is not the same as "equal to name".
+   * The name the Claude session itself answers to, read live from its registry. It is NOT always
+   * `name`: a resumed session is launched without `--name` and derives its own from the cwd, so the
+   * card can read `s0-orchestrator-spec` while the session is really `github-private-e5`.
+   * Null when there is no registry record for the pane, which is not the same as "equal to name".
+   *
+   * Deliberately UNGATED, unlike every value that gets stored or pushed onto a label: this one is only
+   * displayed, and reporting what Claude currently calls the session — auto-derived or not — is the
+   * whole point of the field.
    *
    * Defaulted, not required: an MCP client talks to whatever corral server is already running, and a
    * server predating this field would otherwise fail validation on EVERY card read rather than lose
