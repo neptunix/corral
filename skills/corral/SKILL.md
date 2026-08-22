@@ -1,6 +1,6 @@
 ---
 name: corral
-description: Use when this session runs under corral (the corral_* MCP tools exist) and the task is more than a single tool call — reading its own assignment, logging progress to its card, handing work to a fresh session before context runs out, or triaging other sessions. Triggers include "what am I working on", "which session am I", "bind me to a card", "update the card", "log progress", "what else is running", "who needs attention", "hand this off", "write a handoff", "spawn a continuation", "I'm running out of context", "close this session".
+description: Use when this session runs under corral (the corral_* MCP tools exist) and the task is more than a single tool call — reading its own assignment, keeping its card current, handing work to a fresh session before context runs out, or triaging other sessions. Triggers include "what am I working on", "which session am I", "bind me to a card", "update the card", "log progress", "what else is running", "who needs attention", "hand this off", "write a handoff", "spawn a continuation", "I'm running out of context", "close this session".
 ---
 
 # corral
@@ -27,19 +27,39 @@ description: Use when this session runs under corral (the corral_* MCP tools exi
 ## Starting up
 
 1. `corral_whoami`.
-2. **Bound** → the card is the assignment. `corral_task_read` for its description: the running log of
-   what earlier sessions on this card did. Start from it, not from zero.
+2. **Bound** → the card is the assignment. `corral_task_read` for its description — the task and the
+   decisions behind it, not a log of what was done. Start from it, not from zero.
 3. **Unbound** → `corral_task_bind` with no arguments, then bind to the card this work belongs to. If
    nothing fits, say so and ask — the tools cannot create a card.
 
 ## Keeping the card current
 
+The card describes the task, not the work. Test each line you write: *does a durable carrier already
+record this* — not could it be reconstructed from one. A carrier is durable when it is committed to
+the repo or is the PR itself; nothing else is, so what a brief or a message holds belongs here.
+
+- **In** — the problem, why it matters, what the task requires; decisions and the reasoning that
+  produced them; what is verified and what is still only assumed; what blocks it; hazards — what not
+  to touch and why; and where the code and PR are.
+- **Out** — anything a durable carrier already records: files touched, and the history of gate runs
+  and review rounds as a work record.
+- **The one exception** — where the work stopped: what is in flight, what is edited but not
+  committed, the next action. That goes in the brief, not here: it is stale by the time anyone reads
+  the card.
+
+Decisions and their reasoning always stay: the PR says how the thing was built, the card says what
+was decided about the task. The exclusion is the event, not the finding — "the gate ran" is out, a
+limit it discovered is a decision and stays.
+
+**Keep it to a screenful** — it is read on every bind. Length is a symptom: a card grows long by
+holding lines the test excludes, and the server refuses a description past a hard cap, so a write
+that fails on size is telling you the test was not applied.
+
 Write at real boundaries — a decision made, a phase finished, a blocker hit — not on a timer and not
 per file edited. Move `status` when the work actually changes state; the operator reads column
 position before reading anything else.
 
-`corral_task_read` in the same turn you write, and edit around what it returned rather than retyping
-the log from memory.
+`corral_task_read` in the same turn you write, and edit around what it returned.
 
 ## Talking to another session
 
@@ -115,8 +135,8 @@ usage, so you can notice pressure the operator cannot see and say so:
 **Wait for the answer.** If the operator has their own handoff skill or file convention, use it to
 compose the text and let this procedure carry it. Once they agree:
 
-1. **Write the card first** — everything the next session needs that is not already in git: decisions
-   and their reasons, what was ruled out, what is verified versus assumed.
+1. **Write the card first** — everything the next session needs that no durable carrier records:
+   decisions and their reasons, what was ruled out, what is verified versus assumed.
 2. **Compose the brief** (below) and `corral_spawn` it. The new session lands on the same card and
    starts from that text. By default it lands in a tab beside this one — same workspace, so a
    worktree checkout stays visible. Pass `repo` only to send it to a *different* project: it then
@@ -147,7 +167,8 @@ Write it for a competent stranger who has the repo but not the last hour:
 - **The goal**, in one line, and how you will know it is met.
 - **State** — what is done, what is in flight, what is committed versus only edited.
 - **Knowledge the code does not show** — what you tried that failed, why an obvious approach is
-  wrong, which assumption is load-bearing and unverified.
+  wrong, which assumption is load-bearing and unverified. This lives on the card; repeat it here only
+  to save the successor a lookup. **State** and the next action are the brief's alone.
 - **The next concrete action**, not a direction.
 - **Hazards** — what not to touch, and why.
 - **Who to ask** — your own name from `corral_whoami`'s `you are:` line (not the card's label for

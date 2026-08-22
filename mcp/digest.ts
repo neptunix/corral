@@ -19,8 +19,8 @@ const TASK_PICKER_ROW_LIMIT = 50;
 // Exported: mcp/tools/task.ts echoes a card title back into a confirmation/refusal string outside
 // this module's own formatters, so it needs the same budget this module uses internally.
 export const TASK_TITLE_MAX = 120;
-// `description` is corral_task_update's "running progress log", and the two formatters that render
-// it want opposite things, so it has two budgets rather than one.
+// `description` is the card's own statement of the task, and the two formatters that render it want
+// opposite things, so it has two budgets rather than one.
 //
 // formatWhoami is the call every session REPEATS — at startup, after a bind, to read its own ctx%,
 // to confirm a spawn landed — so there it is a PREVIEW: one bounded line, collapsed and truncated

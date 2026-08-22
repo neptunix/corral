@@ -72,6 +72,15 @@ describe("task tool descriptions", () => {
     expect(TASK_TOOL_DESCRIPTIONS.update).toContain("corral_task_read");
   });
 
+  // The contract itself, both halves, pinned on one distinctive token each rather than whole clauses:
+  // a reword stays possible, a trim that drops what the field is FOR does not. The corrective half is
+  // pinned separately because it is the one this string did not have before.
+  it("states what the description is for", () => {
+    expect(TASK_TOOL_DESCRIPTIONS.update).toContain("no durable carrier records");
+    expect(TASK_TOOL_DESCRIPTIONS.update).toContain("committed to the repo");
+    expect(TASK_TOOL_DESCRIPTIONS.update).toContain("Not a log of what you did");
+  });
+
   it("tells corral_task_read's caller that whoami only shows a preview", () => {
     expect(TASK_TOOL_DESCRIPTIONS.read).toContain("corral_whoami");
     expect(TASK_TOOL_DESCRIPTIONS.read.toLowerCase()).toContain("preview");

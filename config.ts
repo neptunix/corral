@@ -180,6 +180,12 @@ export const UPLOAD_ROOT = path.join(os.tmpdir(), "corral-uploads");
 export const BRIEF_ROOT = path.join(os.tmpdir(), "corral-briefs");
 // Cap so a runaway brief cannot blow the pane or the spawned session's context window.
 export const BRIEF_MAX_BYTES = intFromEnv("BRIEF_MAX_BYTES", 16384, { min: 1 });
+// Overflow guard on a card description, enforced on the WRITE paths only (server/api.ts) — never on
+// the stored shape, or a board holding a description written before this cap would fail to load.
+// A description is written by full replacement, so a session re-emits the whole field on every
+// update and growth compounds. Kept under corral_task_read's render budget (mcp/digest.ts) so what
+// was writable normally renders whole.
+export const TASK_DESCRIPTION_MAX_CHARS = intFromEnv("TASK_DESCRIPTION_MAX_CHARS", 32000, { min: 1 });
 // BACKSTOP delay before the server unlinks a brief (server/api.ts). The normal deletion is the
 // `rm -f` the launch command runs right after its own `$(cat …)` (server/spawn.ts), so on any pane
 // that actually runs the command the file is already gone long before this fires. This timer only

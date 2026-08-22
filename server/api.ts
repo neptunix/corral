@@ -20,7 +20,7 @@ import { z } from "zod";
 
 import {
   BRIEF_CLEANUP_DELAY_MS, BRIEF_MAX_BYTES, BRIEF_ROOT, READ_CACHE_TTL_MS, SPAWN_TIMEOUT_MS,
-  UPLOAD_ROOT, WS_ALLOWED_ORIGINS,
+  TASK_DESCRIPTION_MAX_CHARS, UPLOAD_ROOT, WS_ALLOWED_ORIGINS,
 } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { briefByteLength, cleanupBrief, composeBrief, START_COMMAND_FALLBACK, writeBrief } from "./brief.ts";
@@ -201,6 +201,13 @@ const PatchBoardBodySchema = z.object({
   spawnPresets: z.array(SpawnPresetPatchSchema).max(20).optional(),
   defaultSpawnPresetId: z.string().nullable().optional(),
 });
+// Shared by every route that accepts a description. The message points at the operator rather than
+// saying "shorten it" because a session cannot shorten what corral_task_read did not show it.
+const DescriptionInputSchema = z.string().max(
+  TASK_DESCRIPTION_MAX_CHARS,
+  `description exceeds ${String(TASK_DESCRIPTION_MAX_CHARS)} characters — the card states the task, not the work done on it. Cut what a durable carrier already records; if the existing text is longer than you were shown, ask the operator rather than rewriting from a partial view.`,
+);
+
 
 const CreateTaskBodySchema = z.object({
   title: z.string().min(1),
@@ -209,14 +216,15 @@ const CreateTaskBodySchema = z.object({
   // board knows it.
   status: z.string().optional(),
   priority: z.enum(["p0", "p1", "p2", "p3"]).nullable().optional(),
-  description: z.string().optional(),
+  description: DescriptionInputSchema.optional(),
 });
+
 
 const PatchTaskBodySchema = z.object({
   title: z.string().min(1).optional(),
   status: z.string().optional(),
   priority: z.enum(["p0", "p1", "p2", "p3"]).nullable().optional(),
-  description: z.string().optional(),
+  description: DescriptionInputSchema.optional(),
 });
 
 const AttachBodySchema = z.object({
@@ -250,7 +258,7 @@ const FromSessionBodySchema = z.object({
   // column, which the route resolves inside withBoard (it needs the loaded board to know it).
   status: z.string().optional(),
   priority: z.enum(["p0", "p1", "p2", "p3"]).nullable().optional(),
-  description: z.string().optional(),
+  description: DescriptionInputSchema.optional(),
   env: z.string(),
   paneId: z.string(),
   tabId: z.string().default(""),
