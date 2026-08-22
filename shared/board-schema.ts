@@ -39,6 +39,8 @@ export const SessionLinkSchema = z.object({
 export const TaskSchema = z.object({
   id: z.string(),
   title: z.string(),
+  // Uncapped on purpose: the length guard belongs on the write paths (server/api.ts). A `.max()`
+  // here would stop a board loading once it holds a description written before the guard existed.
   description: z.string().default(""),
   status: z.string(),
   priority: PrioritySchema.default(null),

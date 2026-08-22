@@ -746,7 +746,7 @@ The seven tools:
 - `corral_whoami` — this session's pane/tab/workspace, Claude session id, model/context/cost, and its bound task card; call it first.
 - `corral_fleet` — one bounded line per session across every environment, for cross-session triage.
 - `corral_task_bind` — link this session to an existing task card (no card creation).
-- `corral_task_read` — the bound card's full description. `corral_whoami` renders it as a one-line preview, because that call is repeated many times a session and a long progress log would be re-inlined on every one; this is the opt-in full read, and the one to call before rewriting the description.
+- `corral_task_read` — the bound card's full description. `corral_whoami` renders it as a one-line preview, because that call is repeated many times a session and a long description would be re-inlined on every one; this is the opt-in full read, and the one to call before rewriting the description.
 - `corral_task_update` — update the bound card's title, description, status, or priority.
 - `corral_spawn` — start a new session on this session's card, with a brief as its first message; `repo` says which project it lands in.
 - `corral_session_close` — stop this session or one on the same card; suspend, not destroy.

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
+import { TASK_DESCRIPTION_MAX_CHARS } from "../config.ts";
 import { ENVIRONMENTS } from "../environments.ts";
 import { createApi } from "../server/api.ts";
 import type { Poller } from "../server/poller.ts";
@@ -179,6 +180,24 @@ describe("PATCH /api/boards/:bid/tasks/:tid", () => {
     expect(res.status).toBe(200);
     const updated = await res.json() as { title: string };
     expect(updated.title).toBe("New");
+  });
+
+  // The cap lives on the write path only: a description written before it must still load and be
+  // readable, so the refusal has to come from the route, never from the stored schema.
+  it("refuses a description past the cap, and accepts one at it", async () => {
+    const app = makeApi(tmpDir);
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Test" }) });
+    const { id } = await (await app.request("/api/boards/test/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "T", status: "todo" }) })).json() as { id: string };
+    const patch = async (description: string) => app.request(`/api/boards/test/tasks/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description }),
+    });
+
+    const over = await patch("x".repeat(TASK_DESCRIPTION_MAX_CHARS + 1));
+    expect(over.status).toBe(400);
+    expect(JSON.stringify(await over.json())).toContain("the card states the task");
+
+    expect((await patch("x".repeat(TASK_DESCRIPTION_MAX_CHARS))).status).toBe(200);
   });
 });
 

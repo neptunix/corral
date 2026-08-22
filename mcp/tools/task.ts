@@ -122,13 +122,15 @@ export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string>
  * they can be pinned the way ORIENTATION is (test/mcp-orientation.test.ts). `update` is now the ONLY
  * place a session is warned before a full-replacement description write — corral_whoami no longer
  * puts the value in front of it — so a later pass trimming this string for tokens would silently
- * remove the last guard. That is not hypothetical: this string was trimmed once already.
+ * remove the last guard. That is not hypothetical: this string was trimmed once already. It also
+ * carries what the field is FOR, which is the only statement of that a session without the skill
+ * ever sees; both halves are pinned in test/mcp-tools-read.test.ts.
  */
 export const TASK_TOOL_DESCRIPTIONS = {
   read:
     "Read the FULL description of the card THIS session is bound to — corral_whoami shows only a one-line preview of it. Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. Read-only.",
   update:
-    "Update the card THIS session is bound to; cannot target another card. `status` is the coarse board state and must be one of the column ids corral_whoami reports. `description` is the running progress log and is a FULL-REPLACEMENT write — read the current value with corral_task_read first and edit around it, or you will silently delete what you never saw.",
+    "Update the card THIS session is bound to; cannot target another card. `status` is the coarse board state and must be one of the column ids corral_whoami reports. `description` states the TASK and what no durable carrier records — durable means committed to the repo, or the PR itself — so: the problem, what it requires, decisions and why (these stay even after a PR states them), what is verified and what is still assumed, blockers, hazards, and where the code and PR are. Not a log of what you did — files touched, gate runs, review rounds — whatever else records them. Keep it to a screenful — over-long writes are refused. It is a FULL-REPLACEMENT write — read the current value with corral_task_read first and edit around it, or you will silently delete what you never saw.",
 } as const;
 
 export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
@@ -165,7 +167,7 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
       inputSchema: {
         title: z.string().optional(),
         description: z.string().optional().describe(
-          "full replacement body; the progress log lives here. OVERWRITES the whole field — read it with corral_task_read first.",
+          "OVERWRITES the whole field — read it with corral_task_read first.",
         ),
         status: z.string().optional().describe("a column id from corral_whoami's task.columns"),
         priority: z.enum(PRIORITIES).nullable().optional().describe("null clears the priority"),
