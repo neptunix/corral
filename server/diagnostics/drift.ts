@@ -19,12 +19,20 @@ export const DRIFT_FILES: readonly (readonly [installed: string, repo: string])[
   ["corral-status-capture.sh", "scripts/corral-status-capture.sh"],
   ["corral-claude-hook.sh", "scripts/corral-claude-hook.sh"],
   ["skills/corral/SKILL.md", "skills/corral/SKILL.md"],
+  ["skills/corral-doctor/SKILL.md", "skills/corral-doctor/SKILL.md"],
 ] as const;
 
 /**
  * The installed copy of a tracked file, compared by content hash against the checkout's own copy.
- * A file that is not installed is skipped entirely — its absence is reported by that file's own
- * check (`ctx-hook-installed`, `corral-skill-installed`, `capture-script`), not here.
+ * A file that is not installed is skipped entirely — for the first three, its absence is reported by
+ * that file's own check (`ctx-hook-installed`, `corral-skill-installed`, `capture-script`).
+ *
+ * `corral-doctor` has no presence check of its own, deliberately: it is optional, needed only by an
+ * operator who uses the Health panel's "Fix issues" button, and the prompt that button composes
+ * names `skills/corral-doctor/SKILL.md` directly so an uninstalled skill still leaves the session
+ * something to read. Demanding it everywhere would be a standing row about a file most config dirs
+ * have no reason to hold. A STALE copy is the opposite case and does belong here — it hands a fixer
+ * session outdated repair instructions with nothing anywhere saying they are outdated.
  */
 interface DriftResult {
   readonly name: string;

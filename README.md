@@ -360,14 +360,14 @@ kill "$(lsof -nP -iTCP:8787 -sTCP:LISTEN -t)"
 ```
 
 **`git pull` does not touch your installed copies.** `corral-status-capture.sh`,
-`corral-claude-hook.sh`, and `skills/corral/` are copied into `~/.claude*` — outside this
-checkout — by the per-config-dir install step (see [Installing the Claude helper
-files](#installing-the-claude-helper-files-per-config-dir)), so an upgrade that changes any of
-them leaves the installed copy running the old version until you re-copy it (`cp` locally,
-`scp` again for a remote config dir). Symlink them once instead and this stops being a step:
-`ln -s "$(pwd)/scripts/corral-claude-hook.sh" "$D/corral-claude-hook.sh"` makes the installed
-file follow the checkout across every future `git pull` — local only, since there is no `scp`
-equivalent of a symlink for a remote config dir.
+`corral-claude-hook.sh`, `skills/corral/` and `skills/corral-doctor/` are installed into
+`~/.claude*` — outside this checkout — by the per-config-dir install step (see [Installing the
+Claude helper files](#installing-the-claude-helper-files-per-config-dir)), so if they are copies,
+an upgrade that changes any of them leaves the installed copy running the old version until you
+re-copy it (`cp` locally, `scp` again for a remote config dir). Link them once instead and this
+stops being a step — `ln -sf` for the files, and for the two skill directories remove the old copy
+first, because `ln -s` into an existing directory nests the link inside it rather than replacing
+it. Local only: there is no `scp` equivalent of a symlink for a remote config dir.
 
 Install the theme only **after** upgrading to ≥ v0.3.2 — the theme-sync-on-mount fix landed
 there, so installing it against an older build means testing the old behaviour.
@@ -561,24 +561,45 @@ the copy command differs (`cp` vs `scp` + `ssh`). Into each config dir:
 | `statusline-command.sh` | `scripts/statusline-command.sh` | only if you have **no** statusline script of your own |
 | `themes/corral.json` | `themes/corral.json` | only for the optional theme |
 | `skills/corral/` | `skills/corral/` | recommended with the [MCP server](#mcp-server); only on the machine running corral |
+| `skills/corral-doctor/` | `skills/corral-doctor/` | optional — needed by the 🛟 Health panel's [Fix issues](#a-second-skill-for-corrals-own-health) flow |
 | `corral-claude-hook.sh` | `scripts/corral-claude-hook.sh` | recommended — proactive context-pressure signal |
 
 **Local** (default `~/.claude`; repeat for each extra dir such as `~/.claude-work`):
 
+**Link them rather than copy them, when the config dir is on the same machine as the checkout.**
+A copy goes stale on the next `git pull` and has to be redone by hand; a link is simply correct
+again. `helper-drift` follows symlinks when it hashes, so a linked file is never reported as
+drifted — nothing to notice, nothing to redo.
+
 ```bash
 D=~/.claude
-cp scripts/corral-status-capture.sh "$D/corral-status-capture.sh"
-cp scripts/statusline-command.sh    "$D/statusline-command.sh"    # skip if you have your own
-cp scripts/corral-claude-hook.sh   "$D/corral-claude-hook.sh"    # recommended — context-pressure hook
-chmod +x "$D/corral-status-capture.sh" "$D/statusline-command.sh" "$D/corral-claude-hook.sh"
-mkdir -p "$D/themes" && cp themes/corral.json "$D/themes/corral.json"   # optional theme
-mkdir -p "$D/skills" && cp -R skills/corral "$D/skills/corral"          # recommended with the MCP server
+R=$(pwd)
+mkdir -p "$D/themes" "$D/skills"
+ln -sf "$R/scripts/corral-status-capture.sh" "$D/corral-status-capture.sh"
+ln -sf "$R/scripts/corral-claude-hook.sh"    "$D/corral-claude-hook.sh"   # context-pressure hook
+ln -sf "$R/themes/corral.json"               "$D/themes/corral.json"      # optional theme
+cp     "$R/scripts/statusline-command.sh"    "$D/statusline-command.sh"   # copy — see below
+chmod +x "$D/statusline-command.sh"
+# Directories: ln -s into an existing directory silently nests the link INSIDE it, so clear it first.
+rm -rf "$D/skills/corral"        && ln -s "$R/skills/corral"        "$D/skills/corral"
+rm -rf "$D/skills/corral-doctor" && ln -s "$R/skills/corral-doctor" "$D/skills/corral-doctor"
 echo "corral-status/" >> "$D/.gitignore"    # if the config dir is version-controlled
 ```
 
-Locally, you can `ln -s "$(pwd)/scripts/corral-claude-hook.sh" "$D/corral-claude-hook.sh"`
-instead of `cp` if you don't want to re-copy after every `git pull` — there's no equivalent for
-the remote `scp` step below.
+Every line above is safe to re-run over an existing install — that is what `ln -sf` and the
+`rm -rf` before each directory link are for. Plain `ln -s` is not: onto an existing *file* it stops
+with `File exists`, and onto an existing *directory* it silently creates the link **inside** that
+directory and leaves the stale copy in place, which is the one failure you would not notice.
+`ln -sfn` does not help there either — only removing the directory first does.
+
+`statusline-command.sh` is copied, not linked, because it is the one file you may own: if you
+already run your own statusline, keep it and add just the inject line instead (see
+[Statusline](#statusline)). That is also why `helper-drift` ignores this file — an edited copy is
+expected. If you use corral's script unmodified you can link it like the others.
+
+Use `cp` instead of `ln` when a link cannot work: a remote config dir (the `scp` step below has no
+equivalent), a config dir that must outlive the checkout being moved or deleted, or a checkout you
+switch branches in — a linked skill follows whichever branch is checked out.
 
 **Remote** (over SSH — `H` is the environment's `sshHost`, `D` its config dir, e.g.
 `/home/me/.claude`):
@@ -789,7 +810,9 @@ get the details wrong. Copy it into each config dir you registered the server in
 [the helper-file table](#installing-the-claude-helper-files-per-config-dir)):
 
 ```bash
-mkdir -p ~/.claude/skills && cp -R skills/corral ~/.claude/skills/corral
+mkdir -p ~/.claude/skills
+# rm -rf first: ln -s into an existing directory nests the link inside it instead of replacing it.
+rm -rf ~/.claude/skills/corral && ln -s "$(pwd)/skills/corral" ~/.claude/skills/corral
 ```
 
 It loads only when a session actually reaches for corral, so it costs nothing the rest of the time.
@@ -804,8 +827,13 @@ Run Claude themselves, through the same spawn path every other session starts fr
 same directory:
 
 ```bash
-cp -R skills/corral-doctor ~/.claude/skills/corral-doctor
+rm -rf ~/.claude/skills/corral-doctor && ln -s "$(pwd)/skills/corral-doctor" ~/.claude/skills/corral-doctor
 ```
+
+Linking matters a little more here than for the skill above: this one's instructions are about
+repairing your install, so a stale copy hands a fixer session repair steps for an older corral.
+`helper-drift` tracks it, but only once it is installed — an absent `corral-doctor` is not reported,
+because the skill is optional and the Fix issues prompt names its file directly as a fallback.
 
 ### Letting sessions talk to each other (recommended)
 

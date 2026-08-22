@@ -21,6 +21,7 @@ const content = (s: string, executable = false): ProbeAnswer =>
 const CAPTURE_CONTENT = "#!/bin/sh\n# capture";
 const HOOK_CONTENT = "#!/bin/sh\n# hook";
 const SKILL_CONTENT = "<!-- ctx-signal:start -->x<!-- ctx-signal:end -->";
+const DOCTOR_SKILL_CONTENT = "---\nname: corral-doctor\n---\n";
 
 const remoteEnv = (dirs: readonly string[] = [DIR]): RemoteEnv => ({
   id: "box", label: "box", kind: "remote", sshHost: "h", socket: "~/s.sock",
@@ -32,6 +33,7 @@ function healthyLocalHash(p: string): string | null {
   if (p === `${REPO_ROOT}/scripts/corral-status-capture.sh`) return sha256(CAPTURE_CONTENT);
   if (p === `${REPO_ROOT}/scripts/corral-claude-hook.sh`) return sha256(HOOK_CONTENT);
   if (p === `${REPO_ROOT}/skills/corral/SKILL.md`) return sha256(SKILL_CONTENT);
+  if (p === `${REPO_ROOT}/skills/corral-doctor/SKILL.md`) return sha256(DOCTOR_SKILL_CONTENT);
   return null;
 }
 
@@ -52,6 +54,7 @@ const HEALTHY_BYPATH: readonly (readonly [string, ProbeAnswer])[] = [
   [`${DIR}/corral-status-capture.sh`, content(CAPTURE_CONTENT, true)],
   [`${DIR}/corral-claude-hook.sh`, content(HOOK_CONTENT, true)],
   [`${DIR}/skills/corral/SKILL.md`, content(SKILL_CONTENT)],
+  [`${DIR}/skills/corral-doctor/SKILL.md`, content(DOCTOR_SKILL_CONTENT)],
   [`${DIR}/themes/corral.json`, content("{}")],
   [DYN, content("exec corral-status-capture.sh")],
   ["/usr/bin/jq", { kind: "exec", executable: true }],
@@ -246,7 +249,7 @@ describe("composeRemoteRows — disabled (no probe)", () => {
 });
 
 describe("composeRemoteRows — hashFile routing", () => {
-  it("localHash is called for exactly the three DRIFT_FILES repo paths and nothing else", async () => {
+  it("localHash is called for exactly the four DRIFT_FILES repo paths and nothing else", async () => {
     const calls: string[] = [];
     const opts = baseOpts({ localHash: (p) => { calls.push(p); return healthyLocalHash(p); } });
     await composeRemoteRows(opts);
@@ -254,6 +257,7 @@ describe("composeRemoteRows — hashFile routing", () => {
       `${REPO_ROOT}/scripts/corral-status-capture.sh`,
       `${REPO_ROOT}/scripts/corral-claude-hook.sh`,
       `${REPO_ROOT}/skills/corral/SKILL.md`,
+      `${REPO_ROOT}/skills/corral-doctor/SKILL.md`,
     ]));
   });
 
@@ -265,6 +269,7 @@ describe("composeRemoteRows — hashFile routing", () => {
       [`${oddDir}/corral-status-capture.sh`, content(CAPTURE_CONTENT, true)],
       [`${oddDir}/corral-claude-hook.sh`, content(HOOK_CONTENT, true)],
       [`${oddDir}/skills/corral/SKILL.md`, content(SKILL_CONTENT)],
+      [`${oddDir}/skills/corral-doctor/SKILL.md`, content(DOCTOR_SKILL_CONTENT)],
       [`${oddDir}/themes/corral.json`, content("{}")],
       [`${oddDir}/statusline-command.sh`, content("exec corral-status-capture.sh")],
       ["/usr/bin/jq", { kind: "exec", executable: true }],
@@ -275,7 +280,7 @@ describe("composeRemoteRows — hashFile routing", () => {
       probe: healthyProbe({ byPath, arrived: 20 }),
       localHash: (p) => { localCalled += 1; return healthyLocalHash(p); },
     }));
-    expect(localCalled).toBe(3); // routed local for the exact repoRoot paths only
+    expect(localCalled).toBe(4); // routed local for the exact repoRoot paths only
     const drift = byId(rows, "helper-drift");
     expect(drift?.state === "ok" || drift?.state === "problem").toBe(true); // a REAL verdict, not n/a
   });
@@ -287,6 +292,7 @@ describe("composeRemoteRows — bytes not text", () => {
     const goodBytes = Buffer.from([0x68, 0x69, 0x00]);
     const localHash = (p: string): string | null => {
       if (p === `${REPO_ROOT}/skills/corral/SKILL.md`) return createHash("sha256").update(goodBytes).digest("hex");
+      if (p === `${REPO_ROOT}/skills/corral-doctor/SKILL.md`) return sha256(DOCTOR_SKILL_CONTENT);
       return healthyLocalHash(p);
     };
     const withDrift = new Map(HEALTHY_BYPATH);

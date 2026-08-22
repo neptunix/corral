@@ -18,6 +18,7 @@ export const PER_DIR_FILES: readonly string[] = [
   "corral-status-capture.sh",
   "corral-claude-hook.sh",
   "skills/corral/SKILL.md",
+  "skills/corral-doctor/SKILL.md",
   "themes/corral.json",
 ];
 

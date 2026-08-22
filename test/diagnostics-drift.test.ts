@@ -35,6 +35,16 @@ describe("helper-drift", () => {
     expect(c.detail).toContain("corral-status-capture.sh");
   });
 
+  // The fixer skill's whole content is repair instructions for THIS corral, so a copy left behind by
+  // an upgrade hands a session steps for a version it is no longer running — and nothing else reports
+  // it: corral-doctor has no presence check, unlike the other three tracked files.
+  it("names a drifted corral-doctor skill — an out-of-date fixer is the one nobody else would catch", () => {
+    const d = deps({ hashFile: (p) => (p === `${D}/skills/corral-doctor/SKILL.md` ? "old" : "same") });
+    const c = driftCheck(d, "work", D);
+    expect(c.state).toBe("problem");
+    expect(c.detail).toContain("skills/corral-doctor/SKILL.md");
+  });
+
   it("never reports statusline-command.sh — README allows your own", () => {
     const d = deps({ hashFile: (p) => (p.endsWith("statusline-command.sh") ? "mine" : "same") });
     expect(driftCheck(d, "work", D).state).toBe("ok");
