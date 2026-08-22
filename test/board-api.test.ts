@@ -211,6 +211,75 @@ async function firstSessionLink(app: ReturnType<typeof createApi>): Promise<Stat
   return state.tasks[0]?.sessions[0];
 }
 
+describe("GET /api/state — the name a live card renders", () => {
+  // The live card shows `name`, not the tab label (web/src/components/TaskCard.tsx), so this chain is
+  // what the operator actually reads. Four steps: the operator's own Claude name, else the LIVE tab
+  // label, else the stored link name, else the paneId.
+  function snapshotWith(over: Partial<SessionRow>): Snapshot {
+    return {
+      envs: { "work-local": { reachable: true } },
+      sessions: [{
+        env: "work-local", paneId: "w1-1", status: "working", agent: "claude",
+        cwd: "/repo/x", tab: "live-tab", workspace: "demo-api",
+        sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null,
+        statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null,
+        remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null, ...over,
+      }],
+    };
+  }
+  async function nameFor(over: Partial<SessionRow>, body: Record<string, unknown>): Promise<string | undefined> {
+    const app = makeApiWithSnapshot(tmpDir, snapshotWith(over));
+    const tid = await createTaskOnTestBoard(app);
+    await app.request(`/api/boards/test/tasks/${tid}/attach`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", paneId: "w1-1", ...body }),
+    });
+    // By task id, not tasks[0]: a test that calls this twice creates two tasks in the same board.
+    const state = await (await app.request("/api/state?board=test")).json() as { tasks: { id: string; sessions: StateLink[] }[] };
+    return state.tasks.find((t) => t.id === tid)?.sessions[0]?.name;
+  }
+
+  it("prefers the operator's own Claude name over the live tab label", async () => {
+    expect(await nameFor({ claudeName: "auth-fix", claudeNameUserSet: true }, {})).toBe("auth-fix");
+  });
+
+  it("keeps the LIVE tab label when Claude derived the name itself", async () => {
+    // Ungated, this would replace a label the operator set by hand with a Claude auto-name — and
+    // nothing would ever push that name onto the tab, so board and terminal would disagree for good.
+    expect(await nameFor({ claudeName: "Refactoring the poller", claudeNameUserSet: false }, {})).toBe("live-tab");
+  });
+
+  it("keeps the LIVE tab label when there is no registry record for the pane", async () => {
+    expect(await nameFor({ claudeName: null, claudeNameUserSet: null }, {})).toBe("live-tab");
+  });
+
+  it("normalizes the Claude name, and falls through to the tab label when it normalizes away", async () => {
+    expect(await nameFor({ claudeName: "  auth-fix  ", claudeNameUserSet: true }, {})).toBe("auth-fix");
+    // claudeNameOf rejects only the exact empty string, so a whitespace-only name reaches the
+    // normalizer and becomes "" — which must never render on a card.
+    expect(await nameFor({ claudeName: "   ", claudeNameUserSet: true }, {})).toBe("live-tab");
+  });
+
+  it("skips herdr's '?' unknown-label sentinel, falling through to the stored name", async () => {
+    // The tab-label step guards BOTH "" and "?" — herdr's sentinel for a label it does not know.
+    // Without the "?" half a card would render a literal question mark as the session's name.
+    expect(await nameFor({ tab: "?" }, { name: "stored-name" })).toBe("stored-name");
+    expect(await nameFor({ tab: "?" }, { name: "" })).toBe("w1-1");
+  });
+
+  it("prefers the LIVE tab label over a stale stored name", async () => {
+    // The one case that can distinguish the tab-label step from the stored-name step: everywhere else
+    // the attach route stores liveRow.tab itself, so link.name and live.tab hold the same string and
+    // dropping the step is invisible. link.name is a bind-time snapshot that the reconciler refreshes
+    // only for user-set names, so without this step a card would show it forever.
+    expect(await nameFor({}, { name: "stale-stored" })).toBe("live-tab");
+  });
+
+  it("falls back to the stored name only when there is no usable live label", async () => {
+    expect(await nameFor({ tab: "?" }, { name: "stale-stored" })).toBe("stale-stored");
+  });
+});
+
 describe("POST /api/boards/:bid/tasks/:tid/attach — label enrichment", () => {
   it("fills tab/workspace/cwd labels from the live poller snapshot", async () => {
     const snapshot: Snapshot = {
@@ -1873,21 +1942,25 @@ describe("POST attach — UUID-aware idempotency (two same-pane cards)", () => {
 // server/api.ts, so a new SessionRow field that is not added in BOTH places never reaches the web —
 // and the omission is silent. This is the test that catches it.
 describe("GET /api/state — Claude's own session state reaches the board", () => {
-  it("projects claudeStatus, waitingFor, remoteControl and registryStatus onto the enriched link", async () => {
+  it("projects claudeStatus, waitingFor, remoteControl, registryStatus and claudeName onto the enriched link", async () => {
     const storage = createStorage(tmpDir);
     const snapshot: Snapshot = {
       envs: { "work-local": { reachable: true } },
       sessions: [{
         ...makeLiveRow({ paneId: "w1:p1", sessionId: "11111111-2222-3333-4444-555555555555", tabId: "w1:t1" }),
-        claudeStatus: "waiting", waitingFor: "input needed", remoteControl: true, registryStatus: "ok", claudeName: null, claudeNameUserSet: null,
+        claudeStatus: "waiting", waitingFor: "input needed", registryStatus: "ok", remoteControl: true,
+        // Ungated on purpose: this is the session modal's subtitle, which reports what Claude calls the
+        // session whoever set that name. The GATED value is the link's `name`, resolved separately.
+        claudeName: "auto-derived-title", claudeNameUserSet: false,
       }],
     };
     const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage });
     await seedTaskWithLink(app, storage);
     const state = await (await app.request("/api/state?board=t")).json() as {
-      tasks: { sessions: { live: { claudeStatus: string; waitingFor: string; remoteControl: boolean; registryStatus: string } | null }[] }[];
+      tasks: { sessions: { live: { claudeStatus: string; waitingFor: string; remoteControl: boolean; registryStatus: string; claudeName: string | null } | null }[] }[];
     };
     const live = state.tasks[0]?.sessions[0]?.live;
+    expect(live?.claudeName).toBe("auto-derived-title");
     expect(live?.claudeStatus).toBe("waiting");
     expect(live?.waitingFor).toBe("input needed");
     expect(live?.remoteControl).toBe(true);

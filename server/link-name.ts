@@ -38,3 +38,26 @@ export function normalizeLinkName(text: string): string {
   // remove. It cannot empty the string: clean[0] is already non-whitespace.
   return out.trimEnd();
 }
+
+/**
+ * The name to use when a session's own name is about to DISPLACE something — a herdr tab label, a
+ * card's title, a durable `SessionLink.name`, a fleet-mirror record — or `""` when there is none.
+ *
+ * The gate is the point: only a name the operator set may displace. `claudeNameUserSet` is false for a
+ * name Claude derived for itself, and null when there is no registry record for the pane; neither is a
+ * choice, and letting one through would overwrite a label the operator picked with a name nothing
+ * would ever push back onto the tab — leaving the board and the terminal disagreeing for good.
+ *
+ * Returns "" rather than null so callers chain with `!== ""`: `claudeNameOf` rejects only the exact
+ * empty string, so a whitespace- or control-only name survives it and normalizes away to "" here.
+ *
+ * Callers that merely SHOW the name (mcp/digest.ts's fleet listing, WhoamiSession.claudeName) do not
+ * use this — reporting what Claude actually calls a session, derived or not, is the point there.
+ */
+export function displacingName(row: {
+  readonly claudeName: string | null;
+  readonly claudeNameUserSet: boolean | null;
+}): string {
+  if (row.claudeNameUserSet !== true || row.claudeName === null) return "";
+  return normalizeLinkName(row.claudeName);
+}

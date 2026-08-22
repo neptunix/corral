@@ -15,7 +15,7 @@ const resolved: WhoamiResponse = {
   session: {
     env: "work-local", envLabel: "Work (local)", paneId: "w1:p1", tabId: "tab1",
     tabLabel: "alpha", workspaceId: "ws1", workspaceLabel: "repo",
-    sessionId: "11111111-2222-3333-4444-555555555555", sessionName: "alpha",
+    sessionId: "11111111-2222-3333-4444-555555555555", sessionName: "alpha", claudeName: null,
     cwd: "/repo", status: "working", model: "Opus",
     ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null,
   },
@@ -153,7 +153,7 @@ describe("fleetHandler", () => {
   // rendered row. Asserting only the "no marker" case (below) would pass with the plumbing deleted.
   it("carries this session's own account into the digest, marking only the rows that differ", async () => {
     const statusline = (email: string): StatuslineData => ({
-      v: 1, captured_at: 0, session_id: "s1", session_name: null, name_source: null,
+      v: 1, captured_at: 0, session_id: "s1",
       account: { uuid: null, email, org: null, tier: null },
       model: null, model_id: null,
       ctx: { pct: null, tokens: null, window: null },
@@ -245,7 +245,7 @@ describe("fleetHandler defaults and filters", () => {
     const client = stub({
       state: async () => mixed,
       attention: async () => ({
-        "work-local:w1:p4": { state: "finished", since: Date.now(), sessionName: "s4", lastLines: "", captured: true },
+        "work-local:w1:p4": { state: "finished", since: Date.now(), sessionName: "s4", claudeName: null, lastLines: "", captured: true },
       }),
     });
     const out = await fleetHandler(fleetDeps(client), { filter: "needs-attention" });

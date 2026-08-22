@@ -19,10 +19,14 @@ export const WhoamiCardSessionSchema = z.object({
   /** The LINK's name — what the card is labelled with, i.e. the name corral was asked for. */
   name: z.string(),
   /**
-   * The name the Claude session itself answers to, when the statusline has been captured. It is NOT
-   * always `name`: a resumed session is launched without `--name` and derives its own from the cwd,
-   * so the card can read `s0-orchestrator-spec` while the session is really `github-private-e5`.
-   * Null when unknown, which is not the same as "equal to name".
+   * The name the Claude session itself answers to, read live from its registry. It is NOT always
+   * `name`: a resumed session is launched without `--name` and derives its own from the cwd, so the
+   * card can read `s0-orchestrator-spec` while the session is really `github-private-e5`.
+   * Null when there is no registry record for the pane, which is not the same as "equal to name".
+   *
+   * Deliberately UNGATED, unlike every value that gets stored or pushed onto a label: this one is only
+   * displayed, and reporting what Claude currently calls the session — auto-derived or not — is the
+   * whole point of the field.
    *
    * Defaulted, not required: an MCP client talks to whatever corral server is already running, and a
    * server predating this field would otherwise fail validation on EVERY card read rather than lose
@@ -62,7 +66,22 @@ export const WhoamiSessionSchema = z.object({
   workspaceId: z.string(),
   workspaceLabel: z.string(),
   sessionId: z.string().nullable(),
+  /**
+   * The name to STORE for this session — gated on `claudeNameUserSet`, because the MCP attach writes
+   * it into `SessionLink.name`, which outlives the session and which the reconciler refreshes only for
+   * user-set names. Null when Claude named the session itself: the card should not inherit that.
+   * For DISPLAY use `claudeName` below, which is what the session actually answers to.
+   */
   sessionName: z.string().nullable(),
+  /**
+   * What Claude currently calls this session, ungated — the address a peer uses. Mirrors
+   * `WhoamiCardSession.claudeName`, and deliberately shows an auto-derived name: a session resumed
+   * without `--name` derives its own, and telling it its name was "not captured" would send it to hand
+   * out its tab label, which for a resumed session is the slugified card name and not an address.
+   *
+   * Defaulted, not required: an MCP client talks to whatever corral server is already running.
+   */
+  claudeName: z.string().nullable().default(null),
   cwd: z.string(),
   status: z.string(),
   model: z.string().nullable(),

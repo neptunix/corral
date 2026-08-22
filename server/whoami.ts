@@ -4,6 +4,7 @@ import type { WhoamiCardSession, WhoamiEnv, WhoamiResponse, WhoamiSession, Whoam
 
 import type { HerdrEnv } from "../environments.ts";
 import { expandTilde } from "./herdr.ts";
+import { displacingName } from "./link-name.ts";
 import { buildLiveIndex, type LiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import { linkBindsSession } from "./session-binding.ts";
 
@@ -179,13 +180,23 @@ function envList(envs: readonly HerdrEnv[], snapshot: Snapshot): WhoamiEnv[] {
 }
 
 /**
- * A captured session name, or null. `session_name` is `z.string().nullable()`, so "" is a valid
- * capture — and an empty address is worse than a missing one: it renders as a blank where a reader
- * is told to find the string to message. Normalised here, at the boundary, so every renderer of
- * either name field inherits it.
+ * The session's name as Claude's registry has it, for a value that will be STORED rather than shown.
+ * Gated on `claudeNameUserSet` — the same gate the tab renamer (server/tab-namer.ts), the board's
+ * enriched `name` (server/api.ts) and the fleet mirror use — because `sessionName` feeds the MCP
+ * attach (mcp/tools/task.ts), which writes it into `SessionLink.name`, the DURABLE projection. An
+ * auto-derived name landing there is permanent: the reconciler mirrors user-set names only
+ * (server/reconcile.ts).
+ *
+ * Returns null rather than falling back to the tab label — the consumer supplies its own fallback.
+ *
+ * NORMALIZED, like every other gated writer of this name (server/api.ts, server/fleet-mirror.ts,
+ * server/reconcile.ts): this string is stored, and an un-normalized registry name would carry control
+ * sequences and an unbounded length into the board file. `claudeNameOf` collapses "" to null, but the
+ * normalizer can produce "" from a whitespace-only name, so the result is re-tested.
  */
-function capturedName(name: string | null | undefined): string | null {
-  return name === undefined || name === null || name === "" ? null : name;
+function storedName(row: SessionRow): string | null {
+  const clean = displacingName(row);
+  return clean === "" ? null : clean;
 }
 
 function cardSession(index: LiveIndex, link: SessionLink, selfRow: SessionRow): WhoamiCardSession {
@@ -195,7 +206,7 @@ function cardSession(index: LiveIndex, link: SessionLink, selfRow: SessionRow): 
   const live = resolveLiveRow(link, index);
   return {
     name: link.name,
-    claudeName: capturedName(live?.statusline?.session_name),
+    claudeName: live?.claudeName ?? null,
     key: `${link.env}:${link.paneId}`,
     sessionId: link.sessionId,
     status: live?.status ?? "detached",
@@ -248,7 +259,8 @@ function sessionBlock(env: HerdrEnv, row: SessionRow): WhoamiSession {
     workspaceId: row.workspaceId ?? "",
     workspaceLabel: row.workspace,
     sessionId: row.sessionId,
-    sessionName: capturedName(sl?.session_name),
+    sessionName: storedName(row),
+    claudeName: row.claudeName,
     cwd: row.cwd,
     status: row.status,
     model: sl?.model ?? null,

@@ -112,37 +112,88 @@ describe("createPoller", () => {
 });
 
 describe("createPoller tab rename", () => {
-  it("renames a tab when the canonical pane has a user-set name differing from the label", async () => {
-    const env = A; // existing local env fixture in this file
+  const SID = "11111111-2222-3333-4444-555555555555";
+
+  it("renames a tab from the REGISTRY, with no statusline capture at all", async () => {
+    // The reported bug: the renamer used to read the statusline capture, which is written only when
+    // Claude renders its statusline. An idle session's capture goes stale and still holds the old
+    // name, so the renamer saw "already matches" and never renamed. Here there is no capture at all
+    // and the rename must still happen.
+    const env = A;
     const rows = [{
       env: env.id, paneId: "p1", status: "working", agent: "claude", cwd: "/x",
-      tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId: "11111111-2222-3333-4444-555555555555",
+      tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId: SID,
       recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
     }];
-    const statusline: StatuslineFn = () => Promise.resolve({
-      data: {
-        v: 1, captured_at: 1, session_id: "11111111-2222-3333-4444-555555555555",
-        session_name: "renamed-by-user", name_source: "user",
-        account: null, model: null, model_id: null,
-        ctx: { pct: null, tokens: null, window: null },
-        cost: { usd: null, lines_added: null, lines_removed: null },
-        rate: { five_hour: null, seven_day: null },
-        effort: null, thinking: null, cc_version: null,
-      },
-      status: "ok",
-    });
     const calls: { tabId: string; label: string }[] = [];
     const p = createPoller({
       envs: [env],
       list: () => Promise.resolve(rows),
       recap: () => Promise.resolve({ recap: null, status: "no-summary", source: null }),
-      statusline,
+      statusline: () => Promise.resolve({ data: null, status: "not-found" }),
       tabRename: (_e, tabId, label) => { calls.push({ tabId, label }); return Promise.resolve(); },
       tabRenameEnabled: true,
     });
-    await p.pollOnce();          // populate perEnv rows
-    await p.runClaudeSweepOnce(); // capture statusline + apply renames
+    await p.pollOnce();
+    // Primed directly: for a LOCAL env the registry is read by the interval timer, not by the sweep
+    // (the sweep reads it for remote envs only), so pollOnce + runClaudeSweepOnce would otherwise
+    // leave the cache empty.
+    p.applyRegistry(env, ok([{ sessionId: SID, name: "renamed-by-user" }]));
+    await p.runClaudeSweepOnce();
     expect(calls).toEqual([{ tabId: "t1", label: "renamed-by-user" }]);
+  });
+
+  it("does not rename from a Claude auto-derived name", async () => {
+    const env = A;
+    const rows = [{
+      env: env.id, paneId: "p1", status: "working", agent: "claude", cwd: "/x",
+      tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId: SID,
+      recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
+    }];
+    const calls: { tabId: string; label: string }[] = [];
+    const p = createPoller({
+      envs: [env],
+      list: () => Promise.resolve(rows),
+      recap: () => Promise.resolve({ recap: null, status: "no-summary", source: null }),
+      statusline: () => Promise.resolve({ data: null, status: "not-found" }),
+      tabRename: (_e, tabId, label) => { calls.push({ tabId, label }); return Promise.resolve(); },
+      tabRenameEnabled: true,
+    });
+    await p.pollOnce();
+    p.applyRegistry(env, ok([{ sessionId: SID, name: "Refactoring the poller", nameSource: "derived" }]));
+    await p.runClaudeSweepOnce();
+    expect(calls).toEqual([]);
+  });
+
+  it("does not rename from a registry record belonging to a previous session on the pane", async () => {
+    // Reaches server/poller.ts's `reg.sessionId !== r.sessionId` guard, which needs the cache to hold
+    // a record for THIS PANE captured under a DIFFERENT session. Priming with an unknown id would not
+    // do it: applyRegistry drops records matching no row, so the cache would simply stay empty and the
+    // test would pass through the `reg === undefined` branch instead.
+    const env = A;
+    const OLD = "11111111-2222-3333-4444-555555555555";
+    const NEW = "99999999-8888-7777-6666-555555555555";
+    const paneRow = (sessionId: string): SessionRow => ({
+      env: env.id, paneId: "p1", status: "working", agent: "claude", cwd: "/x",
+      tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId,
+      recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
+    });
+    let current = paneRow(OLD);
+    const calls: { tabId: string; label: string }[] = [];
+    const p = createPoller({
+      envs: [env],
+      list: () => Promise.resolve([current]),
+      recap: () => Promise.resolve({ recap: null, status: "no-summary", source: null }),
+      statusline: () => Promise.resolve({ data: null, status: "not-found" }),
+      tabRename: (_e, tabId, label) => { calls.push({ tabId, label }); return Promise.resolve(); },
+      tabRenameEnabled: true,
+    });
+    await p.pollOnce();
+    p.applyRegistry(env, ok([{ sessionId: OLD, name: "old-session-name" }])); // cached against OLD
+    current = paneRow(NEW);   // the pane is recycled: same pane id, a different Claude session
+    await p.pollOnce();
+    await p.runClaudeSweepOnce();
+    expect(calls).toEqual([]); // the stale record must not name the new session's tab
   });
 });
 
@@ -293,7 +344,7 @@ describe("createPoller — recap sweep", () => {
 describe("createPoller — statusline sweep", () => {
   it("merges statusline data onto session rows via the sweep", async () => {
     const sl: StatuslineData = {
-      v: 1, captured_at: 100, session_id: "sid-1", session_name: null, name_source: null,
+      v: 1, captured_at: 100, session_id: "sid-1",
       account: { uuid: "u1", email: "a@b.c", org: "O", tier: "t" },
       model: "Opus", model_id: null, ctx: { pct: 42, tokens: null, window: null },
       cost: { usd: null, lines_added: null, lines_removed: null },
@@ -359,17 +410,6 @@ describe("createPoller initial sweep kick", () => {
     tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId: SID,
     recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
   };
-  const userStatusline: StatuslineFn = () => Promise.resolve({
-    data: {
-      v: 1, captured_at: 1, session_id: SID, session_name: "renamed-by-user", name_source: "user",
-      account: null, model: null, model_id: null,
-      ctx: { pct: null, tokens: null, window: null },
-      cost: { usd: null, lines_added: null, lines_removed: null },
-      rate: { five_hour: null, seven_day: null },
-      effort: null, thinking: null, cc_version: null,
-    },
-    status: "ok",
-  });
 
   it("kicks the first sweep after initialSweepDelayMs, not a full recap interval", async () => {
     vi.useFakeTimers();
@@ -379,7 +419,7 @@ describe("createPoller initial sweep kick", () => {
         envs: [A],
         list: () => Promise.resolve([liveRow]),
         recap: () => Promise.resolve({ recap: null, status: "no-summary", source: null }),
-        statusline: userStatusline,
+        statusline: () => Promise.resolve({ data: null, status: "not-found" }),
         tabRename: (_e, tabId, label) => { calls.push({ tabId, label }); return Promise.resolve(); },
         tabRenameEnabled: true,
         initialSweepDelayMs: 5000,
@@ -387,11 +427,15 @@ describe("createPoller initial sweep kick", () => {
         intervalMs: 30000,
       });
       p.start();
-      await vi.advanceTimersByTimeAsync(4999);
+      // After the t=0 poll, not before it: applyRegistry drops a record whose sessionId matches no
+      // known row, and rows only exist once list() has resolved.
+      await vi.advanceTimersByTimeAsync(1);
+      p.applyRegistry(A, { records: [{ sessionId: SID, name: "renamed-by-user" }], status: "ok", truncated: false });
+      await vi.advanceTimersByTimeAsync(4998);
       expect(calls).toEqual([]); // the racing t=0 sweep no-ops; the delayed kick has not fired yet
       await vi.advanceTimersByTimeAsync(1);
-      // renamed at ~5s (well before the 60s recap interval); name_source null = user-set (post-fix)
-      expect(calls).toEqual([{ tabId: "t1", label: "renamed-by-user" }]);
+      expect(calls).toEqual([{ tabId: "t1", label: "renamed-by-user" }]); // ~5s, not the 60s recap interval
+
       p.stop();
     } finally {
       vi.useRealTimers();

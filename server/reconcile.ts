@@ -1,6 +1,6 @@
 import type { SessionLink } from "@shared/board-schema";
 
-import { normalizeLinkName } from "./link-name.ts";
+import { displacingName } from "./link-name.ts";
 import { buildLiveIndex, resolveLiveRow, type LiveIndex } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
 import type { Storage } from "./storage.ts";
@@ -49,8 +49,7 @@ import type { Storage } from "./storage.ts";
 function mirrorNameFor(link: SessionLink, index: LiveIndex): string | null {
   if (link.sessionId === null || link.sessionId === "") return null;
   const row = resolveLiveRow(link, index);
-  if (row?.claudeNameUserSet !== true || row.claudeName === null) return null;
-  const next = normalizeLinkName(row.claudeName);
+  const next = row === undefined ? "" : displacingName(row);
   return next === "" || next === link.name ? null : next;
 }
 

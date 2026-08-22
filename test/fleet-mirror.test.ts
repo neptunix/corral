@@ -269,6 +269,37 @@ describe("createFleetMirror write policy", () => {
 
 });
 
+describe("createFleetMirror — which name it stores", () => {
+  // fleet-restore slugifies this string into the restored session's herdr TAB LABEL, so it is gated
+  // exactly like the tab renamer: an auto-derived Claude name must never relabel a tab.
+  const nameOf = (m: ReturnType<typeof createFleetMirror>): string | undefined =>
+    m.getState().envs.e1?.sessions[0]?.name;
+
+  function mirrorWith(over: Partial<SessionRow>): ReturnType<typeof createFleetMirror> {
+    const fp = fakePoller();
+    const m = createFleetMirror({ dataDir: tmpDir });
+    m.start(fp.poller);
+    fp.set({ e1: UP }, [row("e1", UUID_A, over)]);
+    fp.emit();
+    return m;
+  }
+
+  it("stores the session's own name when the operator set it", () => {
+    expect(nameOf(mirrorWith({ claudeName: "auth-fix", claudeNameUserSet: true }))).toBe("auth-fix");
+  });
+
+  it("falls back to the tab label for a derived name, a null name, and no registry record", () => {
+    expect(nameOf(mirrorWith({ claudeName: "Refactoring the poller", claudeNameUserSet: false }))).toBe("my-tab");
+    expect(nameOf(mirrorWith({ claudeName: null, claudeNameUserSet: true }))).toBe("my-tab");
+    expect(nameOf(mirrorWith({ claudeName: "x", claudeNameUserSet: null }))).toBe("my-tab");
+  });
+
+  it("normalizes the stored name, and falls back when it normalizes away", () => {
+    expect(nameOf(mirrorWith({ claudeName: "  auth-fix  ", claudeNameUserSet: true }))).toBe("auth-fix");
+    expect(nameOf(mirrorWith({ claudeName: "   ", claudeNameUserSet: true }))).toBe("my-tab");
+  });
+});
+
 describe("ensureMirrorGitignore", () => {
   it("adds the line exactly once, preserving existing content, and untracks a previously tracked mirror", async () => {
     const gi = path.join(tmpDir, ".gitignore");

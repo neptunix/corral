@@ -41,8 +41,6 @@ export const StatuslineDataSchema = z.object({
   v: z.literal(1),
   captured_at: z.number(),
   session_id: z.string(),
-  session_name: z.string().nullable(),
-  name_source: z.string().nullable().optional().default(null),
   account: StatuslineAccountSchema.nullable(),
   model: z.string().nullable(),
   model_id: z.string().nullable(),
@@ -111,16 +109,12 @@ export const SessionRowSchema = z.object({
   remoteControl: z.boolean().nullable().default(null),
   registryStatus: RegistryStatusSchema.nullable().default(null),
   // The session's own name, and a DECISION about its provenance rather than a copy of `nameSource`.
-  // NOT the same field as WhoamiCardSession.claudeName (shared/whoami-schema.ts), which comes from the
-  // statusline capture on the 60 s sweep and carries no provenance — the two can differ in latency and
-  // in source, and only this one is registry-derived.
-  // The file's `nameSource` cannot ride across as-is: on the statusline path `null` means "registry
-  // miss" (server/tab-namer.ts), while on the registry path ABSENT means the opposite — set
-  // deliberately, by /rename or by corral's own `--name`. One field cannot carry both meanings, so
-  // rebuild() resolves it where both are in scope. `"derived"` — Claude's own auto-name — is the only
-  // value that closes the gate; a marker corral has not been told about fails OPEN (see the drift
-  // nudge at RegistryRecordSchema). null = no record for this pane; false = a record with no usable
-  // name; true = a record whose name was set deliberately.
+  // The registry is the ONE source of a live session's name — the statusline capture no longer carries
+  // one — so every reader and every writer of a name goes through this pair.
+  // `"derived"` — Claude's own auto-name — is the only value that closes the gate; a marker corral has
+  // not been told about fails OPEN (see the drift nudge at RegistryRecordSchema). null = no record for
+  // this pane; false = a record with no usable name, or one Claude named itself; true = a record whose
+  // name was set deliberately, and the only state any writer of a name acts on.
   claudeName: z.string().nullable().default(null),
   claudeNameUserSet: z.boolean().nullable().default(null),
 });

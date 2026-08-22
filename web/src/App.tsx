@@ -149,7 +149,7 @@ export function App(): JSX.Element {
     const m = new Map<string, {
       recap: string | null; recapStatus: RecapStatus | null; recapSource: RecapSource | null;
       statusline: StatuslineData | null; workspace: string;
-      status: string; claudeStatus: string | null; waitingFor: string | null;
+      status: string; claudeStatus: string | null; claudeName: string | null; waitingFor: string | null;
       remoteControl: boolean | null; registryStatus: RegistryStatus | null;
     }>();
     // workspace (≈ repo) shown in the terminal header; "?" is herdr's unknown-label sentinel → drop it.
@@ -157,7 +157,7 @@ export function App(): JSX.Element {
     for (const s of globalState?.unassigned ?? []) m.set(`${s.env}:${s.paneId}`, {
       recap: s.recap, recapStatus: s.recapStatus, recapSource: s.recapSource,
       statusline: s.statusline, workspace: clean(s.workspace),
-      status: s.status, claudeStatus: s.claudeStatus, waitingFor: s.waitingFor,
+      status: s.status, claudeStatus: s.claudeStatus, claudeName: s.claudeName, waitingFor: s.waitingFor,
       remoteControl: s.remoteControl, registryStatus: s.registryStatus,
     });
     if (activeBoardState !== null) {
@@ -165,7 +165,7 @@ export function App(): JSX.Element {
         if (link.live !== null) m.set(`${link.env}:${link.paneId}`, {
           recap: link.live.recap, recapStatus: link.live.recapStatus, recapSource: link.live.recapSource,
           statusline: link.live.statusline, workspace: clean(link.workspaceLabel),
-          status: link.live.status, claudeStatus: link.live.claudeStatus, waitingFor: link.live.waitingFor,
+          status: link.live.status, claudeStatus: link.live.claudeStatus, claudeName: link.live.claudeName, waitingFor: link.live.waitingFor,
           remoteControl: link.live.remoteControl, registryStatus: link.live.registryStatus,
         });
       }
@@ -365,6 +365,7 @@ export function App(): JSX.Element {
           recapStatus={liveByKey.get(`${session.env}:${session.paneId}`)?.recapStatus ?? null}
           recapSource={liveByKey.get(`${session.env}:${session.paneId}`)?.recapSource ?? null}
           statusline={liveByKey.get(`${session.env}:${session.paneId}`)?.statusline ?? null}
+          claudeName={liveByKey.get(`${session.env}:${session.paneId}`)?.claudeName ?? null}
           status={liveByKey.get(`${session.env}:${session.paneId}`)?.status ?? "unknown"}
           claudeStatus={liveByKey.get(`${session.env}:${session.paneId}`)?.claudeStatus ?? null}
           waitingFor={liveByKey.get(`${session.env}:${session.paneId}`)?.waitingFor ?? null}

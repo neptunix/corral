@@ -9,7 +9,7 @@ const SID = "11111111-2222-3333-4444-555555555555";
 const SID_B = "99999999-8888-7777-6666-555555555555";
 
 const statusline: StatuslineData = {
-  v: 1, captured_at: 9, session_id: SID, session_name: "api-refactor", name_source: "user",
+  v: 1, captured_at: 9, session_id: SID,
   account: { uuid: "u1", email: "user@example.com", org: "Org", tier: "t" },
   model: "Opus", model_id: null,
   ctx: { pct: 41, tokens: null, window: null },
@@ -27,7 +27,7 @@ function row(over: Partial<SessionRow>): SessionRow {
   };
 }
 
-const me = row({ statusline, statuslineStatus: "ok" });
+const me = row({ statusline, statuslineStatus: "ok", claudeName: "api-refactor", claudeNameUserSet: true });
 const sibling = row({ paneId: "w1:p2", sessionId: SID_B, status: "blocked", tab: "api-refactor-b" });
 
 const snapshot: Snapshot = {
@@ -134,17 +134,48 @@ describe("buildWhoami", () => {
     expect(sessions.find((s) => s.name === "api-refactor-c")?.claudeName).toBeNull();
   });
 
-  it("normalises an empty captured name to null rather than handing out a blank address", () => {
+  // Two fields, two policies, deliberately: `sessionName` is STORED (the MCP attach writes it into
+  // SessionLink.name), so it is gated on claudeNameUserSet; the card's `claudeName` is only shown, so
+  // it reports whatever Claude currently calls the session, auto-derived or not.
+  it("gates the STORED session name on user-set, while still showing the derived one", () => {
     const localEnv = ENVIRONMENTS.find((e) => e.id === "work-local");
     if (localEnv === undefined) throw new Error("fixture missing work-local");
-    const blank = row({ statusline: { ...statusline, session_name: "" }, statuslineStatus: "ok" });
+    // Gated, not merely non-empty: this value is written into SessionLink.name by the MCP attach
+    // (mcp/tools/task.ts), so a Claude auto-name landing here would be stored permanently.
+    const blank = row({ statusline, statuslineStatus: "ok", claudeName: "auto-derived-title", claudeNameUserSet: false });
     const out = buildWhoami({
       resolution: { ok: true, env: localEnv, row: blank },
       envs: ENVIRONMENTS, snapshot: { ...snapshot, sessions: [blank, sibling] }, boards: [board],
     });
     if (!out.resolved) throw new Error("expected resolved");
     expect(out.session.sessionName).toBeNull();
-    expect(out.task?.sessions.find((s) => s.name === "api-refactor-a")?.claudeName).toBeNull();
+    // The other half of the split, and the whole point of it: the session must still be TOLD the name
+    // it answers to. Without this, re-gating the display field is invisible to the suite — and a
+    // session that reads "name not captured" hands out its tab label, which for a resumed session is
+    // the slugified card name and not an address (mcp/digest.ts).
+    expect(out.session.claudeName).toBe("auto-derived-title");
+    expect(out.task?.sessions.find((s) => s.name === "api-refactor-a")?.claudeName).toBe("auto-derived-title");
+  });
+
+  it("normalizes the name it hands out to be STORED, and drops one that normalizes away", () => {
+    // This value reaches SessionLink.name through the MCP attach, whose body schema puts no bound on
+    // it — so the normalizer here is the boundary, not a nicety.
+    const localEnv = ENVIRONMENTS.find((e) => e.id === "work-local");
+    if (localEnv === undefined) throw new Error("fixture missing work-local");
+    const named = (claudeName: string): ReturnType<typeof buildWhoami> => {
+      const r = row({ statusline, statuslineStatus: "ok", claudeName, claudeNameUserSet: true });
+      return buildWhoami({
+        resolution: { ok: true, env: localEnv, row: r },
+        envs: ENVIRONMENTS, snapshot: { ...snapshot, sessions: [r, sibling] }, boards: [board],
+      });
+    };
+    const trimmed = named("  auth-fix  ");
+    if (!trimmed.resolved) throw new Error("expected resolved");
+    expect(trimmed.session.sessionName).toBe("auth-fix");
+
+    const blankAfterNormalize = named("   ");
+    if (!blankAfterNormalize.resolved) throw new Error("expected resolved");
+    expect(blankAfterNormalize.session.sessionName).toBeNull();
   });
 
   it("returns a null task for a session bound to nothing", () => {

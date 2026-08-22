@@ -89,6 +89,11 @@ export const LiveSessionDataSchema = z.object({
   // field-by-field in server/api.ts — a new SessionRow field that is not added in BOTH places never
   // reaches the web, and the omission is silent.
   claudeStatus: z.string().nullable().default(null),
+  // Claude's own name for this session, straight from the registry. The card's title does NOT come
+  // from here — server/api.ts resolves that into the link's `name`, gated on claudeNameUserSet. This
+  // is the informational subtitle only, and is deliberately ungated: showing Claude's actual current
+  // name, auto-derived or not, is the point of that line.
+  claudeName: z.string().nullable().default(null),
   waitingFor: z.string().nullable().default(null),
   remoteControl: z.boolean().nullable().default(null),
   registryStatus: RegistryStatusSchema.nullable().default(null),

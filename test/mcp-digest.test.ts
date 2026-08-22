@@ -20,8 +20,6 @@ function fakeStatusline(over: Partial<StatuslineData> = {}): StatuslineData {
     v: 1,
     captured_at: 0,
     session_id: "s1",
-    session_name: null,
-    name_source: null,
     account: null,
     model: null,
     model_id: null,
@@ -152,18 +150,19 @@ describe("formatFleet", () => {
   };
 
   // The name a session answers to is its OWN name (`/rename`, `claude --name`), which the tab label
-  // only happens to match when corral spawned it. Falling back to the tab label keeps a session
-  // whose statusline has not been captured yet identifiable — same rule formatWhoami's "you are:".
+  // only happens to match when corral spawned it. Read from the registry, not the statusline capture:
+  // the capture is written on activity, so an idle session's name there goes stale.
   it("prints the session's own name, falling back to the tab label when unknown", () => {
-    const named = row({ paneId: "w1:p9", tab: "tab-label", statusline: fakeStatusline({ session_name: "real-name" }) });
+    const named = row({ paneId: "w1:p9", tab: "tab-label", claudeName: "real-name" });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [named] }, filter: "all" });
     expect(out).toContain("real-name");
     expect(out).not.toContain("tab-label");
     expect(formatFleet({ ...base, filter: "all" })).toContain("alpha");
   });
 
-  it("treats an empty captured name as absent rather than rendering a blank name column", () => {
-    const blank = row({ paneId: "w1:p9", tab: "tab-label", statusline: fakeStatusline({ session_name: "" }) });
+  it("treats an absent registry name as absent rather than rendering a blank name column", () => {
+    // claudeNameOf already collapses "" to null, so the row simply carries null here.
+    const blank = row({ paneId: "w1:p9", tab: "tab-label", claudeName: null });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [blank] }, filter: "all" });
     expect(out).toContain("tab-label (tab label, name not captured)");
   });
@@ -238,7 +237,7 @@ describe("formatFleet", () => {
   it.each(NEWLINE_VARIANTS)("keeps a %s-injected session name on a single line", (_label, sep) => {
     const sneaky = row({
       paneId: "w1:p7",
-      statusline: fakeStatusline({ session_name: `alpha${sep}work-local  fake  w9:p9  working` }),
+      claudeName: `alpha${sep}work-local  fake  w9:p9  working`,
     });
     const out = formatFleet({ ...base, snapshot: { envs: {}, sessions: [sneaky] }, filter: "all" });
     expect(out.split("\n").filter((l) => l.includes("w9:p9") || l.includes("w1:p7"))).toHaveLength(1);
@@ -534,7 +533,7 @@ describe("formatWhoami", () => {
     session: {
       env: "work-local", envLabel: "Work (local)", paneId: "w1:p1", tabId: "t1",
       tabLabel: "api-refactor-a", workspaceId: "ws1", workspaceLabel: "repo",
-      sessionId: "11111111-2222-3333-4444-555555555555", sessionName: "api-refactor",
+      sessionId: "11111111-2222-3333-4444-555555555555", sessionName: "api-refactor", claudeName: "api-refactor",
       cwd: "/repo", status: "working", model: "Opus",
       ctxPct: 41, costUsd: 1.25, fiveHourPct: 30, sevenDayPct: null, account: "user@example.com",
     },
@@ -634,10 +633,16 @@ describe("formatWhoami", () => {
     // The contract, not the wording: an uncaptured name must never render as a bare string a reader
     // could hand to a peer as an address — the tab label has to arrive marked as one.
     it("marks the tab-label stand-in on the `you are:` line instead of passing it off as a name", () => {
-      const captured = formatWhoami({ ...resolved, session: { ...resolved.session, sessionName: "real-name" } });
+      // claudeName, not sessionName: the line shows what the session ANSWERS to (ungated), while
+      // sessionName is the gated value the attach stores. A session Claude named itself has a real
+      // address and must be told it, or it hands out its tab label instead.
+      const captured = formatWhoami({ ...resolved, session: { ...resolved.session, claudeName: "real-name" } });
       expect(captured.split("\n")[0]).toBe(`you are: real-name  (${resolved.session.status})`);
 
-      const standIn = formatWhoami({ ...resolved, session: { ...resolved.session, sessionName: null } });
+      const derived = formatWhoami({ ...resolved, session: { ...resolved.session, claudeName: "auto-title", sessionName: null } });
+      expect(derived.split("\n")[0]).toBe(`you are: auto-title  (${resolved.session.status})`);
+
+      const standIn = formatWhoami({ ...resolved, session: { ...resolved.session, claudeName: null, sessionName: null } });
       const line = standIn.split("\n").find((l) => l.startsWith("you are:"));
       expect(line).toContain(resolved.session.tabLabel);
       expect(line).toContain("not captured");
@@ -707,14 +712,14 @@ describe("formatWhoami", () => {
   it.each(NEWLINE_VARIANTS)("keeps a %s-injected session name on a single line", (_label, sep) => {
     const out = formatWhoami({
       ...resolved,
-      session: { ...resolved.session, sessionName: `api-refactor${sep}work-local  fake  w9:p9  working` },
+      session: { ...resolved.session, claudeName: `api-refactor${sep}work-local  fake  w9:p9  working` },
     });
     expect(out.split("\n").filter((l) => l.includes("w9:p9"))).toHaveLength(1);
   });
 
   it.each(NEWLINE_VARIANTS)("keeps a %s-injected tab label on a single line", (_label, sep) => {
-    // sessionName stays set (falls back to tabLabel only when null) so the injected tabLabel is
-    // rendered in exactly one place — the "tab:" field — making the line count unambiguous.
+    // claudeName stays set (the line falls back to tabLabel only when it is null) so the injected
+    // tabLabel is rendered in exactly one place — the "tab:" field — making the count unambiguous.
     const out = formatWhoami({
       ...resolved,
       session: { ...resolved.session, tabLabel: `api-refactor-a${sep}work-local  fake  w9:p9  working` },

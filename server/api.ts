@@ -29,6 +29,7 @@ import type { DiagnosticsStore } from "./diagnostics-store.ts";
 import type { FleetRestore } from "./fleet-restore.ts";
 import { closePane, listWorkspaces, paneIdentity, readPane, type ReadFn, UUID_RE } from "./herdr.ts";
 import { isLoopbackHost } from "./host-guard.ts";
+import { displacingName } from "./link-name.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
 import { isSessionBound, linkBindsSession, resolveLinkIndex } from "./session-binding.ts";
@@ -116,6 +117,9 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
       // sessionId (server/session-binding.ts).
       const live = resolveLiveRow(link, index);
       const paneId = live?.paneId ?? link.paneId;
+      // Bound first, then tested for empty, so a degenerate name FALLS THROUGH to the tab label rather
+      // than ending the chain rendering "" — the one value a card must never show.
+      const claudeName = live === undefined ? "" : displacingName(live);
       return {
         ...link,
         paneId,
@@ -123,22 +127,29 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
         // workspace move then shows immediately. The stored link labels are only a bind-time snapshot
         // (they go stale on rename) and are the source of truth for nothing that's displayed: they serve
         // ONLY as a fallback when there is no live row (detached) or the live label is unknown ("?"/"").
-        // `name` is shown only on a DETACHED card ("⚠ {name}"), where `live` is undefined — so it can
-        // never come from `live`; fall back to paneId, which also heals records persisted with an empty name.
+        // `name` is rendered on the live card as well as the detached one, so it prefers the LIVE
+        // registry name — the same way tabLabel prefers the live herdr label. Gated on claudeNameUserSet
+        // exactly as the tab renamer (server/tab-namer.ts) and the fleet mirror are: a Claude auto-name
+        // must not displace a label the operator set by hand, or the board and the terminal would
+        // disagree permanently — nothing would ever push that name onto the tab. Then the LIVE tab label,
+        // because the stored link.name is only a bind-time snapshot and the reconciler refreshes it for
+        // user-set names alone; then the stored name; then paneId, which heals a record persisted empty.
         tabLabel: live !== undefined && live.tab !== "" && live.tab !== "?" ? live.tab : link.tabLabel,
         workspaceLabel: live !== undefined && live.workspace !== "" && live.workspace !== "?" ? live.workspace : link.workspaceLabel,
-        name: link.name !== "" ? link.name : link.paneId,
+        name: claudeName !== "" ? claudeName
+          : live !== undefined && live.tab !== "" && live.tab !== "?" ? live.tab
+          : link.name !== "" ? link.name : paneId,
         live: live !== undefined
           ? { status: live.status, model: live.statusline?.model ?? null,
               ctxPct: live.statusline?.ctx.pct !== null && live.statusline?.ctx.pct !== undefined
                 ? String(live.statusline.ctx.pct) : null,
               detached: false, recap: live.recap, recapAt: live.recapAt,
               recapStatus: live.recapStatus, recapSource: live.recapSource, statusline: live.statusline,
-              claudeStatus: live.claudeStatus, waitingFor: live.waitingFor,
+              claudeStatus: live.claudeStatus, claudeName: live.claudeName, waitingFor: live.waitingFor,
               remoteControl: live.remoteControl, registryStatus: live.registryStatus }
           : { status: "unknown", model: null, ctxPct: null, detached: true,
               recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null,
-              claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null },
+              claudeStatus: null, claudeName: null, waitingFor: null, remoteControl: null, registryStatus: null },
       };
     }),
   }));

@@ -25,7 +25,7 @@ function withOptimisticLive(s: EnrichedSessionLink, state: OptimisticState): Enr
   // what makes sessionStateLabel fall back to `status`, so the row reads "closing…"/"resuming…". A
   // preserved `registryStatus: "ok"` would make the label render the stale `claudeStatus` instead and
   // the overlay would appear to do nothing at all.
-  const registry = { claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null };
+  const registry = { claudeStatus: null, claudeName: null, waitingFor: null, remoteControl: null, registryStatus: null };
   const live = state === "closing"
     ? { status: CLOSING_STATUS, model: null, ctxPct: null, detached: true, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, ...registry }
     : { status: RESUMING_STATUS, model: null, ctxPct: null, detached: false, recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, ...registry };

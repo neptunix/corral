@@ -9,7 +9,7 @@ const resolvedBody: WhoamiResponse = {
   session: {
     env: "work-local", envLabel: "Work (local)", paneId: "w1:p1", tabId: "tab1",
     tabLabel: "alpha", workspaceId: "ws1", workspaceLabel: "repo",
-    sessionId: "11111111-2222-3333-4444-555555555555", sessionName: "alpha",
+    sessionId: "11111111-2222-3333-4444-555555555555", sessionName: "alpha", claudeName: null,
     cwd: "/repo", status: "working", model: "Opus",
     ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null,
   },

@@ -25,7 +25,7 @@ function run(configDir: string, input: unknown, home: string = configDir): void 
 
 describe.skipIf(!hasJq())("corral-status-capture.sh", () => {
   const statusInput = {
-    session_id: "a13ad559-8e59-4b98-b420-2746ef0b94d8", session_name: "task-42-a",
+    session_id: "a13ad559-8e59-4b98-b420-2746ef0b94d8",
     model: { id: "claude-opus-4-8", display_name: "Opus" },
     context_window: { used_percentage: 42, total_input_tokens: 84000, context_window_size: 200000 },
     cost: { total_cost_usd: 0.83, total_lines_added: 120, total_lines_removed: 30 },
@@ -78,51 +78,27 @@ describe.skipIf(!hasJq())("corral-status-capture.sh", () => {
     expect(existsSync(path.join(configDir, "corral-status"))).toBe(false);
   });
 
-  function writeRegistry(configDir: string, sessionId: string, name: string, nameSource?: string): void {
-    const dir = path.join(configDir, "sessions");
-    mkdirSync(dir, { recursive: true });
-    // files are named by PID in the real registry; the script matches by content, so any name works.
-    // nameSource omitted entirely when undefined (the real "/rename leaves it unset" shape).
-    const record = nameSource === undefined ? { sessionId, name } : { sessionId, name, nameSource };
-    writeFileSync(path.join(dir, "12345.json"), JSON.stringify(record));
-  }
-
-  it("maps a registry name with NO nameSource to name_source 'user' (the /rename-leaves-it-unset case)", () => {
+  it("carries NO name, and does not read the session registry", () => {
+    // The registry is corral's one source for a session's name (server/session-registry.ts). This
+    // script runs only when Claude renders its statusline, so any name it captured would be stale for
+    // an idle session — which is what used to make a /rename invisible.
     const configDir = mkdtempSync(path.join(os.tmpdir(), "corral-cap-")); dirs.push(configDir);
-    writeRegistry(configDir, statusInput.session_id, "my-real-name"); // no nameSource
+    const sessions = path.join(configDir, "sessions");
+    mkdirSync(sessions, { recursive: true });
+    writeFileSync(path.join(sessions, "12345.json"),
+      JSON.stringify({ sessionId: statusInput.session_id, name: "my-real-name", nameSource: "user" }));
+
     run(configDir, statusInput);
-    const out = JSON.parse(readFileSync(path.join(configDir, "corral-status", `${statusInput.session_id}.json`), "utf8"));
-    const parsed = StatuslineDataSchema.parse(out);
-    expect(parsed.name_source).toBe("user");
-    expect(parsed.session_name).toBe("my-real-name");
-  });
 
-  it("passes an explicit 'derived' nameSource through (so downstream skips the rename)", () => {
-    const configDir = mkdtempSync(path.join(os.tmpdir(), "corral-cap-")); dirs.push(configDir);
-    writeRegistry(configDir, statusInput.session_id, "hl-trade-d2", "derived");
-    run(configDir, statusInput);
-    const out = JSON.parse(readFileSync(path.join(configDir, "corral-status", `${statusInput.session_id}.json`), "utf8"));
+    const out: unknown = JSON.parse(readFileSync(path.join(configDir, "corral-status", `${statusInput.session_id}.json`), "utf8"));
+    // Asserted on the RAW object, not the parsed one: the schema strips unknown keys, so parsing first
+    // would pass even if the script still emitted a name.
+    expect(out).not.toHaveProperty("session_name");
+    expect(out).not.toHaveProperty("name_source");
+    expect(JSON.stringify(out)).not.toContain("my-real-name");
+    // The metrics it does exist for are untouched.
     const parsed = StatuslineDataSchema.parse(out);
-    expect(parsed.name_source).toBe("derived");
-    expect(parsed.session_name).toBe("hl-trade-d2");
-  });
-
-  it("name_source is null and session_name falls back to statusline when no registry", () => {
-    const configDir = mkdtempSync(path.join(os.tmpdir(), "corral-cap-")); dirs.push(configDir);
-    run(configDir, statusInput); // no sessions/ dir
-    const out = JSON.parse(readFileSync(path.join(configDir, "corral-status", `${statusInput.session_id}.json`), "utf8"));
-    const parsed = StatuslineDataSchema.parse(out);
-    expect(parsed.name_source).toBeNull();
-    expect(parsed.session_name).toBe("task-42-a"); // statusInput.session_name
-  });
-
-  it("still writes output (name_source null) when the sessions dir has no matching file", () => {
-    const configDir = mkdtempSync(path.join(os.tmpdir(), "corral-cap-")); dirs.push(configDir);
-    writeRegistry(configDir, "some-other-session-id", "someone-elses-name", "user");
-    run(configDir, statusInput);
-    const out = JSON.parse(readFileSync(path.join(configDir, "corral-status", `${statusInput.session_id}.json`), "utf8"));
-    const parsed = StatuslineDataSchema.parse(out);
-    expect(parsed.name_source).toBeNull();
-    expect(parsed.session_name).toBe("task-42-a");
+    expect(parsed.session_id).toBe(statusInput.session_id);
+    expect(parsed.model).toBe("Opus");
   });
 });
