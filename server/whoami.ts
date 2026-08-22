@@ -1,4 +1,4 @@
-import type { Board, SessionLink, Task } from "@shared/board-schema.ts";
+import type { Board, SessionLink } from "@shared/board-schema.ts";
 import type { SessionRow, Snapshot } from "@shared/schema";
 import type { WhoamiCardSession, WhoamiEnv, WhoamiResponse, WhoamiSession, WhoamiTask } from "@shared/whoami-schema.ts";
 
@@ -6,7 +6,7 @@ import type { HerdrEnv } from "../environments.ts";
 import { expandTilde } from "./herdr.ts";
 import { displacingName } from "./link-name.ts";
 import { buildLiveIndex, type LiveIndex, resolveLiveRow } from "./live-resolve.ts";
-import { linkBindsSession } from "./session-binding.ts";
+import { findCard, linkBindsSession } from "./session-binding.ts";
 
 type LocalEnv = Extract<HerdrEnv, { kind: "local" }>;
 
@@ -214,21 +214,6 @@ function cardSession(index: LiveIndex, link: SessionLink, selfRow: SessionRow): 
     ctxPct: live?.statusline?.ctx.pct ?? null,
     self: linkBindsSession(link, { env: selfRow.env, paneId: selfRow.paneId, liveSessionId: selfRow.sessionId }),
   };
-}
-
-function findCard(
-  boards: readonly Board[],
-  row: SessionRow,
-): { readonly board: Board; readonly task: Task } | undefined {
-  const incoming = { env: row.env, paneId: row.paneId, liveSessionId: row.sessionId };
-  for (const board of boards) {
-    for (const task of board.tasks) {
-      if (task.sessions.some((l) => linkBindsSession(l, incoming))) {
-        return { board, task };
-      }
-    }
-  }
-  return undefined;
 }
 
 function taskBlock(boards: readonly Board[], snapshot: Snapshot, row: SessionRow): WhoamiTask | null {

@@ -149,6 +149,13 @@ export const MoveTaskRequestSchema = z.object({ toBoardId: z.string() });
 // Response of POST /api/envs/:env/uploads — the absolute on-host path the dropped bytes were written to.
 export const UploadResponseSchema = z.object({ path: z.string() });
 
+// Response of GET /api/card-signal — the corral-claude-hook.sh card-empty check. `true` means the
+// caller's pane is bound to a card whose description is blank; `false` covers every other case
+// (unresolvable pane, no card, non-blank description) deliberately conflated, since the hook has
+// exactly two behaviours and a distinction it cannot act on invites wrong handling.
+export const CardSignalResponseSchema = z.object({ empty: z.boolean() });
+export type CardSignalResponse = z.infer<typeof CardSignalResponseSchema>;
+
 // Single source of truth for the drop-upload byte cap: the server enforces it (pre-buffer, via
 // hono/body-limit) and the web pre-checks against it, so client and server limits cannot drift.
 export const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;

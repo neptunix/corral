@@ -1,4 +1,5 @@
-import type { SessionLink } from "@shared/board-schema.ts";
+import type { Board, SessionLink, Task } from "@shared/board-schema.ts";
+import type { SessionRow } from "@shared/schema";
 
 // A non-empty (present) stable-UUID guard — mirrors the read-side resolver's `!== null && !== ""`.
 function hasId(s: string | null): boolean {
@@ -41,6 +42,23 @@ export function isSessionBound(
 //     safe no-op (idempotent); close/resume 404.
 //   - No sessionId (legacy caller / a link whose id isn't backfilled yet): resolve by paneId, else
 //     churn-heal by the live row's sessionId (a herdr restart relocated the pane).
+// The one place that walks every board looking for a session's card — whoami's task block and the
+// card-empty signal both need it, and both must see the same card for the same session.
+export function findCard(
+  boards: readonly Board[],
+  row: SessionRow,
+): { readonly board: Board; readonly task: Task } | undefined {
+  const incoming = { env: row.env, paneId: row.paneId, liveSessionId: row.sessionId };
+  for (const board of boards) {
+    for (const task of board.tasks) {
+      if (task.sessions.some((l) => linkBindsSession(l, incoming))) {
+        return { board, task };
+      }
+    }
+  }
+  return undefined;
+}
+
 export function resolveLinkIndex(
   links: readonly SessionLink[],
   target: {

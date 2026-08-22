@@ -125,6 +125,24 @@ estimate is systematically optimistic, and it converts a signal into a reason to
 Handoff itself follows the procedure below — wait for the operator, never spawn unprompted.
 <!-- ctx-signal:end -->
 
+<!-- card-signal:start -->
+## Card-empty signal
+
+`[corral] card empty` appears on prompts when the card this session is bound to has no description.
+
+- **You know the task** — from your spawn brief or the operator's request — write it now, per
+  "Keeping the card current", and `corral_task_read` in the same turn: another session may be on this
+  card and the write replaces the whole field.
+- **Only a title exists and nothing told you the task** — do not invent one. A description nobody
+  wrote is worse than an empty card: empty is honest, invention looks written and gets believed. Say
+  the card is empty, state what you do know, and ask.
+- **Never a placeholder.** "Working on it" satisfies no reader and hides the empty card from the one
+  check that would have found it.
+- **The line stops when the card is written, not when you have spoken about it.** If you asked and the
+  answer comes, write it then — that is the whole point. If the operator told you to leave the card
+  alone, that is settled and you neither write nor raise it again. Do not re-ask on every turn.
+<!-- card-signal:end -->
+
 ## Handing off before context runs out
 
 Available, not obligatory — and never silent. `corral_whoami` reports this session's own context
