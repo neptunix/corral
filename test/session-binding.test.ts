@@ -1,7 +1,8 @@
-import type { SessionLink } from "@shared/board-schema.ts";
+import type { Board, SessionLink, Task } from "@shared/board-schema.ts";
+import type { SessionRow } from "@shared/schema";
 import { describe, it, expect } from "vitest";
 
-import { isSessionBound, resolveLinkIndex } from "../server/session-binding.ts";
+import { findCard, isSessionBound, resolveLinkIndex } from "../server/session-binding.ts";
 
 function link(o: { paneId: string; sessionId: string | null; env?: string }): SessionLink {
   return {
@@ -66,5 +67,47 @@ describe("resolveLinkIndex — address one stored link", () => {
   it("returns -1 on no match", () => {
     const links = [link({ paneId: "pX", sessionId: OLD })];
     expect(resolveLinkIndex(links, { env: "work-local", paneId: "pY", sessionId: null, liveSessionId: null })).toBe(-1);
+  });
+});
+
+function row(paneId: string): SessionRow {
+  return {
+    env: "work-local", paneId, status: "working", agent: "claude", cwd: "/repo",
+    tab: "t", workspace: "w", tabId: "tab1", workspaceId: "ws1",
+    sessionId: null, recap: null, recapAt: null, recapStatus: null, recapSource: null,
+    statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null,
+    remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
+  };
+}
+
+function task(id: string, sessions: SessionLink[]): Task {
+  return { id, title: "T", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions };
+}
+
+function board(id: string, tasks: Task[]): Board {
+  return { id, label: id, columns: [{ id: "todo", label: "Todo" }], tasks, spawnPresets: [], defaultSpawnPresetId: null };
+}
+
+describe("findCard — walks every board and every task, not just the first", () => {
+  it("skips a non-matching board to find the match in a later one", () => {
+    const other = board("other", [task("t-other", [link({ paneId: "pX", sessionId: null })])]);
+    const mine = board("mine", [task("t-mine", [link({ paneId: "pY", sessionId: null })])]);
+    const found = findCard([other, mine], row("pY"));
+    expect(found?.board.id).toBe("mine");
+    expect(found?.task.id).toBe("t-mine");
+  });
+
+  it("skips a non-matching task to find the match in a later task on the same board", () => {
+    const b = board("b", [
+      task("t1", [link({ paneId: "pX", sessionId: null })]),
+      task("t2", [link({ paneId: "pY", sessionId: null })]),
+    ]);
+    const found = findCard([b], row("pY"));
+    expect(found?.task.id).toBe("t2");
+  });
+
+  it("returns undefined when no board or task matches", () => {
+    const b = board("b", [task("t1", [link({ paneId: "pX", sessionId: null })])]);
+    expect(findCard([b], row("pZ"))).toBeUndefined();
   });
 });

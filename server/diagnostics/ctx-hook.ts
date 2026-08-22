@@ -14,9 +14,10 @@ const SIGNAL_END = "<!-- ctx-signal:end -->";
 
 /**
  * Every link of the context-pressure hook chain fails silently by design — `corral-claude-hook.sh`
- * runs `set -euo pipefail` with `trap 'exit 0' ERR` and exits 0 at seven separate preconditions
- * (README → "Claude context-pressure hook"). Each precondition therefore needs its own visible
- * check here; the hook itself will never tell an operator which one failed.
+ * runs `set -euo pipefail` with `trap 'exit 0' ERR` and returns quietly from its own ctx_signal
+ * function at each of several separate preconditions (README → "Claude context-pressure hook"), none
+ * shared with the script's other signal (card-signal). Each precondition therefore needs its own
+ * visible check here; the hook itself will never tell an operator which one failed.
  */
 function hookInstalledCheck(deps: CheckDeps, envId: string, dir: string, now: number): Check {
   const scope = { kind: "configDir" as const, envId, dir };
@@ -121,11 +122,12 @@ function hookRegisteredCheck(deps: CheckDeps, envId: string, dir: string, now: n
 }
 
 /**
- * `<dir>/skills/corral/SKILL.md` must carry BOTH ctx-signal markers: the hook (line 24 of
- * corral-claude-hook.sh) `awk`s the block between them and exits silently on an empty result, so a
- * pre-marker copy of the skill looks installed while quietly disabling the hook. Severity drops to
- * `info` when the hook itself is not installed — then the skill is only an MCP recommendation, not a
- * broken link in an otherwise-working chain.
+ * `<dir>/skills/corral/SKILL.md` must carry BOTH ctx-signal markers: the hook's `block_of` helper
+ * (corral-claude-hook.sh) `awk`s the block between them and its `ctx_signal` function returns quietly
+ * on an empty result, so a pre-marker copy of the skill looks installed while quietly disabling just
+ * the ctx-pressure signal — the hook's other signal (card-signal) has its own independent marker pair
+ * and is unaffected. Severity drops to `info` when the hook itself is not installed — then the skill
+ * is only an MCP recommendation, not a broken link in an otherwise-working chain.
  */
 function skillInstalledCheck(deps: CheckDeps, envId: string, dir: string, now: number): Check {
   const scope = { kind: "configDir" as const, envId, dir };
