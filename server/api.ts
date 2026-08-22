@@ -138,7 +138,7 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
         workspaceLabel: live !== undefined && live.workspace !== "" && live.workspace !== "?" ? live.workspace : link.workspaceLabel,
         name: claudeName !== "" ? claudeName
           : live !== undefined && live.tab !== "" && live.tab !== "?" ? live.tab
-          : link.name !== "" ? link.name : link.paneId,
+          : link.name !== "" ? link.name : paneId,
         live: live !== undefined
           ? { status: live.status, model: live.statusline?.model ?? null,
               ctxPct: live.statusline?.ctx.pct !== null && live.statusline?.ctx.pct !== undefined

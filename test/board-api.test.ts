@@ -267,10 +267,16 @@ describe("GET /api/state — the name a live card renders", () => {
     expect(await nameFor({ tab: "?" }, { name: "" })).toBe("w1-1");
   });
 
-  it("falls back to the live tab label even when the stored name is a bare paneId", async () => {
-    // The unassigned-view create path stores the paneId (no name is supplied), so without the tab
-    // label in the chain a live card would render "w1-1".
-    expect(await nameFor({}, { name: "" })).toBe("live-tab");
+  it("prefers the LIVE tab label over a stale stored name", async () => {
+    // The one case that can distinguish the tab-label step from the stored-name step: everywhere else
+    // the attach route stores liveRow.tab itself, so link.name and live.tab hold the same string and
+    // dropping the step is invisible. link.name is a bind-time snapshot that the reconciler refreshes
+    // only for user-set names, so without this step a card would show it forever.
+    expect(await nameFor({}, { name: "stale-stored" })).toBe("live-tab");
+  });
+
+  it("falls back to the stored name only when there is no usable live label", async () => {
+    expect(await nameFor({ tab: "?" }, { name: "stale-stored" })).toBe("stale-stored");
   });
 });
 
@@ -1936,21 +1942,25 @@ describe("POST attach — UUID-aware idempotency (two same-pane cards)", () => {
 // server/api.ts, so a new SessionRow field that is not added in BOTH places never reaches the web —
 // and the omission is silent. This is the test that catches it.
 describe("GET /api/state — Claude's own session state reaches the board", () => {
-  it("projects claudeStatus, waitingFor, remoteControl and registryStatus onto the enriched link", async () => {
+  it("projects claudeStatus, waitingFor, remoteControl, registryStatus and claudeName onto the enriched link", async () => {
     const storage = createStorage(tmpDir);
     const snapshot: Snapshot = {
       envs: { "work-local": { reachable: true } },
       sessions: [{
         ...makeLiveRow({ paneId: "w1:p1", sessionId: "11111111-2222-3333-4444-555555555555", tabId: "w1:t1" }),
-        claudeStatus: "waiting", waitingFor: "input needed", remoteControl: true, registryStatus: "ok", claudeName: null, claudeNameUserSet: null,
+        claudeStatus: "waiting", waitingFor: "input needed", registryStatus: "ok", remoteControl: true,
+        // Ungated on purpose: this is the session modal's subtitle, which reports what Claude calls the
+        // session whoever set that name. The GATED value is the link's `name`, resolved separately.
+        claudeName: "auto-derived-title", claudeNameUserSet: false,
       }],
     };
     const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage });
     await seedTaskWithLink(app, storage);
     const state = await (await app.request("/api/state?board=t")).json() as {
-      tasks: { sessions: { live: { claudeStatus: string; waitingFor: string; remoteControl: boolean; registryStatus: string } | null }[] }[];
+      tasks: { sessions: { live: { claudeStatus: string; waitingFor: string; remoteControl: boolean; registryStatus: string; claudeName: string | null } | null }[] }[];
     };
     const live = state.tasks[0]?.sessions[0]?.live;
+    expect(live?.claudeName).toBe("auto-derived-title");
     expect(live?.claudeStatus).toBe("waiting");
     expect(live?.waitingFor).toBe("input needed");
     expect(live?.remoteControl).toBe(true);
