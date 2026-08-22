@@ -24,7 +24,7 @@ const bound: WhoamiResponse = {
     // which made an attach payload assertion unable to tell which one bindHandler actually sent —
     // see the "attaches ..." tests below, item 2 of the review-fix wave).
     tabLabel: "alpha-tab-label", workspaceId: "ws1", workspaceLabel: "repo",
-    sessionId: SID, sessionName: "alpha", cwd: "/repo", status: "working", model: "Opus",
+    sessionId: SID, sessionName: "alpha", claudeName: null, cwd: "/repo", status: "working", model: "Opus",
     ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null,
   },
   task: boundTask,

@@ -11,11 +11,14 @@ export interface RenameOp {
 /**
  * A pane's name as Claude's session registry has it — the pair `rebuild()` merges onto a SessionRow,
  * which the 60 s sweep cannot read off its own rows (those come from `perEnv`, before that merge).
- * `userSet` carries `claudeNameUserSetOf`'s answer, plus a third state: null = no record for this pane.
+ *
+ * `userSet` is a BIT, not SessionRow's tri-state: "no registry record for this pane" and "a record
+ * whose name Claude derived" are different facts but the same decision here, so the accessor collapses
+ * both to false rather than making every reader re-learn that they are equivalent.
  */
 export interface ClaudeNameRef {
   readonly name: string | null;
-  readonly userSet: boolean | null;
+  readonly userSet: boolean;
 }
 
 /**
@@ -26,8 +29,8 @@ export interface ClaudeNameRef {
  *  - group rows by tabId (rows with no tabId are ignored);
  *  - per tab the CANONICAL session is the row with the lexicographically smallest paneId — a documented
  *    proxy for "first pane" (herdr's agent list does not flag the root pane);
- *  - rename ONLY on `userSet === true`. `false` means a record exists whose name is not the operator's
- *    (Claude's auto-name, or no usable name at all); `null` means no record for this pane at all.
+ *  - rename ONLY on `userSet`. False covers every not-the-operator's-choice case: no registry record
+ *    for the pane, a name Claude derived for itself, or a record with no usable name.
  *  - emit a rename only when the NORMALIZED name is non-empty and differs from the current tab label.
  *
  * The name comes from the REGISTRY, not from the statusline capture. The capture is written only when
@@ -55,7 +58,7 @@ export function computeRenames(
     const canonical = [...group].sort((a, b) => a.paneId.localeCompare(b.paneId))[0];
     if (canonical === undefined) continue;
     const ref = claudeNameFor(canonical);
-    if (ref.userSet !== true || ref.name === null) continue; // only a name the operator chose
+    if (!ref.userSet || ref.name === null) continue; // only a name the operator chose
     const label = normalizeLinkName(ref.name);
     if (label === "") continue; // a whitespace- or control-only name normalizes away
     if (label === canonical.tab) continue; // already matches

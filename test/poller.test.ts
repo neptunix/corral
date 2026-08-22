@@ -166,26 +166,34 @@ describe("createPoller tab rename", () => {
   });
 
   it("does not rename from a registry record belonging to a previous session on the pane", async () => {
+    // Reaches server/poller.ts's `reg.sessionId !== r.sessionId` guard, which needs the cache to hold
+    // a record for THIS PANE captured under a DIFFERENT session. Priming with an unknown id would not
+    // do it: applyRegistry drops records matching no row, so the cache would simply stay empty and the
+    // test would pass through the `reg === undefined` branch instead.
     const env = A;
-    const OTHER = "99999999-8888-7777-6666-555555555555";
-    const rows = [{
+    const OLD = "11111111-2222-3333-4444-555555555555";
+    const NEW = "99999999-8888-7777-6666-555555555555";
+    const paneRow = (sessionId: string): SessionRow => ({
       env: env.id, paneId: "p1", status: "working", agent: "claude", cwd: "/x",
-      tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId: SID,
+      tab: "1", workspace: "ws", tabId: "t1", workspaceId: "w1", sessionId,
       recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
-    }];
+    });
+    let current = paneRow(OLD);
     const calls: { tabId: string; label: string }[] = [];
     const p = createPoller({
       envs: [env],
-      list: () => Promise.resolve(rows),
+      list: () => Promise.resolve([current]),
       recap: () => Promise.resolve({ recap: null, status: "no-summary", source: null }),
       statusline: () => Promise.resolve({ data: null, status: "not-found" }),
       tabRename: (_e, tabId, label) => { calls.push({ tabId, label }); return Promise.resolve(); },
       tabRenameEnabled: true,
     });
     await p.pollOnce();
-    p.applyRegistry(env, ok([{ sessionId: OTHER, name: "someone-elses-name" }]));
+    p.applyRegistry(env, ok([{ sessionId: OLD, name: "old-session-name" }])); // cached against OLD
+    current = paneRow(NEW);   // the pane is recycled: same pane id, a different Claude session
+    await p.pollOnce();
     await p.runClaudeSweepOnce();
-    expect(calls).toEqual([]);
+    expect(calls).toEqual([]); // the stale record must not name the new session's tab
   });
 });
 

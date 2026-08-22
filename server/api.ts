@@ -29,7 +29,7 @@ import type { DiagnosticsStore } from "./diagnostics-store.ts";
 import type { FleetRestore } from "./fleet-restore.ts";
 import { closePane, listWorkspaces, paneIdentity, readPane, type ReadFn, UUID_RE } from "./herdr.ts";
 import { isLoopbackHost } from "./host-guard.ts";
-import { normalizeLinkName } from "./link-name.ts";
+import { displacingName } from "./link-name.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
 import { isSessionBound, linkBindsSession, resolveLinkIndex } from "./session-binding.ts";
@@ -118,12 +118,8 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
       const live = resolveLiveRow(link, index);
       const paneId = live?.paneId ?? link.paneId;
       // Bound first, then tested for empty, so a degenerate name FALLS THROUGH to the tab label rather
-      // than ending the chain: claudeNameOf rejects only the exact empty string, so a whitespace- or
-      // control-only registry name survives it and normalizes to "" — the one value a card must never
-      // render. The reconciler guards the same state on the write path (server/reconcile.ts).
-      const claudeName = live?.claudeNameUserSet === true && live.claudeName !== null
-        ? normalizeLinkName(live.claudeName)
-        : "";
+      // than ending the chain rendering "" — the one value a card must never show.
+      const claudeName = live === undefined ? "" : displacingName(live);
       return {
         ...link,
         paneId,

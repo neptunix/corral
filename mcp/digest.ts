@@ -526,7 +526,7 @@ export function formatWhoami(w: WhoamiResolved): string {
     // The name, or an explicitly-labelled stand-in. A session reads this line to learn the address it
     // hands to a peer, so an uncaptured name must not silently become the tab label — for a RESUMED
     // session that label is the slugified card name, i.e. exactly the string that is not the address.
-    `you are: ${s.sessionName ?? `${s.tabLabel} (tab label, name not captured)`}  (${s.status})`,
+    `you are: ${s.claudeName ?? `${s.tabLabel} (tab label, name not captured)`}  (${s.status})`,
     `env: ${s.envLabel} [${s.env}]   pane: ${s.paneId}   tab: ${s.tabLabel}   workspace: ${s.workspaceLabel}`,
     `session id: ${s.sessionId ?? "not registered yet"}`,
     `cwd: ${cwd}`,

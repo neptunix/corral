@@ -385,7 +385,7 @@ export function createPoller(opts: {
         const renames = computeRenames(rows, (r) => {
           const reg = registryCache.get(`${env.id}:${r.paneId}`);
           if (r.sessionId === null || reg?.sessionId !== r.sessionId || reg.record === null) {
-            return { name: null, userSet: null };
+            return { name: null, userSet: false };
           }
           return { name: claudeNameOf(reg.record), userSet: claudeNameUserSetOf(reg.record) };
         });

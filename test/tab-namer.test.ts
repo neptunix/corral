@@ -12,7 +12,7 @@ function row(paneId: string, tabId: string, tab: string): SessionRow {
     recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
   };
 }
-function ref(name: string | null, userSet: boolean | null): ClaudeNameRef {
+function ref(name: string | null, userSet: boolean): ClaudeNameRef {
   return { name, userSet };
 }
 
@@ -22,11 +22,10 @@ describe("computeRenames", () => {
     expect(ops).toEqual([{ env: "e1", tabId: "t1", label: "my-name" }]);
   });
 
-  it("skips a derived name (userSet false) and a pane with no registry record (userSet null)", () => {
-    // Neither is a name the operator chose; renaming on either overwrites the label with an auto name.
-    const rows = [row("pA", "t1", "1")];
-    expect(computeRenames(rows, () => ref("auto-title", false))).toEqual([]);
-    expect(computeRenames(rows, () => ref("auto-title", null))).toEqual([]);
+  it("skips any name the operator did not set", () => {
+    // A derived name and a missing registry record are different facts but the same decision: renaming
+    // on either would overwrite the label with a name nothing would ever push back onto the tab.
+    expect(computeRenames([row("pA", "t1", "1")], () => ref("auto-title", false))).toEqual([]);
   });
 
   it("no-op when the label already matches", () => {
@@ -59,5 +58,6 @@ describe("computeRenames", () => {
     expect(computeRenames([noTab], () => ref("x", true))).toEqual([]);
     expect(computeRenames([row("pA", "t1", "1")], () => ref("", true))).toEqual([]);
     expect(computeRenames([row("pA", "t1", "1")], () => ref(null, true))).toEqual([]);
+    expect(computeRenames([row("pA", "t1", "1")], () => ref("x", false))).toEqual([]);
   });
 });

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { writeAtomic } from "./atomic-store.ts";
 import { runGit } from "./git.ts";
 import { UUID_RE } from "./herdr.ts";
-import { normalizeLinkName } from "./link-name.ts";
+import { displacingName } from "./link-name.ts";
 import type { Poller } from "./poller.ts";
 
 export const FLEET_MIRROR_FILENAME = "fleet-mirror.json";
@@ -135,8 +135,7 @@ export function createFleetMirror(opts: { readonly dataDir: string; readonly now
           // string into the restored session's TAB LABEL (server/fleet-restore.ts), so an ungated
           // auto-derived name would relabel tabs on restore — the rename server/tab-namer.ts refuses
           // to perform. Normalized here for the same reason it is everywhere else.
-          const name = r.claudeNameUserSet === true && r.claudeName !== null
-            ? normalizeLinkName(r.claudeName) : "";
+          const name = displacingName(r);
           live.push({ sessionId: r.sessionId, name: name !== "" ? name : r.tab, cwd: r.cwd, workspaceLabel: r.workspace });
         }
 

@@ -234,7 +234,9 @@ describe("GET /api/state — the name a live card renders", () => {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ env: "work-local", paneId: "w1-1", ...body }),
     });
-    return (await firstSessionLink(app))?.name;
+    // By task id, not tasks[0]: a test that calls this twice creates two tasks in the same board.
+    const state = await (await app.request("/api/state?board=test")).json() as { tasks: { id: string; sessions: StateLink[] }[] };
+    return state.tasks.find((t) => t.id === tid)?.sessions[0]?.name;
   }
 
   it("prefers the operator's own Claude name over the live tab label", async () => {
@@ -256,6 +258,13 @@ describe("GET /api/state — the name a live card renders", () => {
     // claudeNameOf rejects only the exact empty string, so a whitespace-only name reaches the
     // normalizer and becomes "" — which must never render on a card.
     expect(await nameFor({ claudeName: "   ", claudeNameUserSet: true }, {})).toBe("live-tab");
+  });
+
+  it("skips herdr's '?' unknown-label sentinel, falling through to the stored name", async () => {
+    // The tab-label step guards BOTH "" and "?" — herdr's sentinel for a label it does not know.
+    // Without the "?" half a card would render a literal question mark as the session's name.
+    expect(await nameFor({ tab: "?" }, { name: "stored-name" })).toBe("stored-name");
+    expect(await nameFor({ tab: "?" }, { name: "" })).toBe("w1-1");
   });
 
   it("falls back to the live tab label even when the stored name is a bare paneId", async () => {

@@ -4,6 +4,7 @@ import type { WhoamiCardSession, WhoamiEnv, WhoamiResponse, WhoamiSession, Whoam
 
 import type { HerdrEnv } from "../environments.ts";
 import { expandTilde } from "./herdr.ts";
+import { displacingName } from "./link-name.ts";
 import { buildLiveIndex, type LiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import { linkBindsSession } from "./session-binding.ts";
 
@@ -186,12 +187,16 @@ function envList(envs: readonly HerdrEnv[], snapshot: Snapshot): WhoamiEnv[] {
  * auto-derived name landing there is permanent: the reconciler mirrors user-set names only
  * (server/reconcile.ts).
  *
- * Returns null rather than falling back to the tab label — every consumer supplies its own fallback
- * AND marks it (mcp/digest.ts renders "(tab label, name not captured)"), so substituting here would
- * silently pass a herdr label off as the session's name. `claudeNameOf` already collapses "" to null.
+ * Returns null rather than falling back to the tab label — the consumer supplies its own fallback.
+ *
+ * NORMALIZED, like every other gated writer of this name (server/api.ts, server/fleet-mirror.ts,
+ * server/reconcile.ts): this string is stored, and an un-normalized registry name would carry control
+ * sequences and an unbounded length into the board file. `claudeNameOf` collapses "" to null, but the
+ * normalizer can produce "" from a whitespace-only name, so the result is re-tested.
  */
 function storedName(row: SessionRow): string | null {
-  return row.claudeNameUserSet === true ? row.claudeName : null;
+  const clean = displacingName(row);
+  return clean === "" ? null : clean;
 }
 
 function cardSession(index: LiveIndex, link: SessionLink, selfRow: SessionRow): WhoamiCardSession {
@@ -255,6 +260,7 @@ function sessionBlock(env: HerdrEnv, row: SessionRow): WhoamiSession {
     workspaceLabel: row.workspace,
     sessionId: row.sessionId,
     sessionName: storedName(row),
+    claudeName: row.claudeName,
     cwd: row.cwd,
     status: row.status,
     model: sl?.model ?? null,
