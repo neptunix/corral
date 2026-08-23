@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { BoardSchema, TaskSchema } from "../shared/board-schema.ts";
+import { BoardFrameSchema, BoardSchema, TaskSchema } from "../shared/board-schema.ts";
 import { AttentionMapSchema, SnapshotSchema } from "../shared/schema.ts";
 import { WhoamiResponseSchema } from "../shared/whoami-schema.ts";
 
@@ -94,7 +94,13 @@ export interface CorralClient {
   whoami(q: { paneId: string; cwd: string; socket: string | null }): Promise<z.infer<typeof WhoamiResponseSchema>>;
   attention(): Promise<z.infer<typeof AttentionMapSchema>>;
   state(): Promise<z.infer<typeof SnapshotSchema>>;
-  boards(): Promise<z.infer<typeof BoardSchema>[]>;
+  /** The board LIST, which the route serves log-free — the picker and the fleet digest read titles
+   *  and bindings, never an entry. */
+  boards(): Promise<z.infer<typeof BoardFrameSchema>[]>;
+  /** One board, for the card read that needs a task's log. The full-list call would carry every other
+   *  board's logs into this process for nothing. */
+  board(boardId: string): Promise<z.infer<typeof BoardSchema>>;
+  appendLog(a: { boardId: string; taskId: string; env: string; paneId: string; text: string }): Promise<z.infer<typeof AppendLogResultSchema>>;
   patchTask(a: { boardId: string; taskId: string; patch: TaskPatch }): Promise<z.infer<typeof TaskSchema>>;
   attach(a: { boardId: string; taskId: string; env: string; paneId: string; name: string }): Promise<void>;
   spawn(a: { boardId: string; taskId: string; env: string; brief: string; name?: string | undefined; model?: string | undefined; remoteControl?: boolean | undefined; targetWorkspaceId?: string | undefined; repo?: string | undefined }): Promise<z.infer<typeof SpawnResultSchema>>;
@@ -117,6 +123,13 @@ const SpawnResultSchema = z.object({
   cwdSnapshot: z.string(),
   idempotent: z.boolean(),
 });
+// What the append route answers with. `logCount` is what the reply reports back, so a session sees
+// its entry landed on a card that already holds N.
+const AppendLogResultSchema = z.object({
+  ok: z.boolean(),
+  atMs: z.number(),
+  logCount: z.number(),
+});
 const SpawnTargetsSchema = z.object({
   spaces: z.array(z.object({ workspaceId: z.string(), label: z.string() })).default([]),
   // Deliberately NOT defaulted. `repos: null` means "the names could not be read" to the refusal
@@ -137,7 +150,16 @@ export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralC
     },
     attention: () => request(fetchFn, `${base}/api/attention`, undefined, AttentionMapSchema),
     state: () => request(fetchFn, `${base}/api/state`, undefined, SnapshotSchema),
-    boards: () => request(fetchFn, `${base}/api/boards`, undefined, z.array(BoardSchema)),
+    boards: () => request(fetchFn, `${base}/api/boards`, undefined, z.array(BoardFrameSchema)),
+    board: (boardId) => request(fetchFn, `${base}/api/boards/${seg(boardId)}`, undefined, BoardSchema),
+    appendLog: (a) =>
+      request(
+        fetchFn,
+        `${base}/api/boards/${seg(a.boardId)}/tasks/${seg(a.taskId)}/log`,
+        // `at` is deliberately absent: the server stamps it.
+        post({ kind: "note", text: a.text, env: a.env, paneId: a.paneId }),
+        AppendLogResultSchema,
+      ),
     patchTask: (a) =>
       request(
         fetchFn,

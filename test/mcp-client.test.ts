@@ -129,6 +129,8 @@ describe("corral client", () => {
     });
     const boards = await client.boards();
     expect(new URL(urls[0] ?? "").pathname).toBe("/api/boards");
+    // The list route serves boards log-free, and the client parses them that way — a `log` in the body
+    // is stripped rather than carried into this process.
     expect(boards).toEqual(boardsBody);
   });
 

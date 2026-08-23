@@ -8,7 +8,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { useDroppable } from "@dnd-kit/core";
-import type { Board as BoardType, BoardState, EnrichedTask, SpawnPreset } from "@shared/board-schema";
+import type { BoardFrame as BoardType, BoardState, EnrichedTask, SpawnPreset } from "@shared/board-schema";
 import { closedColumnIds, defaultColumnId } from "@shared/board-schema";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
@@ -185,7 +185,9 @@ export function Board({
         // it, or true unmount) is safe to fall through: React 18 no-ops a state update on an unmounted
         // component, and a re-run with the SAME board must still open the modal.
         if (latestBoardId.current !== requestBoardId) return;
-        setEditingTask({ ...created, sessions: [] });
+        // The route answers with the frame shape, which carries the log as two counters. A card this
+        // call just created has no entries, so both are their empty values.
+        setEditingTask({ ...created, sessions: [], logCount: 0, lastLogAtMs: null });
         setFixPreset(request.preset);
       })
       .catch((err: unknown) => {

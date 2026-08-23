@@ -1,4 +1,4 @@
-import type { Board, BoardState, SessionLink, Task } from "@shared/board-schema";
+import type { Board, BoardFrame, BoardState, SessionLink, Task, TaskFrame } from "@shared/board-schema";
 import type { DiagnosticsSnapshot } from "@shared/diagnostics-schema";
 import { DiagnosticsSnapshotSchema } from "@shared/diagnostics-schema";
 import type { PaneRead } from "@shared/schema";
@@ -60,7 +60,10 @@ export interface SpawnRequestBody {
 
 export const api = {
   boards: {
-    list: () => req<Board[]>("/api/boards"),
+    // The LIST route serves frames (server/api.ts) — every task-shaped response but
+    // `GET /api/boards/:bid` is log-free, and `req` is an unvalidated generic, so this
+    // declaration is the only thing that says so on this side.
+    list: () => req<BoardFrame[]>("/api/boards"),
     create: (label: string) =>
       req<Board>("/api/boards", {
         method: "POST",
@@ -85,7 +88,7 @@ export const api = {
         description?: string;
       },
     ) =>
-      req<Task>(`/api/boards/${bid}/tasks`, {
+      req<TaskFrame>(`/api/boards/${bid}/tasks`, {
         method: "POST",
         body: JSON.stringify(data),
       }),
@@ -96,7 +99,7 @@ export const api = {
         Pick<Task, "title" | "description" | "status" | "priority">
       >,
     ) =>
-      req<Task>(`/api/boards/${bid}/tasks/${tid}`, {
+      req<TaskFrame>(`/api/boards/${bid}/tasks/${tid}`, {
         method: "PATCH",
         body: JSON.stringify(patch),
       }),
@@ -143,7 +146,7 @@ export const api = {
         workspaceLabel: string;
       },
     ) =>
-      req<Task>(`/api/boards/${bid}/tasks/from-session`, {
+      req<TaskFrame>(`/api/boards/${bid}/tasks/from-session`, {
         method: "POST",
         body: JSON.stringify(data),
       }),

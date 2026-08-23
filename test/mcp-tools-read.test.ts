@@ -27,6 +27,8 @@ function stub(over: Partial<CorralClient>): CorralClient {
   return {
     whoami: async () => resolved,
     attention: async () => ({}),
+    board: async () => { throw new Error("unused"); },
+    appendLog: async () => ({ ok: true, atMs: 1, logCount: 1 }),
     state: async () => ({ envs: {}, sessions: [] }),
     boards: async () => [],
     patchTask: async () => { throw new Error("unused"); },
@@ -81,6 +83,15 @@ describe("task tool descriptions", () => {
     expect(TASK_TOOL_DESCRIPTIONS.update).toContain("Not a log of what you did");
   });
 
+  // The split is only real if BOTH tool descriptions say the same thing about it. This one exists
+  // because the update description used to claim decisions for `description`, which is precisely
+  // what the log was added to hold — two steering surfaces disagreeing on the one rule that matters.
+  it("sends what happened to the log rather than to the description", () => {
+    expect(TASK_TOOL_DESCRIPTIONS.update).toContain("corral_task_log");
+    expect(TASK_TOOL_DESCRIPTIONS.update).not.toContain("decisions and why");
+    expect(TASK_TOOL_DESCRIPTIONS.log).toContain("APPEND-ONLY");
+  });
+
   it("tells corral_task_read's caller that whoami only shows a preview", () => {
     expect(TASK_TOOL_DESCRIPTIONS.read).toContain("corral_whoami");
     expect(TASK_TOOL_DESCRIPTIONS.read.toLowerCase()).toContain("preview");
@@ -95,7 +106,7 @@ describe("readHandler", () => {
     boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
     description, status: "doing", priority: null,
     columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
-    sessions: [],
+    sessions: [], logCount: 0, lastLogAtMs: null,
   };
 
   it("returns the bound card's full description, past whoami's preview budget", async () => {

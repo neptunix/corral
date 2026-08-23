@@ -50,9 +50,9 @@ describe("TaskSchema", () => {
 describe("sortTasks", () => {
   it("sorts p0 before p1 before null", () => {
     const tasks = [
-      { id: "a", title: "a", status: "todo", priority: null, description: "", sessions: [], createdAt: 1, updatedAt: 1 },
-      { id: "b", title: "b", status: "todo", priority: "p1" as const, description: "", sessions: [], createdAt: 2, updatedAt: 2 },
-      { id: "c", title: "c", status: "todo", priority: "p0" as const, description: "", sessions: [], createdAt: 3, updatedAt: 3 },
+      { id: "a", title: "a", status: "todo", priority: null, description: "", sessions: [], log: [], createdAt: 1, updatedAt: 1 },
+      { id: "b", title: "b", status: "todo", priority: "p1" as const, description: "", sessions: [], log: [], createdAt: 2, updatedAt: 2 },
+      { id: "c", title: "c", status: "todo", priority: "p0" as const, description: "", sessions: [], log: [], createdAt: 3, updatedAt: 3 },
     ];
     const sorted = sortTasks(tasks);
     expect(sorted.map(t => t.id)).toEqual(["c", "b", "a"]);
@@ -60,8 +60,8 @@ describe("sortTasks", () => {
 
   it("breaks priority ties by createdAt DESC (newest first)", () => {
     const tasks = [
-      { id: "a", title: "a", status: "todo", priority: "p1" as const, description: "", sessions: [], createdAt: 10, updatedAt: 10 },
-      { id: "b", title: "b", status: "todo", priority: "p1" as const, description: "", sessions: [], createdAt: 20, updatedAt: 20 },
+      { id: "a", title: "a", status: "todo", priority: "p1" as const, description: "", sessions: [], log: [], createdAt: 10, updatedAt: 10 },
+      { id: "b", title: "b", status: "todo", priority: "p1" as const, description: "", sessions: [], log: [], createdAt: 20, updatedAt: 20 },
     ];
     expect(sortTasks(tasks).map(t => t.id)).toEqual(["b", "a"]);
   });

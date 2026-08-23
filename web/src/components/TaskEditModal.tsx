@@ -1,4 +1,4 @@
-import type { EnrichedTask, Board, Priority, SessionLink, SpawnPreset } from "@shared/board-schema";
+import type { EnrichedTask, BoardFrame, Priority, SessionLink, SpawnPreset } from "@shared/board-schema";
 import type { JSX } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -9,7 +9,7 @@ import { useSpawnForm } from "../lib/use-spawn-form";
 
 interface Props {
   readonly task: EnrichedTask;
-  readonly board: Board;
+  readonly board: BoardFrame;
   readonly envs: readonly SpawnEnvOption[];
   // Rejects on a server refusal so handleSave can keep the modal open and show the message, instead
   // of closing on a failure it never saw (mirrors BoardSettingsModal's onSave contract).
@@ -18,7 +18,7 @@ interface Props {
   readonly onDelete: () => Promise<void>;
   readonly onSpawn: (body: SpawnRequestBody) => Promise<SessionLink>;
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
-  readonly boards: readonly Board[];
+  readonly boards: readonly BoardFrame[];
   readonly onMove: (toBoardId: string) => Promise<void>;
   readonly onClose: () => void;
   // Both set only by the fix-issues flow (Board.tsx): opens straight to Run with a generated,

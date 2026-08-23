@@ -423,7 +423,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-9" }],
-          createdAt: now, updatedAt: now,
+          createdAt: now, updatedAt: now, log: [],
         }],
       },
       result: undefined,
@@ -462,7 +462,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
             { env: "work-local", paneId: "p1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "A", cwdSnapshot: "", sessionId: "uuid-A" },
             { env: "work-local", paneId: "p2", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "B", cwdSnapshot: "", sessionId: "uuid-B" },
           ],
-          createdAt: now, updatedAt: now,
+          createdAt: now, updatedAt: now, log: [],
         }],
       },
       result: undefined,
@@ -499,7 +499,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-dead" }],
-          createdAt: now, updatedAt: now,
+          createdAt: now, updatedAt: now, log: [],
         }],
       },
       result: undefined,
@@ -525,7 +525,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [{ env: "work-local", paneId: "wQ:p4", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-old" }],
-          createdAt: now, updatedAt: now,
+          createdAt: now, updatedAt: now, log: [],
         }],
       },
       result: undefined,
@@ -609,7 +609,7 @@ describe("GET /api/state — name healing for persisted empty-name links", () =>
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [{ env: "work-local", paneId: "old-1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "", cwdSnapshot: "", sessionId: null }],
-          createdAt: now, updatedAt: now,
+          createdAt: now, updatedAt: now, log: [],
         }],
       },
       result: undefined,
@@ -1175,7 +1175,7 @@ async function seedTaskWithLink(app: ReturnType<typeof createApi>, storage: Retu
     const task = {
       id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null,
       sessions: [{ env: "work-local", paneId: "w1:p1", tabId: "w1:t1", tabLabel: "x", workspaceId: "w1", workspaceLabel: "c", name: "x-a", cwdSnapshot: "/c", sessionId }],
-      createdAt: 1, updatedAt: 1,
+      createdAt: 1, updatedAt: 1, log: [],
     };
     return { board: { ...b, tasks: [task] }, result: undefined };
   });
@@ -1514,7 +1514,7 @@ describe("POST resume — rebinds one link by ?sid and keeps the live sibling in
     await storage.withBoard("t", (b) => {
       if (b === null) return { board: null, result: undefined };
       const mk = (sid: string, paneId: string, tabId: string) => ({ env: "work-local", paneId, tabId, tabLabel: "x", workspaceId: "w1", workspaceLabel: "c", name: sid, cwdSnapshot: "/c", sessionId: sid });
-      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [mk(OLD, "pX", "old:t"), mk(NEW, "pX", "new:t")], createdAt: 1, updatedAt: 1 };
+      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [mk(OLD, "pX", "old:t"), mk(NEW, "pX", "new:t")], createdAt: 1, updatedAt: 1, log: [] };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
     const res = await app.request(`/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/pX/resume?sid=${OLD}`, { method: "POST" });
@@ -1540,7 +1540,7 @@ describe("POST resume — rebinds one link by ?sid and keeps the live sibling in
     await storage.withBoard("t", (b) => {
       if (b === null) return { board: null, result: undefined };
       const mk = (env: string, paneId: string, tabId: string) => ({ env, paneId, tabId, tabLabel: "x", workspaceId: "w1", workspaceLabel: "c", name: env, cwdSnapshot: "/c", sessionId: OLD });
-      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [mk("work-local", "wp", "wt"), mk("personal-local", "gp", "gt")], createdAt: 1, updatedAt: 1 };
+      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [mk("work-local", "wp", "wt"), mk("personal-local", "gp", "gt")], createdAt: 1, updatedAt: 1, log: [] };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
     const res = await app.request(`/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/wp/resume?sid=${OLD}`, { method: "POST" });
@@ -1572,7 +1572,7 @@ async function seedLinkOnBoardT(storage: ReturnType<typeof createStorage>, link:
     const task = {
       id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null,
       sessions: [{ env: "work-local", paneId: link.paneId, tabId: link.tabId, tabLabel: "x", workspaceId: link.workspaceId ?? "w1", workspaceLabel: "c", name: "x-a", cwdSnapshot: "/c", sessionId: link.sessionId }],
-      createdAt: 1, updatedAt: 1,
+      createdAt: 1, updatedAt: 1, log: [],
     };
     return { board: { ...b, tasks: [task] }, result: undefined };
   });
@@ -1687,7 +1687,7 @@ describe("POST detach — targets one of two same-pane links by sessionId", () =
     await storage.withBoard("t", (b) => {
       if (b === null) return { board: null, result: undefined };
       const s = (sid: string, name: string) => ({ env: "work-local", paneId: "pX", tabId: "t", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name, cwdSnapshot: "/c", sessionId: sid });
-      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [s(OLD, "old"), s(NEW, "new")], createdAt: 1, updatedAt: 1 };
+      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [s(OLD, "old"), s(NEW, "new")], createdAt: 1, updatedAt: 1, log: [] };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
     const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/detach", {
@@ -1709,7 +1709,7 @@ describe("POST close — targets one of two same-pane links by ?sid", () => {
     await storage.withBoard("t", (b) => {
       if (b === null) return { board: null, result: undefined };
       const s = (sid: string, tabId: string) => ({ env: "work-local", paneId: "pX", tabId, tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: sid, cwdSnapshot: "/c", sessionId: sid });
-      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [s(OLD, "old:t"), s(NEW, "new:t")], createdAt: 1, updatedAt: 1 };
+      const task = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [s(OLD, "old:t"), s(NEW, "new:t")], createdAt: 1, updatedAt: 1, log: [] };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
   }
@@ -1854,7 +1854,7 @@ describe("POST from-session — UUID-aware claim-check", () => {
       if (b === null) return { board: null, result: undefined };
       const task = { id: "t_stale00", title: "T", description: "", status: "todo", priority: null,
         sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "x", cwdSnapshot: "/c", sessionId: OLD }],
-        createdAt: 1, updatedAt: 1 };
+        createdAt: 1, updatedAt: 1, log: [] };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
     const res = await app.request("/api/boards/test/tasks/from-session", {
@@ -1875,7 +1875,7 @@ describe("POST from-session — UUID-aware claim-check", () => {
       if (b === null) return { board: null, result: undefined };
       const task = { id: "t_nul0000", title: "T", description: "", status: "todo", priority: null,
         sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "x", cwdSnapshot: "/c", sessionId: OLD }],
-        createdAt: 1, updatedAt: 1 };
+        createdAt: 1, updatedAt: 1, log: [] };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
     const res = await app.request("/api/boards/test/tasks/from-session", {
@@ -1916,7 +1916,7 @@ describe("POST attach — UUID-aware idempotency (two same-pane cards)", () => {
       if (b === null) return { board: null, result: undefined };
       const task = { id: "t_two0000", title: "T", description: "", status: "todo", priority: null,
         sessions: [{ env: "work-local", paneId: "pX", tabId: "old", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "wm-a", cwdSnapshot: "/c", sessionId: OLD }],
-        createdAt: 1, updatedAt: 1 };
+        createdAt: 1, updatedAt: 1, log: [] };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
     const res = await app.request("/api/boards/test/tasks/t_two0000/attach", {
@@ -1952,7 +1952,7 @@ describe("POST attach — UUID-aware idempotency (two same-pane cards)", () => {
       if (b === null) return { board: null, result: undefined };
       const task = { id: "t_leg0000", title: "T", description: "", status: "todo", priority: null,
         sessions: [{ env: "work-local", paneId: "pX", tabId: "", tabLabel: "x", workspaceId: "w", workspaceLabel: "c", name: "legacy", cwdSnapshot: "/c", sessionId: null }],
-        createdAt: 1, updatedAt: 1 };
+        createdAt: 1, updatedAt: 1, log: [] };
       return { board: { ...b, tasks: [task] }, result: undefined };
     });
     const res = await app.request("/api/boards/test/tasks/t_leg0000/attach", {

@@ -1,4 +1,4 @@
-import { StreamFrameSchema, type Board, type BoardState, type SpawnPreset } from "@shared/board-schema";
+import { StreamFrameSchema, type BoardFrame, type BoardState, type SpawnPreset } from "@shared/board-schema";
 import type { RecapSource, RecapStatus, RegistryStatus, SessionRow, StatuslineData } from "@shared/schema";
 import { useState, useEffect, useCallback, useMemo, type JSX } from "react";
 
@@ -18,7 +18,7 @@ import { applyOptimisticState, type OptimisticState } from "./lib/optimistic";
 import { useEventSource } from "./useEventSource";
 
 export function App(): JSX.Element {
-  const [boards, setBoards] = useState<Board[]>([]);
+  const [boards, setBoards] = useState<BoardFrame[]>([]);
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const [showUnassigned, setShowUnassigned] = useState(false);
   const [showSettings, setShowSettings] = useState(false);

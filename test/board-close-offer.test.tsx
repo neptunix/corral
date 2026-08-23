@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { Board as BoardType, BoardState, EnrichedSessionLink, EnrichedTask } from "@shared/board-schema";
+import type { BoardFrame as BoardType, BoardState, EnrichedSessionLink, EnrichedTask } from "@shared/board-schema";
 import { EMPTY_DIAGNOSTICS } from "@shared/diagnostics-schema";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,7 +45,7 @@ function link(overrides: Partial<EnrichedSessionLink> = {}): EnrichedSessionLink
 function makeTask(overrides: Partial<EnrichedTask> = {}): EnrichedTask {
   return {
     id: "t1", title: "Refactor the API", description: "", status: "c1", priority: null,
-    sessions: [], createdAt: 0, updatedAt: 0, ...overrides,
+    sessions: [], createdAt: 0, updatedAt: 0, logCount: 0, lastLogAtMs: null, ...overrides,
   };
 }
 

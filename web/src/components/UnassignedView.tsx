@@ -1,4 +1,4 @@
-import type { Board } from "@shared/board-schema";
+import type { BoardFrame } from "@shared/board-schema";
 import type { EnvState, SessionRow } from "@shared/schema";
 import type { JSX } from "react";
 import { useEffect, useState } from "react";
@@ -90,7 +90,7 @@ function UnassignedCard({ session, envLabelText, onOpen, onCreate, onAssign }: C
 
 interface Props {
   readonly sessions: readonly SessionRow[];
-  readonly boards: readonly Board[];
+  readonly boards: readonly BoardFrame[];
   readonly envs: Readonly<Record<string, EnvState>>;
   readonly onOpen: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly onCreateTask: (boardId: string, title: string, session: SessionRow, sessionName: string | null) => void;

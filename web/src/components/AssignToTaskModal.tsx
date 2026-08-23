@@ -1,4 +1,4 @@
-import type { Board } from "@shared/board-schema";
+import type { BoardFrame } from "@shared/board-schema";
 import { closedColumnIds } from "@shared/board-schema";
 import type { EnvState, SessionRow } from "@shared/schema";
 import type { JSX } from "react";
@@ -7,7 +7,7 @@ import { useState } from "react";
 import { envLabel } from "../lib/env";
 
 interface Props {
-  readonly boards: readonly Board[];
+  readonly boards: readonly BoardFrame[];
   readonly session: SessionRow;
   readonly envs: Readonly<Record<string, EnvState>>;
   readonly onConfirm: (boardId: string, taskId: string) => void;

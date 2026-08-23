@@ -143,7 +143,7 @@ function boardWithLink(over: Partial<{ tabId: string; paneId: string; sessionId:
         tabLabel: over.tabLabel ?? "task-a", workspaceId: "w1", workspaceLabel: "c", name: "task-a",
         cwdSnapshot: "/c", sessionId: over.sessionId ?? SID,
       }],
-      createdAt: 1, updatedAt: 1,
+      createdAt: 1, updatedAt: 1, log: [],
     }],
     spawnPresets: [], defaultSpawnPresetId: null,
   };
@@ -210,7 +210,7 @@ describe("startZombieReaper", () => {
     const board: Board = {
       id: "b", label: "B", columns: [],
       tasks: [{
-        id: "t", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1,
+        id: "t", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, log: [],
         sessions: [
           { env: "work-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID },
           { env: "personal-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID2 },
@@ -253,7 +253,7 @@ describe("startZombieReaper", () => {
     const board: Board = {
       id: "b", label: "B", columns: [],
       tasks: [{
-        id: "t", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1,
+        id: "t", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, log: [],
         sessions: [
           { env: "work-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID },
           { env: "personal-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID2 },
@@ -352,7 +352,7 @@ describe("startZombieReaper", () => {
       const board: Board = {
         id: "b", label: "B", columns: [],
         tasks: [{
-          id: "t", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1,
+          id: "t", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, log: [],
           sessions: [
             { env: "work-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID },
             { env: "personal-local", paneId: "w1:p2", tabId: "w1:t2", tabLabel: "z", workspaceId: "w1", workspaceLabel: "c", name: "z", cwdSnapshot: "/c", sessionId: SID2 },
@@ -389,8 +389,8 @@ describe("startZombieReaper", () => {
     const board: Board = {
       id: "b", label: "B", columns: [],
       tasks: [
-        { id: "t1", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions: [linkSession(SID)] },
-        { id: "t2", title: "y", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions: [linkSession(SID2)] },
+        { id: "t1", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, log: [], sessions: [linkSession(SID)] },
+        { id: "t2", title: "y", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, log: [], sessions: [linkSession(SID2)] },
       ],
       spawnPresets: [], defaultSpawnPresetId: null,
     };
@@ -435,8 +435,8 @@ describe("startZombieReaper", () => {
     const board: Board = {
       id: "b", label: "B", columns: [],
       tasks: [
-        { id: "t1", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions: [linkSession("w1:t1", SID)] },
-        { id: "t2", title: "y", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions: [linkSession("w1:t2", SID2)] },
+        { id: "t1", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, log: [], sessions: [linkSession("w1:t1", SID)] },
+        { id: "t2", title: "y", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, log: [], sessions: [linkSession("w1:t2", SID2)] },
       ],
       spawnPresets: [], defaultSpawnPresetId: null,
     };
@@ -563,7 +563,7 @@ describe("startZombieReaper", () => {
     });
     const board: Board = {
       id: "b", label: "B", columns: [],
-      tasks: [{ id: "t", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1,
+      tasks: [{ id: "t", title: "x", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, log: [],
         sessions: [link("w1:p2", "w1:t2", "w1", SID), link("w2:p3", "w2:t3", "w2", "dddddddd-1111-2222-3333-444444444444")] }],
       spawnPresets: [], defaultSpawnPresetId: null,
     };
@@ -607,7 +607,7 @@ describe("startZombieReaper", () => {
     const board: Board = {
       id: "b", label: "B", columns: [],
       tasks: [{ id: "t", title: "x", description: "", status: "todo", priority: null,
-        createdAt: 1, updatedAt: 1, sessions: [sess("w1:p2", "w1:t2", "w1", SID), sess("w2:p3", "w2:t3", "w2", SID2)] }],
+        createdAt: 1, updatedAt: 1, log: [], sessions: [sess("w1:p2", "w1:t2", "w1", SID), sess("w2:p3", "w2:t3", "w2", SID2)] }],
       spawnPresets: [], defaultSpawnPresetId: null,
     };
     const empty: Snapshot = { envs: { "work-local": { reachable: true } }, sessions: [] };

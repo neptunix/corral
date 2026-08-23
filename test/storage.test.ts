@@ -43,7 +43,7 @@ describe("createStorage", () => {
           board: { ...b!, tasks: [...(b?.tasks ?? []), {
             id: `t_${String(i)}`, title: `T${String(i)}`, description: "",
             status: "todo", priority: null, sessions: [],
-            createdAt: i, updatedAt: i,
+            createdAt: i, updatedAt: i, log: [],
           }] },
           result: undefined,
         }))
@@ -82,7 +82,7 @@ describe("createStorage", () => {
 });
 
 describe("withBoards (atomic two-board op)", () => {
-  const seededTask = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1 };
+  const seededTask = { id: "t_aaaaaaa", title: "x", description: "", status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1, log: [] };
 
   it("updates both boards atomically and returns the result", async () => {
     const s = createStorage(tmpDir);

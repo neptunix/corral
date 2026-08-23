@@ -36,6 +36,81 @@ export const SessionLinkSchema = z.object({
   sessionId: z.string().nullable().default(null),
 });
 
+// Two families, and the split is load-bearing rather than cosmetic: `note` is the only kind a model
+// writes, every other kind is stamped by corral on a route that already mutates the board, and the
+// two carry SEPARATE quotas (server/task-log.ts) so a burst of lifecycle lines cannot evict the
+// reasoning the log exists for.
+export const LogKindSchema = z.enum([
+  "created", "session_spawned", "session_bound", "session_closed", "session_detached", "status_changed",
+  "note",
+]);
+
+/**
+ * Who wrote the entry: a session, or corral/the operator acting directly.
+ *
+ * `sessionId` is NULLABLE for the same reason `SessionLinkSchema.sessionId` is — at spawn time
+ * Claude has not registered yet, so a `session_spawned` entry cannot carry a uuid and a schema
+ * demanding one would be unwritable exactly when it is most needed.
+ *
+ * `name` is a DISPLAY CAPTURE, not an address: it records what the canonical name resolution
+ * returned when the entry was written (the live registry name, falling back to the link's stored
+ * name), and nothing re-derives it later.
+ */
+export const LogSourceSchema = z.union([
+  z.object({ sessionId: z.string().nullable().default(null), name: z.string() }),
+  z.enum(["corral", "operator"]),
+]);
+
+/**
+ * One entry's text ceiling, INCLUSIVE of the truncation marker — a stored entry is never longer than
+ * this. A decision with its reasoning fits in 200–300.
+ *
+ * Here rather than beside the eviction logic that enforces it (server/task-log.ts) because the MCP
+ * tool description states the number too, and `shared/` is the only module both sides may import:
+ * reaching into `server/` from `mcp/` for one constant would drag the startup config loader into the
+ * MCP process with it.
+ */
+export const LOG_ENTRY_TEXT_MAX = 400;
+
+/**
+ * The largest body the append route will parse, and the same bound the MCP tool applies to its own
+ * argument. Well above the stored cap: text between the two is TRUNCATED, which is what the tool
+ * promises; text above it is refused, because a megabyte of prose is a mistake and not a long note.
+ * One constant so the tool refuses in its own words instead of relaying a schema error from the
+ * route.
+ */
+export const LOG_ENTRY_BODY_MAX = LOG_ENTRY_TEXT_MAX * 20;
+
+// STORED SHAPE — deliberately permissive on `text`, the same reasoning as SpawnPresetSchema and
+// `description`: readBoardFile parses with BoardSchema, so a `.max()` here would turn an entry
+// written before the cap existed into an unloadable board. The 400-character cap lives on the write
+// path (server/task-log.ts).
+export const LogEntrySchema = z.object({
+  /**
+   * A stable identity for one entry. `at` cannot serve as one: closing every session on a card is N
+   * separate requests, each stamping its own clock read, and two can land in the same millisecond —
+   * so a reader keying on the timestamp would collapse them.
+   *
+   * Added now rather than when a reader needs one, because this is data on disk: once entries exist
+   * without an id, every reader carries a branch for them forever. The default is a FUNCTION so a
+   * hand-edited entry missing the field still loads — that id is fresh on each parse rather than
+   * stable, which is the honest answer for a value nobody wrote.
+   */
+  id: z.string().default(() => generateLogEntryId()),
+  /**
+   * Epoch MILLIS — unlike the task's `createdAt`/`updatedAt`, which are SECONDS (`nowSecs`).
+   *
+   * Deliberate: a burst of entries lands inside one second and the log is ordered, so second
+   * resolution would erase the order it records. The mismatch is the trap, which is why it is stated
+   * here and pinned by a test: `lastLogAtMs` (millis) sits beside `updatedAt` (seconds) on the same
+   * object, and anything converting between them needs the factor of 1000.
+   */
+  atMs: z.number(),
+  source: LogSourceSchema,
+  kind: LogKindSchema,
+  text: z.string(),
+});
+
 export const TaskSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -48,9 +123,27 @@ export const TaskSchema = z.object({
   // spawn target comes from the request, never from the card. A board written before this still
   // parses (z.object strips the unknown key) and loses the value on its next write.
   sessions: z.array(SessionLinkSchema).default([]),
+  // The card's life, append-only: decisions and blockers produced between sessions inside a task
+  // that has no PR to be commented on yet. `.default([])`, never `.optional()`, so a board file
+  // written before this field heals on parse — the established pattern here (spawnPresets,
+  // diagnostics). Deliberately absent from what rides the SSE frame: see TaskFrameSchema.
+  log: z.array(LogEntrySchema).default([]),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
+
+/**
+ * A task as it goes over the wire to the browser — everything but the log.
+ *
+ * `BoardState` is re-sent on every poll tick to every open board, so a growing log would be
+ * retransmitted whole on each one. The log is fetched by a dedicated read when a card is opened;
+ * the frame carries only `logCount`/`lastLogAtMs` (EnrichedTaskSchema) so the board can badge a card.
+ *
+ * This fixes the WIRE, not the parse: `buildUnassigned` re-reads and re-parses every board file on
+ * every tick, and the log lives inside TaskSchema, so it is parsed there regardless. That cost is
+ * knowingly accepted and bounded by the quotas in server/task-log.ts.
+ */
+export const TaskFrameSchema = TaskSchema.omit({ log: true });
 
 // A start command the operator can pick when spawning from the UI. STORED SHAPE — deliberately
 // permissive: readBoardFile uses BoardSchema.parse (server/storage.ts), so a content constraint here
@@ -105,8 +198,14 @@ export const EnrichedSessionLinkSchema = SessionLinkSchema.extend({
   live: LiveSessionDataSchema.nullable(),
 });
 
-export const EnrichedTaskSchema = TaskSchema.extend({
+// Built on TaskFrameSchema, NOT on TaskSchema: extending the latter would inherit `log` silently and
+// put the whole log back on every frame. The two counters are what a board badge would read instead
+// of the entries — no web code reads them yet, so they are the shape that change needs, not evidence
+// that it has landed.
+export const EnrichedTaskSchema = TaskFrameSchema.extend({
   sessions: z.array(EnrichedSessionLinkSchema),
+  logCount: z.number().default(0),
+  lastLogAtMs: z.number().nullable().default(null),
 });
 
 // The board-independent slice of a stream frame. `/api/stream` with no (or an unknown) board sends
@@ -124,8 +223,26 @@ export const GlobalStateSchema = z.object({
   diagnostics: DiagnosticsSnapshotSchema.default(emptyDiagnostics),
 });
 
+// `board` carries its own copy of the task list (the web reads a count and the settings modal off
+// it), so it needs the same log-free shape as `tasks` — otherwise the omit above buys nothing and
+// every log still rides every tick. Parsing is unaffected either way: `log` heals to [] on the way
+// back in.
+export const BoardFrameSchema = BoardSchema.extend({
+  tasks: z.array(TaskFrameSchema).default([]),
+});
+
+/**
+ * Drop every task's log. ONE implementation for the two wire paths that must not carry it — the
+ * stream frame and the board LIST — because they are far apart in server/api.ts and a second copy is
+ * how one of them silently stops stripping. `GET /api/boards/:bid` deliberately does NOT use this:
+ * the single-board read is where a card's log is fetched from.
+ */
+export function toBoardFrame(board: Board): BoardFrame {
+  return { ...board, tasks: board.tasks.map(({ log: _log, ...rest }) => rest) };
+}
+
 export const BoardStateSchema = GlobalStateSchema.extend({
-  board: BoardSchema,
+  board: BoardFrameSchema,
   tasks: z.array(EnrichedTaskSchema),
 });
 
@@ -137,7 +254,12 @@ export type ColumnType = z.infer<typeof ColumnTypeSchema>;
 export type Priority = z.infer<typeof PrioritySchema>;
 export type SessionLink = z.infer<typeof SessionLinkSchema>;
 export type Task = z.infer<typeof TaskSchema>;
+export type TaskFrame = z.infer<typeof TaskFrameSchema>;
+export type LogKind = z.infer<typeof LogKindSchema>;
+export type LogSource = z.infer<typeof LogSourceSchema>;
+export type LogEntry = z.infer<typeof LogEntrySchema>;
 export type Board = z.infer<typeof BoardSchema>;
+export type BoardFrame = z.infer<typeof BoardFrameSchema>;
 export type SpawnPreset = z.infer<typeof SpawnPresetSchema>;
 export type LiveSessionData = z.infer<typeof LiveSessionDataSchema>;
 export type EnrichedSessionLink = z.infer<typeof EnrichedSessionLinkSchema>;
@@ -172,6 +294,12 @@ export function slugifyBoardId(label: string): string {
 
 export function generateTaskId(): string {
   return `t_${nanoid(7)}`;
+}
+
+// Short: it identifies an entry within one card's log, never across boards — unlike a task id, which
+// is a REST path segment.
+export function generateLogEntryId(): string {
+  return nanoid(8);
 }
 
 export function generateColumnId(): string {

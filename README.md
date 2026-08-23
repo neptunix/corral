@@ -789,13 +789,14 @@ process, not the hook, since the hook inherits the pane's shell directly rather 
 flag. Exporting `HERDR_DASH_PORT` (or `CORRAL_URL`) **in the shell where Claude starts** reaches
 both, because both are children of that shell.
 
-The seven tools:
+The eight tools:
 
 - `corral_whoami` — this session's pane/tab/workspace, Claude session id, model/context/cost, and its bound task card; call it first.
 - `corral_fleet` — one bounded line per session across every environment, for cross-session triage.
 - `corral_task_bind` — link this session to an existing task card (no card creation).
-- `corral_task_read` — the bound card's full description. `corral_whoami` renders it as a one-line preview, because that call is repeated many times a session and a long description would be re-inlined on every one; this is the opt-in full read, and the one to call before rewriting the description.
-- `corral_task_update` — update the bound card's title, description, status, or priority.
+- `corral_task_read` — the bound card in full: its description, and the recent part of its log. `corral_whoami` renders the description as a one-line preview and the log as a count, because that call is repeated many times a session and inlining either on every one would flood the context; this is the opt-in full read, and the one to call before rewriting the description. `kind` narrows the log to what a session wrote (`note`) or to corral's own lifecycle events.
+- `corral_task_update` — update the bound card's title, description, status, or priority. `description` is a full-replacement write.
+- `corral_task_log` — append one entry to the bound card's log. Append-only, so two sessions on one card never overwrite each other; the server stamps the time and the writer, and the oldest entries are evicted once the card is full.
 - `corral_spawn` — start a new session on this session's card, with a brief as its first message; `repo` says which project it lands in.
 - `corral_session_close` — stop this session or one on the same card; suspend, not destroy.
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { Board as BoardType, BoardState, EnrichedTask, SpawnPreset, Task } from "@shared/board-schema";
+import type { BoardFrame as BoardType, BoardState, EnrichedTask, SpawnPreset, Task } from "@shared/board-schema";
 import { EMPTY_DIAGNOSTICS } from "@shared/diagnostics-schema";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useCallback, useState } from "react";
@@ -29,7 +29,15 @@ function makeBoard(overrides: Partial<BoardType> = {}): BoardType {
 function makeTask(overrides: Partial<EnrichedTask> = {}): EnrichedTask {
   return {
     id: "t_new1", title: "Fix 1 corral issue", description: "", status: "c1", priority: null,
-    sessions: [], createdAt: 0, updatedAt: 0, ...overrides,
+    sessions: [], createdAt: 0, updatedAt: 0, logCount: 0, lastLogAtMs: null, ...overrides,
+  };
+}
+
+// What api.tasks.create resolves with: the STORED task shape, log and all.
+function makeStoredTask(overrides: Partial<Task> = {}): Task {
+  return {
+    id: "t_new1", title: "Fix 1 corral issue", description: "", status: "c1", priority: null,
+    sessions: [], log: [], createdAt: 0, updatedAt: 0, ...overrides,
   };
 }
 
@@ -70,7 +78,7 @@ function FixIssuesHost({ boardState, boards }: { readonly boardState: BoardState
 
 describe("Board — fix-issues task creation", () => {
   it("creates the ad-hoc task and opens it on Run Claude with the preset selected — with a REAL consuming callback", async () => {
-    vi.spyOn(api.tasks, "create").mockResolvedValue(makeTask());
+    vi.spyOn(api.tasks, "create").mockResolvedValue(makeStoredTask());
     const board = makeBoardState();
 
     render(<FixIssuesHost boardState={board} boards={[board.board]} />);
@@ -113,7 +121,7 @@ describe("Board — fix-issues task creation", () => {
 
     // The operator switches to a different board while that create is still in flight.
     rerender(<FixIssuesHost boardState={boardB} boards={[boardA.board, boardB.board]} />);
-    resolveCreate?.(makeTask());
+    resolveCreate?.(makeStoredTask());
 
     await new Promise((r) => { setTimeout(r, 0); }); // let the resolved promise's .then run
     expect(api.tasks.create).toHaveBeenCalledTimes(1); // still exactly one create — board A's
@@ -145,7 +153,7 @@ describe("Board — TaskEditModal remounts on a task-identity swap", () => {
     rerender(<Board boardState={boardState} boards={[boardState.board]}
       onOpenSession={vi.fn()} onMarkOptimistic={vi.fn()} onClearOptimistic={vi.fn()} onBoardStateChange={vi.fn()}
       pendingFixIssues={{ title: "Fix 1 corral issue", description, preset }} onFixIssuesConsumed={vi.fn()} />);
-    resolveCreate?.(makeTask());
+    resolveCreate?.(makeStoredTask());
 
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Run Claude/ }).getAttribute("aria-selected")).toBe("true");
