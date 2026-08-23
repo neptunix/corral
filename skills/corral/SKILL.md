@@ -27,33 +27,56 @@ description: Use when this session runs under corral (the corral_* MCP tools exi
 ## Starting up
 
 1. `corral_whoami`.
-2. **Bound** → the card is the assignment. `corral_task_read` for its description — the task and the
-   decisions behind it, not a log of what was done. Start from it, not from zero.
+2. **Bound** → the card is the assignment. `corral_task_read` for its description — the task — and its
+   log — what has already happened on it. Start from both, not from zero.
 3. **Unbound** → `corral_task_bind` with no arguments, then bind to the card this work belongs to. If
    nothing fits, say so and ask — the tools cannot create a card.
 
 ## Keeping the card current
 
-The card describes the task, not the work. Test each line you write: *does a durable carrier already
-record this* — not could it be reconstructed from one. A carrier is durable when it is committed to
-the repo or is the PR itself; nothing else is, so what a brief or a message holds belongs here.
+The card has two fields, and they answer different questions.
 
-- **In** — the problem, why it matters, what the task requires; decisions and the reasoning that
-  produced them; what is verified and what is still only assumed; what blocks it; hazards — what not
-  to touch and why; and where the code and PR are.
+- **`description` — what the task IS.** A FULL-REPLACEMENT write (`corral_task_update`): whatever you
+  send replaces the whole field.
+- **`log` — what HAPPENED on the task.** APPEND-ONLY (`corral_task_log`), one entry at a time.
+  Nothing you append can destroy what another session wrote.
+
+Writing an outcome into the description is the failure the split exists to prevent — it overwrites
+the statement of the task with a record of the work, and the next session inherits a card that no
+longer says what it is for.
+
+Test each line you write, either field: *does a durable carrier already record this* — not could it
+be reconstructed from one. A carrier is durable when it is committed to the repo or is the PR itself;
+nothing else is, so what a brief or a message holds belongs on the card.
+
+**The description**
+
+- **In** — the problem, why it matters, what the task requires; what is verified and what is still
+  only assumed; what blocks it; hazards — what not to touch and why; and where the code and PR are.
 - **Out** — anything a durable carrier already records: files touched, and the history of gate runs
-  and review rounds as a work record.
+  and review rounds as a work record. And the running record of the work: that is the log's job.
 - **The one exception** — where the work stopped: what is in flight, what is edited but not
   committed, the next action. That goes in the brief, not here: it is stale by the time anyone reads
   the card.
 
-Decisions and their reasoning always stay: the PR says how the thing was built, the card says what
-was decided about the task. The exclusion is the event, not the finding — "the gate ran" is out, a
-limit it discovered is a decision and stays.
-
 **Keep it to a screenful** — it is read on every bind. Length is a symptom: a card grows long by
 holding lines the test excludes, and the server refuses a description past a hard cap, so a write
 that fails on size is telling you the test was not applied.
+
+**The log** — append an entry when a fact about the task changed that the next session would
+otherwise have to re-derive:
+
+- a decision was made — including what was rejected and why;
+- a limitation or blocker was found;
+- a phase finished — what is now true.
+
+Not per-file progress, not "starting work", not a restatement of the diff, not gate or test results.
+The exclusion is the event, not the finding — "the gate ran" is out, a limit it discovered is a
+decision and goes in. The log is not a wall of text, and nothing forces an entry: an entry written to
+have written one is a formality the next reader has to skip past.
+
+An entry is prose, a few sentences — longer text is truncated. The time and the writer are stamped by
+the server; do not write them into the text.
 
 Write at real boundaries — a decision made, a phase finished, a blocker hit — not on a timer and not
 per file edited. Move `status` when the work actually changes state; the operator reads column
@@ -67,7 +90,8 @@ column stops being read.
 An operator who names the column is making the move themselves — write it without arguing; only
 deciding it for them is forbidden.
 
-`corral_task_read` in the same turn you write, and edit around what it returned.
+`corral_task_read` in the same turn you rewrite the description, and edit around what it returned.
+The log needs none of that — appending never touches what is already there.
 
 ## Talking to another session
 
@@ -156,8 +180,10 @@ Handoff itself follows the procedure below — wait for the operator, never spaw
 "That's it, wrap up" is one sentence meaning four things — and not a handoff: the work is over, not
 continuing elsewhere. In this order, stopping for an answer at every step after the first:
 
-1. **Write the card** — the outcome, and anything decided here that no durable carrier records.
-   Everything after this can end the session.
+1. **Log the outcome** — `corral_task_log`: where the work ended up, and anything decided here that no
+   durable carrier records. This is the log, not the description: the description states the task, and
+   rewriting it at the end replaces that statement with a work record. Correct the description too
+   only if the task itself turned out to be something else. Everything after this can end the session.
 2. **List what the task left lying around** — worktree, branch, scratch files — and ask what to
    remove. Never remove on your own reading of "wrap up": a worktree can hold work that reached no
    other carrier, and deleting it is not undoable.

@@ -1,4 +1,8 @@
-import type { LogEntry, LogKind } from "../shared/board-schema.ts";
+import { normalizeLinkName } from "./link-name.ts";
+import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
+import { linkBindsSession } from "./session-binding.ts";
+import type { LogEntry, LogKind, LogSource, Task } from "../shared/board-schema.ts";
+import type { SessionRow } from "../shared/schema.ts";
 
 /**
  * One entry's text ceiling, INCLUSIVE of the truncation marker — a stored entry is never longer than
@@ -53,4 +57,36 @@ export function appendLogEntry(log: readonly LogEntry[], entry: LogEntry): LogEn
     }
     return true;
   });
+}
+
+/**
+ * Who a pane is, for the purposes of one log entry — resolved from the card the entry lands on, not
+ * from anything the caller sent. Returns null when the pane is not bound to this card: a session may
+ * write only on its own card.
+ *
+ * The identity rule is REUSED, never re-derived: `linkBindsSession` decides which stored link is this
+ * pane's, and `resolveLiveRow` finds that link's live row — the same pair whoami's card block and the
+ * board frame use. A fourth local copy of this rule is exactly what bit the fleet digest.
+ *
+ * `name` prefers the session's own registry name and is deliberately UNGATED by `claudeNameUserSet`,
+ * unlike every value that gets pushed onto a label: the log records what the session was called when
+ * it wrote, and a derived name is the honest answer to that. It is still normalized, because it is
+ * stored. `sessionId` may be null — at spawn time Claude has not registered yet.
+ */
+export function resolveLogSource(
+  task: Task,
+  pane: { readonly env: string; readonly paneId: string },
+  sessions: readonly SessionRow[],
+): LogSource | null {
+  const index = buildLiveIndex(sessions);
+  const live = sessions.find((s) => s.env === pane.env && s.paneId === pane.paneId);
+  const incoming = { env: pane.env, paneId: pane.paneId, liveSessionId: live?.sessionId ?? null };
+  const link = task.sessions.find((l) => linkBindsSession(l, incoming));
+  if (link === undefined) return null;
+  const row = resolveLiveRow(link, index);
+  const claudeName = row?.claudeName === null || row?.claudeName === undefined ? "" : normalizeLinkName(row.claudeName);
+  return {
+    sessionId: row?.sessionId ?? link.sessionId,
+    name: claudeName !== "" ? claudeName : link.name,
+  };
 }

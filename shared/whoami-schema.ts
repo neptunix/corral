@@ -59,6 +59,20 @@ export const WhoamiTaskSchema = z.object({
   // rather than assume the DEFAULT_COLUMNS values.
   columns: z.array(WhoamiColumnSchema),
   sessions: z.array(WhoamiCardSessionSchema),
+  /**
+   * The log's SIZE, not its entries — whoami is the first and most repeated call, and the skill
+   * routes a session from it into corral_task_read. Without a count here a session cannot tell a card
+   * carrying 37 entries from an empty one, and would either read every card's log or none of them.
+   *
+   * This is a separate closed schema from EnrichedTask, so the counters added to the stream frame do
+   * NOT reach it — they have to be added here as well or whoami silently loses them.
+   *
+   * Defaulted, not required, for the same reason as `claudeName` and the closing-column marker: an
+   * MCP client talks to whatever corral server is already running, and one predating this field would
+   * otherwise fail validation on every card read.
+   */
+  logCount: z.number().default(0),
+  lastLogAt: z.number().nullable().default(null),
 });
 
 export const WhoamiSessionSchema = z.object({

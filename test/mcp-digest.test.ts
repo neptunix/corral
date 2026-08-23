@@ -545,6 +545,7 @@ describe("formatWhoami", () => {
         { name: "api-refactor-a", claudeName: null, key: "work-local:w1:p1", sessionId: "11111111-2222-3333-4444-555555555555", status: "working", detached: false, ctxPct: 41, self: true },
         { name: "api-refactor-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false },
       ],
+      logCount: 0, lastLogAt: null,
     },
     envs: [{ id: "work-local", label: "Work (local)", kind: "local", reachable: true }],
   };
@@ -949,7 +950,7 @@ describe("formatCardDetail", () => {
     boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
     description: "did the thing\nnext: do the other thing", status: "doing", priority: "p1",
     columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
-    sessions: [],
+    sessions: [], logCount: 0, lastLogAt: null,
   };
 
   it("leads with one card header line, then the description, and nothing else", () => {

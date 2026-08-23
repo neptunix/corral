@@ -1,9 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import { LOG_ENTRY_TEXT_MAX } from "../../server/task-log.ts";
 import { closedColumnIds } from "../../shared/board-schema.ts";
 import type { CorralClient, TaskPatch } from "../client.ts";
-import { formatCardDetail, formatStatusRefusal, formatTaskPicker, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
+import { formatCardDetail, formatStatusRefusal, formatTaskPicker, LOG_ENTRIES_SHOWN, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
 import type { Identity } from "../identity.ts";
 import { runTool, toolText } from "./reply.ts";
 
@@ -91,8 +92,50 @@ export function bindHandler(deps: TaskDeps, args: BindArgs): Promise<string> {
   });
 }
 
-export function readHandler(deps: TaskDeps): Promise<string> {
-  return runTool(async () => formatCardDetail(await deps.identity.requireCard()));
+/** The kinds a session may ask for. `note` is what a model wrote; the rest are corral's own events. */
+export const LOG_KINDS = [
+  "note", "created", "session_spawned", "session_bound", "session_closed", "session_detached", "status_changed",
+] as const;
+
+export interface ReadArgs {
+  readonly kind?: readonly (typeof LOG_KINDS)[number][] | undefined;
+}
+
+export function readHandler(deps: TaskDeps, args: ReadArgs = {}): Promise<string> {
+  return runTool(async () => {
+    const card = await deps.identity.requireCard();
+    // whoami carries only the log's SIZE, so the entries come from the board read. A board that has
+    // gone missing between the two calls is not worth failing the description read over.
+    const board = await deps.client.board(card.boardId).catch(() => null);
+    const log = board?.tasks.find((t) => t.id === card.taskId)?.log ?? [];
+    const kinds = args.kind === undefined || args.kind.length === 0 ? null : [...args.kind];
+    const matched = kinds === null ? log : log.filter((e) => kinds.includes(e.kind));
+    const shown = matched.slice(-LOG_ENTRIES_SHOWN);
+    return formatCardDetail(card, {
+      shown,
+      total: log.length,
+      hidden: matched.length - shown.length,
+      kinds,
+    });
+  });
+}
+
+export function logHandler(deps: TaskDeps, args: { readonly text: string }): Promise<string> {
+  return runTool(async () => {
+    const me = await deps.identity.load(true);
+    if (me.task === null) {
+      return "this session is not bound to a task — call corral_task_bind first (with no arguments to list open cards)";
+    }
+    if (args.text.trim() === "") return "nothing to log — pass the note's text";
+    const res = await deps.client.appendLog({
+      boardId: me.task.boardId,
+      taskId: me.task.taskId,
+      env: me.session.env,
+      paneId: me.session.paneId,
+      text: args.text,
+    });
+    return `logged to ${me.task.boardId}/${me.task.taskId} — the card now holds ${String(res.logCount)} ${res.logCount === 1 ? "entry" : "entries"}. Entries over ${String(LOG_ENTRY_TEXT_MAX)} characters are truncated; the oldest are evicted once the log is full.`;
+  });
 }
 
 export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string> {
@@ -128,7 +171,9 @@ export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string>
  */
 export const TASK_TOOL_DESCRIPTIONS = {
   read:
-    "Read the FULL description of the card THIS session is bound to — corral_whoami shows only a one-line preview of it. Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. Read-only.",
+    "Read the FULL description of the card THIS session is bound to, plus its log — corral_whoami shows only a one-line description preview and the log's size. Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. The log returns the most recent entries and says how many older ones it left out; `kind` narrows it (pass `note` to skip the session lifecycle lines). Read-only.",
+  log:
+    "Append ONE entry to the log of the card THIS session is bound to. The log is APPEND-ONLY and is the card's history, beside `description`, which states the task — writing an outcome into the description destroys the statement of the task, which is what this field exists to prevent. Write an entry when a fact about the task changed that the next session would otherwise have to re-derive: a decision and what it rejected, a limitation or blocker found, a phase finished and what is now true. Do NOT write per-file progress, \"starting work\", a restatement of the diff, or test results — the repository and the PR already record those. One entry, prose, a few sentences; longer text is truncated. The server stamps the time and the writer.",
   update:
     "Update the card THIS session is bound to; cannot target another card. `status` is the coarse board state and must be one of the column ids corral_whoami reports. `description` states the TASK and what no durable carrier records — durable means committed to the repo, or the PR itself — so: the problem, what it requires, decisions and why (these stay even after a PR states them), what is verified and what is still assumed, blockers, hazards, and where the code and PR are. Not a log of what you did — files touched, gate runs, review rounds — whatever else records them. Keep it to a screenful — over-long writes are refused. It is a FULL-REPLACEMENT write — read the current value with corral_task_read first and edit around it, or you will silently delete what you never saw.",
 } as const;
@@ -153,10 +198,28 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
     {
       title: "Read this session's card in full",
       description: TASK_TOOL_DESCRIPTIONS.read,
-      inputSchema: {},
+      inputSchema: {
+        kind: z.array(z.enum(LOG_KINDS)).optional().describe(
+          "narrow the log to these kinds; omit for all. `note` is what a session wrote, the rest are corral's own lifecycle events",
+        ),
+      },
       annotations: { readOnlyHint: true },
     },
-    async () => toolText(await readHandler(deps)),
+    async (args: ReadArgs) => toolText(await readHandler(deps, args)),
+  );
+
+  server.registerTool(
+    "corral_task_log",
+    {
+      title: "Append a note to this session's card",
+      description: TASK_TOOL_DESCRIPTIONS.log,
+      inputSchema: {
+        text: z.string().min(1).describe(
+          `the note, in prose. Truncated past ${String(LOG_ENTRY_TEXT_MAX)} characters — a decision with its reasoning fits well inside that.`,
+        ),
+      },
+    },
+    async (args: { text: string }) => toolText(await logHandler(deps, args)),
   );
 
   server.registerTool(

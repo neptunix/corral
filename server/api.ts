@@ -3,6 +3,7 @@ import {
   type GlobalState, type SessionLink, type Task,
   ColumnSchema,
   DEFAULT_COLUMNS,
+  LogKindSchema,
   defaultColumnId,
   generateTaskId,
   nowSecs,
@@ -38,6 +39,7 @@ import { composeSessionName, fallbackNamePrefix, NAME_MAX, sanitizeSlug, slugify
 import type { SpawnOpts, SpawnResult } from "./spawn.ts";
 import { aggregateAccounts } from "./statusline.ts";
 import type { Storage } from "./storage.ts";
+import { appendLogEntry, LOG_ENTRY_TEXT_MAX, resolveLogSource } from "./task-log.ts";
 import { readLastActivity, readSessionCwd } from "./transcript.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { writeUploadFile } from "./uploads.ts";
@@ -243,6 +245,27 @@ const PatchTaskBodySchema = z.object({
   status: z.string().optional(),
   priority: z.enum(["p0", "p1", "p2", "p3"]).nullable().optional(),
   description: DescriptionInputSchema.optional(),
+});
+
+/**
+ * The append body. Not a PATCH of the task, and that is the point: a PATCH carries last-write-wins
+ * semantics for `description`, and routing the log through it would drag the log into that semantics
+ * and reintroduce the lost update the append-only shape exists to prevent.
+ *
+ * `at` is absent by construction — the server stamps it. A caller-supplied timestamp would let one
+ * session's entry sort ahead of everything already written.
+ *
+ * `kind` is restricted to `note` for now: every other kind is a system event corral stamps itself on
+ * the route that caused it, so accepting one here would let a session forge a lifecycle line.
+ */
+const AppendLogBodySchema = z.object({
+  kind: LogKindSchema.extract(["note"]),
+  // The 400-character cap truncates rather than refusing (server/task-log.ts); this bound only stops
+  // an absurd body from being parsed at all, and the min() is what makes "wrote nothing" an error
+  // instead of an entry saying nothing.
+  text: z.string().trim().min(1).max(LOG_ENTRY_TEXT_MAX * 20),
+  env: z.string(),
+  paneId: z.string(),
 });
 
 const AttachBodySchema = z.object({
@@ -824,6 +847,52 @@ export function createApi(opts: {
     });
     if (!result?.found) return c.json({ error: { code: "not_found" } }, 404);
     return c.json(result.task);
+  });
+
+  // Appending is its own route rather than a field on the task PATCH — see AppendLogBodySchema.
+  // Storage already gives everything the append needs: `withBoard` serializes read-modify-write under
+  // an async mutex and `writeAtomic` commits, so this is a new route and no new locking.
+  app.post("/api/boards/:bid/tasks/:tid/log", async (c) => {
+    if (opts.storage === undefined) return c.json({ error: { code: "no_storage" } }, 503);
+    let body: unknown;
+    try { body = await c.req.json(); } catch { return c.json({ error: { code: "validation", message: "invalid JSON" } }, 400); }
+    const parsed = AppendLogBodySchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: { code: "validation", message: parsed.error.message } }, 400);
+    const bid = c.req.param("bid");
+    if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
+    const tid = c.req.param("tid");
+    if (!TID_RE.test(tid)) return c.json({ error: { code: "validation", message: "bad taskId" } }, 400);
+    const { kind, text, env, paneId } = parsed.data;
+    if (!opts.envs.find((e) => e.id === env)) {
+      return c.json({ error: { code: "validation", message: "unknown env" } }, 400);
+    }
+    const sessions = opts.poller.getSnapshot().sessions;
+    const at = Date.now();
+
+    type AppendResult = "not_found" | "not_on_card" | { readonly logCount: number };
+    const result = await opts.storage.withBoard<AppendResult>(bid, (existing) => {
+      if (existing === null) return { board: null, result: "not_found" };
+      const idx = existing.tasks.findIndex((t) => t.id === tid);
+      const old = idx === -1 ? undefined : existing.tasks[idx];
+      if (old === undefined) return { board: existing, result: "not_found" };
+      // Resolved from the card INSIDE the lock: a card the caller is not on is a refusal, and a card
+      // deleted between the read and the write is a 404 rather than a silent write.
+      const source = resolveLogSource(old, { env, paneId }, sessions);
+      if (source === null) return { board: existing, result: "not_on_card" };
+      const log = appendLogEntry(old.log, { at, source, kind, text });
+      const tasks = [...existing.tasks];
+      // `updatedAt` deliberately untouched: it means "the task statement changed", and the board sorts
+      // on createdAt anyway. A note is not an edit of the task.
+      tasks[idx] = { ...old, log };
+      return { board: { ...existing, tasks }, result: { logCount: log.length } };
+    });
+    if (result === "not_found") return c.json({ error: { code: "not_found" } }, 404);
+    if (result === "not_on_card") {
+      return c.json({
+        error: { code: "not_on_card", message: "this session is not attached to that card — a session appends only to its own card" },
+      }, 403);
+    }
+    return c.json({ ok: true, at, logCount: result.logCount }, 201);
   });
 
   app.delete("/api/boards/:bid/tasks/:tid", async (c) => {

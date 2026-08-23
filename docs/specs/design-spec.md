@@ -308,6 +308,7 @@ fire on `working → blocked` and `working → done|idle` ("finished"). `unknown
 | `POST` | `/api/focus` | `{env,paneId}|null` — frontend tells server which card is expanded → boosts that pane to the fast poll tier. In-memory, not persisted. |
 | `GET`/`POST`/`PATCH`/`DELETE` | `/api/boards[/:bid]` | board CRUD. Delete detaches sessions back to pool (does not kill herdr sessions). |
 | `POST`/`PATCH`/`DELETE` | `/api/boards/:bid/tasks[/:tid]` | task create / edit+move (status, order, priority) / delete. |
+| `POST` | `/api/boards/:bid/tasks/:tid/log` | append ONE entry to the card's log. Its own route, not a field on the task `PATCH`: a `PATCH` carries last-write-wins semantics for `description`, which is exactly what an append-only field must not inherit. **`at` and the writer are server-assigned** (a request body `at` is ignored); refuses `403` for a session not attached to the card. The log is **not** in the SSE frame — that carries `logCount`/`lastLogAt` only. |
 | `POST` | `/api/boards/:bid/tasks/:tid/comments` | add comment. **`author` is server-assigned** (request body `author` rejected); optional `idemKey` dedupes (e.g. agent re-trigger on same `since`). |
 | `POST` | `/api/boards/:bid/tasks/:tid/attach` · `/detach` | move pooled session `{env,paneId}` onto / off a task. |
 | `POST` | `/api/boards/:bid/tasks/:tid/spawn` | spawn (§9). **Idempotent:** pre-checks `agent list` for the intended name; attaches if already present instead of double-spawning. |

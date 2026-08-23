@@ -14,7 +14,7 @@ const boundTask: WhoamiTask = {
   boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "T", description: "",
   status: "doing", priority: null,
   columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
-  sessions: [],
+  sessions: [], logCount: 0, lastLogAt: null,
 };
 const bound: WhoamiResponse = {
   resolved: true,
@@ -43,6 +43,8 @@ function stub(over: Partial<CorralClient>): CorralClient {
   return {
     whoami: async () => bound,
     attention: async () => ({}),
+    board: async () => { throw new Error("unused"); },
+    appendLog: async () => ({ ok: true, at: 1, logCount: 1 }),
     state: async () => ({ envs: {}, sessions: [] }),
     boards: async () => boards,
     patchTask: async () => ({ id: "t_abcdefg", title: "T", description: "", status: "doing", priority: null, sessions: [], log: [], createdAt: 1, updatedAt: 2 }),
