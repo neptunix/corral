@@ -1,4 +1,4 @@
-import type { Board } from "@shared/board-schema";
+import type { BoardFrame } from "@shared/board-schema";
 import { useState, type JSX } from "react";
 
 import { GearIcon } from "./icons/gearIcon";
@@ -6,7 +6,7 @@ import { SettingsModal } from "./SettingsModal";
 import { ThemeSwitch } from "./ThemeSwitch";
 
 interface Props {
-  readonly boards: readonly Board[];
+  readonly boards: readonly BoardFrame[];
   readonly activeBoardId: string | null;
   readonly unassignedCount: number;
   readonly attentionCounts: ReadonlyMap<string, number>; // per-board attention count → badge on each board

@@ -56,7 +56,7 @@ async function seedLink(storage: ReturnType<typeof makeStorage>["storage"], sess
       tasks: [{
         id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
         sessions: [{ env: "work-local", paneId: "p1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "n", cwdSnapshot: "", sessionId }],
-        createdAt: now, updatedAt: now,
+        createdAt: now, updatedAt: now, log: [],
       }],
       spawnPresets: [], defaultSpawnPresetId: null,
     },
@@ -281,7 +281,7 @@ describe("startReconciler — the SessionLink name mirror", () => {
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [link("p1", "uuid-1"), link("p2", null)],
-          createdAt: now, updatedAt: now,
+          createdAt: now, updatedAt: now, log: [],
         }],
         spawnPresets: [], defaultSpawnPresetId: null,
       },

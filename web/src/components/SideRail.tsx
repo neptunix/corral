@@ -1,4 +1,4 @@
-import type { Board, SpawnPreset } from "@shared/board-schema";
+import type { BoardFrame, SpawnPreset } from "@shared/board-schema";
 import type { DiagnosticsSnapshot } from "@shared/diagnostics-schema";
 import { computeRollup, emptyDiagnostics } from "@shared/diagnostics-schema";
 import type { AttentionMap, EnvState } from "@shared/schema";
@@ -17,7 +17,7 @@ interface Props {
   readonly diagnostics: DiagnosticsSnapshot | null;
   readonly streamDown: boolean;
   readonly attention: AttentionMap;
-  readonly boards: readonly Board[];
+  readonly boards: readonly BoardFrame[];
   readonly envs: Readonly<Record<string, EnvState>>;
   readonly activeBoardId: string | null;
   readonly showUnassigned: boolean;

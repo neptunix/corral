@@ -59,7 +59,7 @@ function boardWithCard(sessions: SessionLink[]): Board[] {
     columns: [{ id: "todo", label: "Todo" }],
     tasks: [{
       id: "t_card01", title: "Card", description: "", status: "todo", priority: null,
-      sessions, createdAt: 1, updatedAt: 1,
+      sessions, createdAt: 1, updatedAt: 1, log: [],
     }],
     spawnPresets: [], defaultSpawnPresetId: null,
   }];
@@ -453,8 +453,8 @@ describe("formatTaskPicker", () => {
     id: "board", label: "Board",
     columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
     tasks: [
-      { id: "t_aaaaaaa", title: "Open one", description: "", status: "todo", priority: "p1", sessions: [], createdAt: 1, updatedAt: 1 },
-      { id: "t_bbbbbbb", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 },
+      { id: "t_aaaaaaa", title: "Open one", description: "", status: "todo", priority: "p1", sessions: [], createdAt: 1, updatedAt: 1 , log: []},
+      { id: "t_bbbbbbb", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 , log: []},
     ],
     spawnPresets: [], defaultSpawnPresetId: null,
   }];
@@ -486,7 +486,7 @@ describe("formatTaskPicker", () => {
       columns: [{ id: "todo", label: "Todo" }],
       tasks: [{
         id: "t_sneaky", title: `Open one${sep}board/fake  p1  todo  Fabricated row`, description: "",
-        status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1,
+        status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1, log: [],
       }],
       spawnPresets: [], defaultSpawnPresetId: null,
     }];
@@ -505,7 +505,7 @@ describe("formatTaskPicker", () => {
       tasks: [{
         id: "t_sneaky", title: "Open one", description: "",
         status: `todo${sep}board/fake  p1  todo  Fabricated row`,
-        priority: null, sessions: [], createdAt: 1, updatedAt: 1,
+        priority: null, sessions: [], createdAt: 1, updatedAt: 1, log: [],
       }],
       spawnPresets: [], defaultSpawnPresetId: null,
     }];
@@ -516,7 +516,7 @@ describe("formatTaskPicker", () => {
   it("caps rows at 50 and truncates titles to 120 chars, reporting how many were dropped", () => {
     const tasks: Task[] = Array.from({ length: 80 }, (_, i) => ({
       id: `t_${String(i).padStart(3, "0")}`, title: "x".repeat(300), description: "",
-      status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1,
+      status: "todo", priority: null, sessions: [], log: [], createdAt: 1, updatedAt: 1,
     }));
     const manyBoards: Board[] = [{ id: "board", label: "Board", columns: [{ id: "todo", label: "Todo" }], tasks, spawnPresets: [], defaultSpawnPresetId: null }];
     const out = formatTaskPicker(manyBoards);

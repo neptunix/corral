@@ -42,7 +42,7 @@ describe("cardSignal", () => {
   it("reports empty for a bound task with a blank description", () => {
     const b = board({ tasks: [{
       id: "t1", title: "T", description: "", status: "todo", priority: null,
-      createdAt: 1, updatedAt: 1, sessions: [link({})],
+      createdAt: 1, updatedAt: 1, log: [], sessions: [link({})],
     }] });
     const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane);
     expect(out.empty).toBe(true);
@@ -51,7 +51,7 @@ describe("cardSignal", () => {
   it("reports empty for a whitespace-only description", () => {
     const b = board({ tasks: [{
       id: "t1", title: "T", description: "   \n\t  ", status: "todo", priority: null,
-      createdAt: 1, updatedAt: 1, sessions: [link({})],
+      createdAt: 1, updatedAt: 1, log: [], sessions: [link({})],
     }] });
     const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane);
     expect(out.empty).toBe(true);
@@ -60,7 +60,7 @@ describe("cardSignal", () => {
   it("reports not-empty for a bound task with a real description", () => {
     const b = board({ tasks: [{
       id: "t1", title: "T", description: "the actual task", status: "todo", priority: null,
-      createdAt: 1, updatedAt: 1, sessions: [link({})],
+      createdAt: 1, updatedAt: 1, log: [], sessions: [link({})],
     }] });
     const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane);
     expect(out.empty).toBe(false);
@@ -81,7 +81,7 @@ describe("cardSignal", () => {
   it("matches a link with a null sessionId on its pane", () => {
     const b = board({ tasks: [{
       id: "t1", title: "T", description: "", status: "todo", priority: null,
-      createdAt: 1, updatedAt: 1, sessions: [link({ sessionId: null })],
+      createdAt: 1, updatedAt: 1, log: [], sessions: [link({ sessionId: null })],
     }] });
     const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane);
     expect(out.empty).toBe(true);
@@ -90,7 +90,7 @@ describe("cardSignal", () => {
   it("matches a link whose pane churned via the stable sessionId", () => {
     const b = board({ tasks: [{
       id: "t1", title: "T", description: "", status: "todo", priority: null,
-      createdAt: 1, updatedAt: 1, sessions: [link({ paneId: "old:p9", sessionId: SID })],
+      createdAt: 1, updatedAt: 1, log: [], sessions: [link({ paneId: "old:p9", sessionId: SID })],
     }] });
     // The live row now sits on a different paneId, matching what the caller asks about.
     const out = cardSignal([b], snapshot([row({ paneId: "w1:p1", sessionId: SID })]), ENVIRONMENTS, pane);
@@ -100,7 +100,7 @@ describe("cardSignal", () => {
   it("finds a blank card sitting in a closed column", () => {
     const b = board({ tasks: [{
       id: "t1", title: "T", description: "", status: "done", priority: null,
-      createdAt: 1, updatedAt: 1, sessions: [link({})],
+      createdAt: 1, updatedAt: 1, log: [], sessions: [link({})],
     }] });
     const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane);
     expect(out.empty).toBe(true);
@@ -109,7 +109,7 @@ describe("cardSignal", () => {
   it("resolves through a second link on the same card", () => {
     const b = board({ tasks: [{
       id: "t1", title: "T", description: "", status: "todo", priority: null,
-      createdAt: 1, updatedAt: 1,
+      createdAt: 1, updatedAt: 1, log: [],
       sessions: [
         link({ paneId: "w1:p2", sessionId: "99999999-8888-7777-6666-555555555555", name: "other" }),
         link({}),

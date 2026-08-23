@@ -1,13 +1,13 @@
 import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { Board, Column, SpawnPreset } from "@shared/board-schema";
+import type { BoardFrame, Column, SpawnPreset } from "@shared/board-schema";
 import { ColumnTypeSchema, defaultColumnId, generateColumnId, generateSpawnPresetId } from "@shared/board-schema";
 import type { CSSProperties, JSX } from "react";
 import { useEffect, useState } from "react";
 
 interface Props {
-  readonly board: Board;
+  readonly board: BoardFrame;
   // Returns a promise that REJECTS on a refused save, so handleSave can keep the modal open and
   // show the server's message instead of closing on a failure it never saw.
   readonly onSave: (patch: { label?: string; columns?: Column[]; spawnPresets?: SpawnPreset[]; defaultSpawnPresetId?: string | null }) => Promise<void>;

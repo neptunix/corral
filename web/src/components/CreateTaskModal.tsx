@@ -1,9 +1,9 @@
-import type { Board } from "@shared/board-schema";
+import type { BoardFrame } from "@shared/board-schema";
 import type { JSX } from "react";
 import { useState } from "react";
 
 interface Props {
-  readonly boards: readonly Board[];
+  readonly boards: readonly BoardFrame[];
   readonly defaultTitle: string;
   // Header text (default suits the from-session flow); the "+ New task" button passes "New task".
   readonly heading?: string;

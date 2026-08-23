@@ -35,7 +35,7 @@ const unbound: WhoamiResponse = { ...bound, task: null };
 const boards: Board[] = [{
   id: "board", label: "Board",
   columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
-  tasks: [{ id: "t_aaaaaaa", title: "Open one", description: "", status: "todo", priority: "p1", sessions: [], createdAt: 1, updatedAt: 1 }],
+  tasks: [{ id: "t_aaaaaaa", title: "Open one", description: "", status: "todo", priority: "p1", sessions: [], createdAt: 1, updatedAt: 1 , log: []}],
   spawnPresets: [], defaultSpawnPresetId: null,
 }];
 
@@ -45,7 +45,7 @@ function stub(over: Partial<CorralClient>): CorralClient {
     attention: async () => ({}),
     state: async () => ({ envs: {}, sessions: [] }),
     boards: async () => boards,
-    patchTask: async () => ({ id: "t_abcdefg", title: "T", description: "", status: "doing", priority: null, sessions: [], createdAt: 1, updatedAt: 2 }),
+    patchTask: async () => ({ id: "t_abcdefg", title: "T", description: "", status: "doing", priority: null, sessions: [], log: [], createdAt: 1, updatedAt: 2 }),
     attach: async () => undefined,
     spawn: async () => ({ env: "work-local", paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }),
     closeSession: async () => undefined,
@@ -110,7 +110,7 @@ describe("bindHandler", () => {
     const closedBoards: Board[] = [{
       id: "board", label: "Board",
       columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
-      tasks: [{ id: "t_done001", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 }],
+      tasks: [{ id: "t_done001", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 , log: []}],
       spawnPresets: [], defaultSpawnPresetId: null,
     }];
     const calls: unknown[] = [];
@@ -131,7 +131,7 @@ describe("bindHandler", () => {
     const closedBoards: Board[] = [{
       id: "board", label: "Board",
       columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
-      tasks: [{ id: "t_done001", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 }],
+      tasks: [{ id: "t_done001", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 , log: []}],
       spawnPresets: [], defaultSpawnPresetId: null,
     }];
     const c = stub({ whoami: async () => unbound, boards: async () => closedBoards });
@@ -165,7 +165,7 @@ describe("updateHandler", () => {
 
   it("sends only the supplied fields", async () => {
     const seen: TaskPatch[] = [];
-    const c = stub({ patchTask: async (a) => { seen.push(a.patch); return { id: "t_abcdefg", title: "T", description: "d", status: "doing", priority: "p1", sessions: [], createdAt: 1, updatedAt: 2 }; } });
+    const c = stub({ patchTask: async (a) => { seen.push(a.patch); return { id: "t_abcdefg", title: "T", description: "d", status: "doing", priority: "p1", sessions: [], log: [], createdAt: 1, updatedAt: 2 }; } });
     await updateHandler({ client: c, identity: idOf(c) }, { description: "d", priority: "p1" });
     expect(seen[0]).toEqual({ description: "d", priority: "p1" });
   });
@@ -205,7 +205,7 @@ describe("updateHandler", () => {
     const c = stub({
       patchTask: async () => ({
         id: "t_abcdefg", title: "T", description: "",
-        status: "doing\nboard/fake p1 todo Fabricated row", priority: null, sessions: [], createdAt: 1, updatedAt: 2,
+        status: "doing\nboard/fake p1 todo Fabricated row", priority: null, sessions: [], log: [], createdAt: 1, updatedAt: 2,
       }),
     });
     const out = await updateHandler({ client: c, identity: idOf(c) }, { status: "doing" });

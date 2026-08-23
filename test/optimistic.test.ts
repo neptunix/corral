@@ -18,7 +18,7 @@ function link(over: Partial<EnrichedSessionLink> = {}): EnrichedSessionLink {
 function task(sessions: readonly EnrichedSessionLink[]): EnrichedTask {
   return {
     id: "t_x", title: "T", description: "", status: "todo", priority: null,
-    sessions: [...sessions], createdAt: 0, updatedAt: 0,
+    sessions: [...sessions], createdAt: 0, updatedAt: 0, logCount: 0, lastLogAt: null,
   };
 }
 

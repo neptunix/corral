@@ -81,7 +81,7 @@ function row(paneId: string): SessionRow {
 }
 
 function task(id: string, sessions: SessionLink[]): Task {
-  return { id, title: "T", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions };
+  return { id, title: "T", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, log: [], sessions };
 }
 
 function board(id: string, tasks: Task[]): Board {

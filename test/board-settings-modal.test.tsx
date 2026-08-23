@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { Board, Task } from "@shared/board-schema";
+import type { BoardFrame, Task } from "@shared/board-schema";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -7,7 +7,7 @@ import { BoardSettingsModal } from "../web/src/components/BoardSettingsModal";
 
 afterEach(cleanup);
 
-function makeBoard(overrides: Partial<Board> = {}): Board {
+function makeBoard(overrides: Partial<BoardFrame> = {}): BoardFrame {
   return {
     id: "b1",
     label: "Original name",
@@ -29,6 +29,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     sessions: [],
     createdAt: 0,
     updatedAt: 0,
+    log: [],
     ...overrides,
   };
 }

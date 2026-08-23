@@ -101,7 +101,21 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
   const index = buildLiveIndex(snapshot.sessions);
 
   const enrichedTasks: EnrichedTask[] = sortTasks(board.tasks).map((task) => ({
-    ...task,
+    // An EXPLICIT field list, not `...task`: this frame goes to every open board on every poll tick,
+    // and a spread would put the whole log on every one of them. The two counters are what the board
+    // badges a card from; the log itself is fetched on demand when a card is opened. A field added to
+    // TaskSchema and not added here never reaches the web — the same deliberate trade LiveSessionData
+    // already makes, and the reason it is worth it is that the omission that matters is the silent one
+    // in the other direction.
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    status: task.status,
+    priority: task.priority,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    logCount: task.log.length,
+    lastLogAt: task.log.at(-1)?.at ?? null,
     sessions: task.sessions.map((link) => {
       // Resolve the live row. When the link carries a stable sessionId, TRUST IT over the stored
       // paneId: a herdr restart reassigns paneIds, so the stored paneId may now belong to a *different*
@@ -156,7 +170,10 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
   }));
 
   return {
-    board,
+    // Same reason as the explicit list above, and not redundant with it: `board` carries its own copy
+    // of the task list, so leaving it whole would ship every log on every tick through the other half
+    // of the frame.
+    board: { ...board, tasks: board.tasks.map(({ log: _log, ...rest }) => rest) },
     tasks: enrichedTasks,
     unassigned: buildUnassigned(storage, snapshot),
     envs: snapshot.envs,
@@ -765,6 +782,7 @@ export function createApi(opts: {
         status,
         priority: parsed.data.priority ?? null,
         sessions: [],
+        log: [],
         createdAt: now,
         updatedAt: now,
       };
@@ -1512,6 +1530,7 @@ export function createApi(opts: {
         status: landing,
         priority: parsed.data.priority ?? null,
         sessions: [link],
+        log: [],
         createdAt: now,
         updatedAt: now,
       };

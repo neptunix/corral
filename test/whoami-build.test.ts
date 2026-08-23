@@ -44,7 +44,7 @@ const board: Board = {
   ],
   tasks: [{
     id: "t_abcdefg", title: "Refactor the API", description: "why and how",
-    status: "doing", priority: "p1", createdAt: 1, updatedAt: 2,
+    status: "doing", priority: "p1", createdAt: 1, updatedAt: 2, log: [],
     sessions: [
       { env: "work-local", paneId: "w1:p1", tabId: "tab1", tabLabel: "api-refactor-a", workspaceId: "ws1", workspaceLabel: "repo", name: "api-refactor-a", cwdSnapshot: "/repo", sessionId: SID },
       { env: "work-local", paneId: "w1:p2", tabId: "tab2", tabLabel: "api-refactor-b", workspaceId: "ws1", workspaceLabel: "repo", name: "api-refactor-b", cwdSnapshot: "/repo", sessionId: SID_B },

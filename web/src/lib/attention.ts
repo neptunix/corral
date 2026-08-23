@@ -1,4 +1,4 @@
-import type { Board } from "@shared/board-schema";
+import type { BoardFrame } from "@shared/board-schema";
 import type { AttentionMap, AttentionRecord } from "@shared/schema";
 
 // Client-side per-board attention attribution. The client already holds every board's bindings
@@ -20,7 +20,7 @@ export interface SessionMembership {
  * env:paneId → { owning board id, owning task title }. The SINGLE board→task→session walk shared by
  * every consumer below — no duplicated traversal. Mirrors the server `buildUnassigned` membership.
  */
-export function buildMembershipIndex(boards: readonly Board[]): Map<string, SessionMembership> {
+export function buildMembershipIndex(boards: readonly BoardFrame[]): Map<string, SessionMembership> {
   const index = new Map<string, SessionMembership>();
   for (const board of boards) {
     for (const task of board.tasks) {
@@ -33,7 +33,7 @@ export function buildMembershipIndex(boards: readonly Board[]): Map<string, Sess
 }
 
 /** Per-board attention count for the switcher badges. Records bound to no task are excluded. */
-export function attentionCountsByBoard(attention: AttentionMap, boards: readonly Board[]): Map<string, number> {
+export function attentionCountsByBoard(attention: AttentionMap, boards: readonly BoardFrame[]): Map<string, number> {
   const index = buildMembershipIndex(boards);
   const counts = new Map<string, number>();
   for (const key of Object.keys(attention)) {
@@ -52,7 +52,7 @@ export interface BoardAttentionEntry {
 
 /** The active board's attention entries, blocked-first then most-recent, each carrying its task title. */
 export function boardAttention(
-  attention: AttentionMap, boards: readonly Board[], boardId: string,
+  attention: AttentionMap, boards: readonly BoardFrame[], boardId: string,
 ): BoardAttentionEntry[] {
   const index = buildMembershipIndex(boards);
   const entries: BoardAttentionEntry[] = [];
@@ -69,7 +69,7 @@ export function boardAttention(
 }
 
 /** Count of attention records whose session is bound to no task — the "Unassigned sessions" badge. */
-export function unassignedAttentionCount(attention: AttentionMap, boards: readonly Board[]): number {
+export function unassignedAttentionCount(attention: AttentionMap, boards: readonly BoardFrame[]): number {
   const index = buildMembershipIndex(boards);
   let count = 0;
   for (const key of Object.keys(attention)) {
