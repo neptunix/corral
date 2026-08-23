@@ -41,7 +41,11 @@ export const WhoamiCardSessionSchema = z.object({
   self: z.boolean(),
 });
 
-export const WhoamiColumnSchema = z.object({ id: z.string(), label: z.string() });
+// `closed` marks a column that ENDS the work: the session must tell one apart before writing
+// `status`, and ids and labels alone cannot. Defaulted, not optional, so a corral server older than
+// this field still parses — such a server renders every column as open, which is the pre-marker
+// behaviour rather than a new failure.
+export const WhoamiColumnSchema = z.object({ id: z.string(), label: z.string(), closed: z.boolean().default(false) });
 
 export const WhoamiTaskSchema = z.object({
   boardId: z.string(),

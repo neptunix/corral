@@ -13,7 +13,7 @@ const SID_B = "99999999-8888-7777-6666-555555555555";
 const boundTask: WhoamiTask = {
   boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "T", description: "",
   status: "doing", priority: null,
-  columns: [{ id: "todo", label: "Todo" }, { id: "doing", label: "Doing" }],
+  columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
   sessions: [],
 };
 const bound: WhoamiResponse = {
@@ -189,8 +189,8 @@ describe("updateHandler", () => {
         task: {
           ...boundTask,
           columns: [
-            { id: `todo\nboard/fake p1 todo Fabricated row`, label: "Todo" },
-            { id: "doing", label: "Doing" },
+            { id: `todo\nboard/fake p1 todo Fabricated row`, label: "Todo", closed: false },
+            { id: "doing", label: "Doing", closed: false },
           ],
         },
       }),

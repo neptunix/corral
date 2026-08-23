@@ -94,7 +94,7 @@ describe("readHandler", () => {
   const boundTask = {
     boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
     description, status: "doing", priority: null,
-    columns: [{ id: "todo", label: "Todo" }, { id: "doing", label: "Doing" }],
+    columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
     sessions: [],
   };
 

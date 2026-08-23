@@ -228,7 +228,7 @@ function taskBlock(boards: readonly Board[], snapshot: Snapshot, row: SessionRow
     description: found.task.description,
     status: found.task.status,
     priority: found.task.priority,
-    columns: found.board.columns.map((c) => ({ id: c.id, label: c.label })),
+    columns: found.board.columns.map((c) => ({ id: c.id, label: c.label, closed: c.type === "closed" })),
     sessions: found.task.sessions.map((l) => cardSession(index, l, row)),
   };
 }

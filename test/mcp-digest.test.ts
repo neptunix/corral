@@ -540,7 +540,7 @@ describe("formatWhoami", () => {
     task: {
       boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
       description: "why and how", status: "doing", priority: "p1",
-      columns: [{ id: "todo", label: "Todo" }, { id: "doing", label: "Doing" }],
+      columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
       sessions: [
         { name: "api-refactor-a", claudeName: null, key: "work-local:w1:p1", sessionId: "11111111-2222-3333-4444-555555555555", status: "working", detached: false, ctxPct: 41, self: true },
         { name: "api-refactor-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false },
@@ -562,6 +562,20 @@ describe("formatWhoami", () => {
     expect(otherLine?.trimStart().startsWith("*")).toBe(false);
   });
 
+  // The rule "closing is the operator's call" is unfollowable from ids and labels: they are per
+  // board, so a session cannot tell Done from Doing by name. The marker is what makes it decidable.
+  it("marks the closed columns and leaves the open ones bare", () => {
+    const out = formatWhoami({
+      ...resolved,
+      task: resolved.task === null ? null : {
+        ...resolved.task,
+        columns: [{ id: "doing", label: "Doing", closed: false }, { id: "done", label: "Done", closed: true }],
+      },
+    });
+    const line = out.split("\n").find((l) => l.startsWith("columns available for status"));
+    expect(line).toContain("doing = Doing, done = Done (closed)");
+  });
+
   // Item 4 of the review-fix wave: formatWhoami's attached-session list and column-id list had no
   // row cap at all, unlike formatFleet and formatTaskPicker — the one call every session makes at
   // startup could otherwise emit unbounded lines from a corrupted/adversarial board config.
@@ -581,7 +595,7 @@ describe("formatWhoami", () => {
     });
 
     it("caps the column-id list at 20 and reports how many were dropped", () => {
-      const manyColumns = Array.from({ length: 25 }, (_, i) => ({ id: `col${String(i)}`, label: `Col ${String(i)}` }));
+      const manyColumns = Array.from({ length: 25 }, (_, i) => ({ id: `col${String(i)}`, label: `Col ${String(i)}`, closed: false }));
       const out = formatWhoami({
         ...resolved,
         task: resolved.task === null ? null : { ...resolved.task, columns: manyColumns },
@@ -677,7 +691,7 @@ describe("formatWhoami", () => {
     it("bounds a line carrying pathological column ids", () => {
       const out = formatWhoami({
         ...resolved,
-        task: resolved.task === null ? null : { ...resolved.task, columns: [{ id: HUGE, label: "C" }] },
+        task: resolved.task === null ? null : { ...resolved.task, columns: [{ id: HUGE, label: "C", closed: false }] },
       });
       for (const line of out.split("\n")) expect(line.length).toBeLessThanOrEqual(2001);
     });
@@ -782,8 +796,8 @@ describe("formatWhoami", () => {
       task: resolved.task === null ? null : {
         ...resolved.task,
         columns: [
-          { id: `todo${sep}work-local  fake  w9:p9  working`, label: "Todo" },
-          { id: "doing", label: "Doing" },
+          { id: `todo${sep}work-local  fake  w9:p9  working`, label: "Todo", closed: false },
+          { id: "doing", label: "Doing", closed: false },
         ],
       },
     });
@@ -934,7 +948,7 @@ describe("formatCardDetail", () => {
   const task: WhoamiTask = {
     boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
     description: "did the thing\nnext: do the other thing", status: "doing", priority: "p1",
-    columns: [{ id: "todo", label: "Todo" }, { id: "doing", label: "Doing" }],
+    columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
     sessions: [],
   };
 

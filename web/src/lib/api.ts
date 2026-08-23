@@ -9,10 +9,25 @@ const base = "";
 const ErrorBodySchema = z.object({
   error: z
     .object({
+      code: z.string().optional(),
       message: z.string().optional(),
     })
     .optional(),
 });
+
+/**
+ * A refusal that kept the server's `error.code`. Every route already sends one; the client used to
+ * drop it and leave callers matching on prose. A caller that must tell one refusal from another —
+ * "the pane is already gone" from "the pane now belongs to someone else" — needs the code.
+ */
+export class ApiError extends Error {
+  readonly code: string | null;
+  constructor(message: string, code: string | null) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+  }
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${base}${path}`, {
@@ -23,7 +38,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     const raw: unknown = await res.json().catch(() => ({}));
     const body = ErrorBodySchema.safeParse(raw);
     const message = body.success ? (body.data.error?.message ?? `HTTP ${String(res.status)}`) : `HTTP ${String(res.status)}`;
-    throw new Error(message);
+    throw new ApiError(message, body.success ? (body.data.error?.code ?? null) : null);
   }
   // res.json() returns Promise<any>; T is caller-specified and trusted
   // eslint-disable-next-line @typescript-eslint/no-unsafe-return

@@ -547,8 +547,11 @@ export function formatWhoami(w: WhoamiResolved): string {
     // A label is shown only when it differs from its id, which is the case that matters: a board
     // whose columns are `c1, c2, c3` gives a caller nothing to choose on without them. The payload
     // has carried these labels all along; only the rendering dropped them.
+    // Moving a card to a `(closed)` column is the operator's call, and the marker is what makes that
+    // rule followable: ids and labels are per board, so "Done" is not something to pattern-match on.
+    // The rule itself lives in SKILL.md — two wordings of one rule drift.
     const columnsLine = `columns available for status (use the id): ${
-      shownColumns.map((c) => (c.label === c.id ? c.id : `${c.id} = ${c.label}`)).join(", ")
+      shownColumns.map((c) => `${c.label === c.id ? c.id : `${c.id} = ${c.label}`}${c.closed ? " (closed)" : ""}`).join(", ")
     }${columnsDropped > 0 ? `, … ${String(columnsDropped)} more (limit=${String(WHOAMI_COLUMNS_MAX)})` : ""}`;
     const shownSessions = t.sessions.slice(0, WHOAMI_SESSIONS_MAX);
     const sessionsDropped = t.sessions.length - shownSessions.length;

@@ -111,7 +111,7 @@ describe("UI wiring — every surface renders session state through sessionState
   // Both palettes must be TOTAL over the tone union, or a tone added later silently renders no colour
   // class at all. `Record<SessionStateTone, string>` is what makes typecheck enforce that.
   it("keys both dot palettes on the tone union so typecheck keeps them total", () => {
-    expect(read("components/TaskCard.tsx")).toContain("const TONE_DOT: Record<SessionStateTone, string>");
+    expect(read("lib/session-state.ts")).toContain("const TONE_DOT: Record<SessionStateTone, string>");
     expect(read("components/UnassignedView.tsx")).toContain("const TONE_COLOR: Record<SessionStateTone, string>");
   });
 
@@ -120,7 +120,7 @@ describe("UI wiring — every surface renders session state through sessionState
   // These pin the two claims that carry meaning: the legacy fallback, and that the states a user must
   // tell apart are actually different colours.
   const PALETTES = [
-    ["components/TaskCard.tsx", "TONE_DOT", "bg-slate-500"],
+    ["lib/session-state.ts", "TONE_DOT", "bg-slate-500"],
     ["components/UnassignedView.tsx", "TONE_COLOR", "text-slate-400 light:text-slate-500"],
   ] as const;
 
@@ -163,6 +163,19 @@ describe("UI wiring — every surface renders session state through sessionState
         expect(p[tone], `${file} ${tone}`).toContain(family);
       }
     }
+  });
+
+  // Drag-and-drop is how a card usually reaches Done, and dnd-kit needs layout jsdom cannot give — so
+  // the behavioural suite covers the edit-modal path only. Without this, deleting the two lines that
+  // ask before a closed-column drop would leave every test green while the drag silently moved the
+  // card with live sessions attached. Static, like the wiring assertions above it.
+  it("asks before a closed-column move on the drag path too, not only from the edit modal", () => {
+    const src = read("components/Board.tsx");
+    const drag = src.split("const handleDragEnd")[1]?.split("const tasksByColumn")[0] ?? "";
+    expect(drag).toContain("moveNeedingConfirmation(taskId, newColumnId)");
+    // The guard must precede the write, and return — a check whose result is not acted on is nothing.
+    expect(drag.indexOf("moveNeedingConfirmation")).toBeLessThan(drag.indexOf("api.tasks.update"));
+    expect(drag).toContain("setPendingMove(pending); return;");
   });
 
   it("SessionModal renders the label too", () => {

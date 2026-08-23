@@ -37,7 +37,11 @@ const snapshot: Snapshot = {
 
 const board: Board = {
   id: "board", label: "Board",
-  columns: [{ id: "todo", label: "Todo" }, { id: "doing", label: "Doing", type: "in-progress" }],
+  columns: [
+    { id: "todo", label: "Todo" },
+    { id: "doing", label: "Doing", type: "in-progress" },
+    { id: "done", label: "Done", type: "closed" },
+  ],
   tasks: [{
     id: "t_abcdefg", title: "Refactor the API", description: "why and how",
     status: "doing", priority: "p1", createdAt: 1, updatedAt: 2,
@@ -99,7 +103,10 @@ describe("buildWhoami", () => {
     });
     if (!out.resolved) throw new Error("expected resolved");
     expect(out.task?.taskId).toBe("t_abcdefg");
-    expect(out.task?.columns.map((c) => c.id)).toEqual(["todo", "doing"]);
+    expect(out.task?.columns.map((c) => c.id)).toEqual(["todo", "doing", "done"]);
+    // `closed` is what lets a session tell a column that ENDS the work from one that does not — the
+    // one distinction it cannot make from an id or a label.
+    expect(out.task?.columns.map((c) => c.closed)).toEqual([false, false, true]);
 
     const sessions = out.task?.sessions ?? [];
     expect(sessions.map((s) => s.name)).toEqual(["api-refactor-a", "api-refactor-b", "api-refactor-c"]);

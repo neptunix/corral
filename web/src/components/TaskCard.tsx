@@ -7,7 +7,7 @@ import { CloseSessionModal } from "./CloseSessionModal";
 import { RestoreSessionModal } from "./RestoreSessionModal";
 import { api } from "../lib/api";
 import { CLOSING_STATUS, RESUMING_STATUS } from "../lib/optimistic";
-import { sessionStateLabel, sessionStateTone, type SessionStateTone } from "../lib/session-state";
+import { TONE_DOT, sessionStateLabel, sessionStateTone } from "../lib/session-state";
 import { relativeTime } from "../lib/time";
 
 const PRIORITY_STYLE: Record<string, string> = {
@@ -17,17 +17,6 @@ const PRIORITY_STYLE: Record<string, string> = {
   p3: "bg-slate-700 text-slate-300 light:bg-slate-200 light:text-slate-700",
 };
 const PRIORITY_LABEL: Record<string, string> = { p0: "P0", p1: "P1", p2: "P2", p3: "P3" };
-// Keyed by tone, NOT by herdr's agent_status — the dot and the label must come from one decision.
-// `unknown` keeps the class the herdr-keyed lookup fell back to, so the closing/resuming transients are
-// not repainted; the values are pinned in test/ui-safety.test.ts.
-const TONE_DOT: Record<SessionStateTone, string> = {
-  working: "bg-emerald-400 light:bg-emerald-600",
-  attention: "bg-red-400 light:bg-red-600",
-  idle: "bg-slate-500",
-  done: "bg-sky-400 light:bg-sky-600",
-  unavailable: "bg-amber-400 light:bg-amber-600",
-  unknown: "bg-slate-500",
-};
 
 interface Props {
   readonly task: EnrichedTask;

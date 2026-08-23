@@ -1232,6 +1232,10 @@ describe("POST close (herdr pane close)", () => {
     await seedTaskWithLink(app, storage);
     const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close", { method: "POST" });
     expect(res.status).toBe(404);
+    // The CODE, not just the status: the web client branches on it to tell "already gone" (the end
+    // state the caller asked for) from a refusal about a different session. Renaming it here would
+    // silently turn a successful close back into a red error in the UI.
+    expect(await res.json()).toMatchObject({ error: { code: "no_live_pane" } });
   });
 
   // A null-sessionId link (no herdr integration, or the pre-backfill /new window) can't be verified by
@@ -1245,6 +1249,9 @@ describe("POST close (herdr pane close)", () => {
     await seedTaskWithLink(app, storage, null); // link.sessionId = null
     const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/close", { method: "POST" });
     expect(res.status).toBe(409);
+    // Pinned for the same reason as `no_live_pane`: this is the refusal the client must NOT treat as
+    // success — the pane is running someone else's session now.
+    expect(await res.json()).toMatchObject({ error: { code: "pane_reused" } });
     expect(closed).toEqual([]);
   });
 
