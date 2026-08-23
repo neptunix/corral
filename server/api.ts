@@ -24,6 +24,7 @@ import {
 } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { briefByteLength, cleanupBrief, composeBrief, START_COMMAND_FALLBACK, writeBrief } from "./brief.ts";
+import { cardSignal } from "./card-signal.ts";
 import { syncClaudeThemeBase, ThemeModeSchema } from "./claude-theme.ts";
 import type { DiagnosticsStore } from "./diagnostics-store.ts";
 import type { FleetRestore } from "./fleet-restore.ts";
@@ -408,6 +409,35 @@ export function createApi(opts: {
       snapshot,
       boards: opts.storage === undefined ? [] : opts.storage.getAllBoards(),
     }));
+  });
+
+  // Card-empty check for scripts/corral-claude-hook.sh — see
+  // docs/adr/0007-a-pane-side-hook-becomes-an-http-client-of-the-corral-api.md. Same request shape
+  // as /api/whoami, deliberately no `env` parameter — see that route's comment. Deliberately WITHOUT
+  // whoami's two escalating recoveries on a resolution miss (re-poll, then pane lookup): this route
+  // is hit on every prompt of every session, so it reads the current snapshot once and answers —
+  // the cost is a miss on a session's very first prompt, recovered on the next one. `getAllBoards()`
+  // throws on a malformed board file (server/storage.ts), UPSTREAM of the pure cardSignal, so the
+  // try/catch has to live here.
+  app.get("/api/card-signal", (c) => {
+    const paneId = c.req.query("paneId");
+    if (paneId === undefined) {
+      return c.json({ error: { code: "validation", message: "paneId required" } }, 400);
+    }
+    if (!PANE_RE.test(paneId)) {
+      return c.json({ error: { code: "validation", message: "malformed paneId" } }, 400);
+    }
+    if (opts.storage === undefined) return c.json({ empty: false });
+    const cwd = c.req.query("cwd") ?? "";
+    const socket = c.req.query("socket") ?? null;
+    let boards: Board[];
+    try {
+      boards = opts.storage.getAllBoards();
+    } catch {
+      return c.json({ empty: false });
+    }
+    const snapshot = opts.poller.getSnapshot();
+    return c.json(cardSignal(boards, snapshot, opts.envs, { paneId, cwd, socket }));
   });
 
   // Attention records for the fleet digest. The bare GET /api/state returns a plain Snapshot with no

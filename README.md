@@ -549,6 +549,26 @@ Requires `jq` and the `skills/corral/` skill installed in the same config dir (s
 below) — the hook reads its context-pressure protocol out of `SKILL.md` rather than duplicating
 the text.
 
+The same script also carries a second, independent signal: `[corral] card empty`, on the same
+`UserPromptSubmit` event, when the session's bound card has a blank description. It asks corral's
+own API (`GET /api/card-signal`, loopback-only, same address resolution as [the MCP
+server](#mcp-server)) whether the pane's card is empty, with a 1-second timeout — a missed check
+is silent and changes nothing. Preconditions, each failing silently: `skills/corral/SKILL.md` must
+carry its own `card-signal` marker pair (independent of the `ctx-signal` pair above — either can be
+missing without disabling the other); `HERDR_PANE_ID` must be set (every herdr pane sets it); `curl`
+must be installed; and the corral server must answer within a second. `CORRAL_URL` (or
+`HERDR_DASH_PORT`) must reach it exactly as [address resolution](#mcp-server) describes for the MCP
+server — this hook is a second client of the same address. Turn it off without touching
+`SKILL.md`:
+
+```json
+{ "hooks": { "cardSignal": false } }
+```
+
+Remote environments do not get this signal — `resolveSelf` filters to local before it looks at the
+snapshot, so a remote pane's card is never resolved and the check always answers "not empty" for
+one.
+
 ## Installing the Claude helper files (per config dir)
 
 The statusline and theme pieces live **per Claude config dir** — every `~/.claude*` dir you
@@ -706,11 +726,12 @@ environments' install health; their remote rows then read `n/a` naming this swit
 `UPDATE_CHECK_ENABLED` (true — set to `false` to stop corral asking GitHub whether a newer release
 exists; the `update-check` row then reads `n/a` naming this switch, and no outbound HTTP request is
 made at all).
-It also reads `$CORRAL_HOME/config.json` for `hooks.ctxThresholds` — see [Claude context-pressure
-hook](#claude-context-pressure-hook).
+It also reads `$CORRAL_HOME/config.json` for `hooks.ctxThresholds` and `hooks.cardSignal` — see
+[Claude context-pressure hook](#claude-context-pressure-hook).
 
 [MCP server](#mcp-server): `CORRAL_URL` (defaults to `http://127.0.0.1:$HERDR_DASH_PORT` — read by
-the MCP process, see the note there) · `BRIEF_MAX_BYTES` (16384) · `BRIEF_CLEANUP_DELAY_MS` (600000
+the MCP process **and** by `corral-claude-hook.sh`'s card-empty check, see the note there) ·
+`BRIEF_MAX_BYTES` (16384) · `BRIEF_CLEANUP_DELAY_MS` (600000
 — backstop only; a brief is normally deleted by the launch command that reads it).
 
 For deeper live scrollback set `pane_history = true` in `~/.config/herdr/config.toml`.
@@ -761,6 +782,12 @@ It resolves that address from **its own** environment (`CORRAL_URL`, else
 if you run corral on a non-default port, either export `HERDR_DASH_PORT` where Claude starts or pin
 it at registration with `--env CORRAL_URL=http://127.0.0.1:<port>` — otherwise every tool reports
 `unreachable` against port 8787 while the server is running perfectly well somewhere else.
+
+`corral-claude-hook.sh`'s card-empty check (above) resolves the same address the same way, but it is
+a second, independent client — pinning `CORRAL_URL` at MCP registration reaches only the MCP
+process, not the hook, since the hook inherits the pane's shell directly rather than an `--env`
+flag. Exporting `HERDR_DASH_PORT` (or `CORRAL_URL`) **in the shell where Claude starts** reaches
+both, because both are children of that shell.
 
 The seven tools:
 
