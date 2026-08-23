@@ -17,11 +17,13 @@ different: `corral-claude-hook.sh` making an HTTP request to corral's own API.
 The hook gains a second, independent signal, `card_signal`, alongside the existing `ctx_signal`.
 On `UserPromptSubmit` it calls `GET /api/card-signal?paneId=&cwd=&socket=` — the same request shape
 `/api/whoami` accepts, deliberately without an `env` parameter, since the pane does not know
-corral's environment ids. The route resolves the caller the same way `/api/whoami` does and answers
-`{ "empty": boolean }`: `true` only when the pane resolves to a bound card whose description is
-blank; every other case — unresolvable pane, no card, a non-blank description — answers `false`,
-deliberately conflated, since the hook has exactly two behaviours and a distinction it cannot act on
-invites wrong handling.
+corral's environment ids. The route resolves the caller with the same `resolveSelf` algorithm
+`/api/whoami` uses, but deliberately without whoami's two escalating recoveries on a miss (a re-poll
+of local environments, then a direct herdr pane lookup) — this route reads the current snapshot once
+and answers. It answers `{ "empty": boolean }`: `true` only when the pane resolves to a bound card
+whose description is blank; every other case — unresolvable pane, no card, a non-blank description —
+answers `false`, deliberately conflated, since the hook has exactly two behaviours and a distinction
+it cannot act on invites wrong handling.
 
 The two signals share one script but no state: each has its own marker pair in `SKILL.md`
 (`ctx-signal` / `card-signal`), and a session missing one skill installation still gets the other.
@@ -42,6 +44,14 @@ the caller by pane coordinates, the way `/api/whoami` already does, needs nothin
 **Why `false` covers every non-empty case.** The hook can only do two things: stay silent, or print
 one line. A response that distinguished "not bound" from "bound but not empty" from "board
 unreadable" would just be discarded three different ways at the call site.
+
+**Why no escalation on a resolution miss.** Whoami's re-poll and pane-lookup recoveries exist because
+a spawned session calls that tool exactly once, right after its pane appears — worth an extra poll to
+get right immediately. This route is hit on every prompt of every session; escalating on every miss
+would mean every session below the poll's registration lag forcing an environment refresh on each
+turn. Accepted cost: a session's very first prompt can land before its pane is in the snapshot (the
+cheap poll runs every 30s by default), so the signal misses its highest-value turn and recovers on
+the next prompt instead.
 
 **Why no diagnostics check.** The signal's failure is harmless — nothing in corral depends on it —
 and the health panel already hands its problems to spawned fix sessions, so a row that could never

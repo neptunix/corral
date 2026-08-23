@@ -2,8 +2,8 @@
 # corral-claude-hook.sh
 # Claude Code hook, registered under both SessionStart and UserPromptSubmit, branching on
 # hook_event_name from the hook-input JSON on stdin. Two independent signals share this script:
-# ctx-signal (context-pressure, docs/superpowers/specs/2026-08-13-context-pressure-notice-design.md)
-# and card-signal (card-empty, docs/superpowers/specs/2026-08-22-card-empty-signal-design.md).
+# ctx-signal (context-pressure) and card-signal (card-empty, see
+# docs/adr/0007-a-pane-side-hook-becomes-an-http-client-of-the-corral-api.md).
 # Best-effort throughout: any failure exits 0 silently, same contract as corral-status-capture.sh
 # — never blocks prompt submission or session start.
 set -euo pipefail
@@ -43,7 +43,8 @@ urlencode() { jq -rn --arg v "$1" '$v|@uri'; }
 
 # Emits "[corral] ctx {pct}% ({band})" on its own preconditions only: session_id present and
 # well-formed, a statusline capture with a numeric ctx.pct, and a band above the lowest threshold.
-# Returns non-zero (never `exit`, which would also kill card_signal) when any precondition fails.
+# Returns 0 with empty stdout (never `exit`, which would also kill card_signal) when any
+# precondition fails.
 ctx_signal() {
   local block
   block="$(block_of ctx-signal)"

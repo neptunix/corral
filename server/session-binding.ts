@@ -34,14 +34,6 @@ export function isSessionBound(
   return links.some((l) => linkBindsSession(l, incoming));
 }
 
-// Which stored link does a per-card action (detach/close/resume) target? Returns the index into
-// `links`, or -1.
-//   - An explicit sessionId is AUTHORITATIVE: match it exactly, or -1. It NEVER falls through to paneId
-//     — with two same-pane links a stale-frame sid that matches nothing must not resolve to the wrong
-//     sibling (close would kill the live one's tab; resume would respawn it). detach treats -1 as a
-//     safe no-op (idempotent); close/resume 404.
-//   - No sessionId (legacy caller / a link whose id isn't backfilled yet): resolve by paneId, else
-//     churn-heal by the live row's sessionId (a herdr restart relocated the pane).
 // The one place that walks every board looking for a session's card — whoami's task block and the
 // card-empty signal both need it, and both must see the same card for the same session.
 export function findCard(
@@ -59,6 +51,14 @@ export function findCard(
   return undefined;
 }
 
+// Which stored link does a per-card action (detach/close/resume) target? Returns the index into
+// `links`, or -1.
+//   - An explicit sessionId is AUTHORITATIVE: match it exactly, or -1. It NEVER falls through to paneId
+//     — with two same-pane links a stale-frame sid that matches nothing must not resolve to the wrong
+//     sibling (close would kill the live one's tab; resume would respawn it). detach treats -1 as a
+//     safe no-op (idempotent); close/resume 404.
+//   - No sessionId (legacy caller / a link whose id isn't backfilled yet): resolve by paneId, else
+//     churn-heal by the live row's sessionId (a herdr restart relocated the pane).
 export function resolveLinkIndex(
   links: readonly SessionLink[],
   target: {

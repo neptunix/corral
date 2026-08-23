@@ -411,10 +411,14 @@ export function createApi(opts: {
     }));
   });
 
-  // Card-empty check for scripts/corral-claude-hook.sh (docs/superpowers/specs/2026-08-22-
-  // card-empty-signal-design.md). Same request shape as /api/whoami, deliberately no `env`
-  // parameter — see that route's comment. `getAllBoards()` throws on a malformed board file
-  // (server/storage.ts), UPSTREAM of the pure cardSignal, so the try/catch has to live here.
+  // Card-empty check for scripts/corral-claude-hook.sh — see
+  // docs/adr/0007-a-pane-side-hook-becomes-an-http-client-of-the-corral-api.md. Same request shape
+  // as /api/whoami, deliberately no `env` parameter — see that route's comment. Deliberately WITHOUT
+  // whoami's two escalating recoveries on a resolution miss (re-poll, then pane lookup): this route
+  // is hit on every prompt of every session, so it reads the current snapshot once and answers —
+  // the cost is a miss on a session's very first prompt, recovered on the next one. `getAllBoards()`
+  // throws on a malformed board file (server/storage.ts), UPSTREAM of the pure cardSignal, so the
+  // try/catch has to live here.
   app.get("/api/card-signal", (c) => {
     const paneId = c.req.query("paneId");
     if (paneId === undefined) {

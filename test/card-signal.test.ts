@@ -73,7 +73,6 @@ describe("cardSignal", () => {
 
   it("reports not-empty when the pane is ambiguous across environments", () => {
     const twoLocal = ENVIRONMENTS.filter((e) => e.kind === "local").slice(0, 2);
-    if (twoLocal.length < 2) return; // this machine's config carries only one local env
     const rows = twoLocal.map((e) => row({ env: e.id, cwd: "/nomatch" }));
     const out = cardSignal([], snapshot(rows), ENVIRONMENTS, { paneId: "w1:p1", cwd: "/other", socket: null });
     expect(out.empty).toBe(false);
