@@ -26,7 +26,15 @@ function quotaFor(kind: LogKind): number {
 }
 
 function capText(text: string): string {
-  return text.length <= LOG_ENTRY_TEXT_MAX ? text : `${text.slice(0, LOG_ENTRY_TEXT_MAX - 1)}…`;
+  if (text.length <= LOG_ENTRY_TEXT_MAX) return text;
+  // Cutting by code unit can land between the two halves of a surrogate pair (an emoji, most CJK
+  // extensions) and store a lone surrogate in the board file. It survives JSON, but every reader
+  // downstream then holds half a character. Step back one unit when the cut lands on a high
+  // surrogate — at most one character shorter than the cap, never longer.
+  const end = LOG_ENTRY_TEXT_MAX - 1;
+  const lastCode = text.charCodeAt(end - 1);
+  const cut = lastCode >= 0xd800 && lastCode <= 0xdbff ? end - 1 : end;
+  return `${text.slice(0, cut)}…`;
 }
 
 /**

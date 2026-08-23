@@ -6,6 +6,7 @@ import {
   LOG_ENTRY_TEXT_MAX,
   LogKindSchema,
   defaultColumnId,
+  generateLogEntryId,
   generateTaskId,
   nowSecs,
   slugifyBoardId,
@@ -873,10 +874,16 @@ export function createApi(opts: {
     if (!opts.envs.find((e) => e.id === env)) {
       return c.json({ error: { code: "validation", message: "unknown env" } }, 400);
     }
+    // The same guard the neighbouring body routes apply (attach, detach). Nothing here does more than
+    // a snapshot lookup with it, but an exception to that discipline is an exception someone has to
+    // explain later.
+    if (!PANE_RE.test(paneId)) {
+      return c.json({ error: { code: "validation", message: "bad paneId" } }, 400);
+    }
     const sessions = opts.poller.getSnapshot().sessions;
     const at = Date.now();
 
-    type AppendResult = "not_found" | "not_on_card" | { readonly logCount: number };
+    type AppendResult = "not_found" | "not_bound" | { readonly logCount: number };
     const result = await opts.storage.withBoard<AppendResult>(bid, (existing) => {
       if (existing === null) return { board: null, result: "not_found" };
       const idx = existing.tasks.findIndex((t) => t.id === tid);
@@ -885,8 +892,8 @@ export function createApi(opts: {
       // Resolved from the card INSIDE the lock: a card the caller is not on is a refusal, and a card
       // deleted between the read and the write is a 404 rather than a silent write.
       const source = resolveLogSource(old, { env, paneId }, sessions);
-      if (source === null) return { board: existing, result: "not_on_card" };
-      const log = appendLogEntry(old.log, { at, source, kind, text });
+      if (source === null) return { board: existing, result: "not_bound" };
+      const log = appendLogEntry(old.log, { id: generateLogEntryId(), at, source, kind, text });
       const tasks = [...existing.tasks];
       // `updatedAt` deliberately untouched: it means "the task statement changed", and the board sorts
       // on createdAt anyway. A note is not an edit of the task.
@@ -894,9 +901,12 @@ export function createApi(opts: {
       return { board: { ...existing, tasks }, result: { logCount: log.length } };
     });
     if (result === "not_found") return c.json({ error: { code: "not_found" } }, 404);
-    if (result === "not_on_card") {
+    if (result === "not_bound") {
+      // "not bound to THAT card", never "may not write to another card": appending to another card is
+      // an ADD, which the invariant permits — it is unavailable only because this route resolves the
+      // writer from the target card's own links and nothing yet resolves a session bound elsewhere.
       return c.json({
-        error: { code: "not_on_card", message: "this session is not attached to that card — a session appends only to its own card" },
+        error: { code: "not_bound", message: "this session is not bound to that card — appending from a session bound elsewhere is not available yet" },
       }, 403);
     }
     return c.json({ ok: true, at, logCount: result.logCount }, 201);

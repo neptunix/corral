@@ -77,8 +77,25 @@ export const LOG_ENTRY_TEXT_MAX = 400;
 // written before the cap existed into an unloadable board. The 400-character cap lives on the write
 // path (server/task-log.ts).
 export const LogEntrySchema = z.object({
-  // Epoch MILLIS, unlike the task's createdAt/updatedAt (seconds): a burst of system entries lands
-  // inside one second and the log is ordered, so second resolution would erase the order it records.
+  /**
+   * A stable identity for one entry. `at` cannot serve as one: closing every session on a card is N
+   * separate requests, each stamping its own clock read, and two can land in the same millisecond —
+   * so a reader keying on the timestamp would collapse them.
+   *
+   * Added now rather than when a reader needs one, because this is data on disk: once entries exist
+   * without an id, every reader carries a branch for them forever. The default is a FUNCTION so a
+   * hand-edited entry missing the field still loads — that id is fresh on each parse rather than
+   * stable, which is the honest answer for a value nobody wrote.
+   */
+  id: z.string().default(() => generateLogEntryId()),
+  /**
+   * Epoch MILLIS — unlike the task's `createdAt`/`updatedAt`, which are SECONDS (`nowSecs`).
+   *
+   * Deliberate: a burst of entries lands inside one second and the log is ordered, so second
+   * resolution would erase the order it records. The mismatch is the trap, which is why it is stated
+   * here and pinned by a test: `lastLogAt` (millis) sits beside `updatedAt` (seconds) on the same
+   * object, and anything converting between them needs the factor of 1000.
+   */
   at: z.number(),
   source: LogSourceSchema,
   kind: LogKindSchema,
@@ -268,6 +285,12 @@ export function slugifyBoardId(label: string): string {
 
 export function generateTaskId(): string {
   return `t_${nanoid(7)}`;
+}
+
+// Short: it identifies an entry within one card's log, never across boards — unlike a task id, which
+// is a REST path segment.
+export function generateLogEntryId(): string {
+  return nanoid(8);
 }
 
 export function generateColumnId(): string {

@@ -30,7 +30,7 @@ const resolved: WhoamiResponse = {
 };
 
 function entry(over: Partial<LogEntry> = {}): LogEntry {
-  return { at: 1_700_000_000_000, source: { sessionId: SID, name: "worker-a" }, kind: "note", text: "decided X", ...over };
+  return { id: "e1", at: 1_700_000_000_000, source: { sessionId: SID, name: "worker-a" }, kind: "note", text: "decided X", ...over };
 }
 
 function boardWith(log: readonly LogEntry[]): Board {

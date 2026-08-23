@@ -96,6 +96,7 @@ describe("POST /api/boards/:bid/tasks/:tid/log", () => {
     expect(log).toHaveLength(1);
     expect(log[0]?.text).toBe("decided X because Y");
     expect(log[0]?.kind).toBe("note");
+    expect(log[0]?.id).not.toBe("");
     expect(log[0]?.at).toBeGreaterThanOrEqual(before);
   });
 
@@ -126,7 +127,7 @@ describe("POST /api/boards/:bid/tasks/:tid/log", () => {
     expect(storedLog(storage)[0]?.source).toEqual({ sessionId: null, name: "stored-name" });
   });
 
-  it("refuses a session that is not on the card, and writes nothing", async () => {
+  it("refuses a session bound to no card here, and writes nothing", async () => {
     const { app, storage } = makeApi([row({ paneId: "w1:p9", sessionId: null })]);
 
     const res = await app.request(

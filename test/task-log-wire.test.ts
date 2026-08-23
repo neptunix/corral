@@ -16,7 +16,7 @@ import { buildWhoami } from "../server/whoami.ts";
 const SID = "11111111-2222-3333-4444-555555555555";
 
 function entry(at: number, text: string): LogEntry {
-  return { at, source: { sessionId: SID, name: "worker-a" }, kind: "note", text };
+  return { id: `e${String(at)}`, at, source: { sessionId: SID, name: "worker-a" }, kind: "note", text };
 }
 
 const LOG: LogEntry[] = [entry(100, "first"), entry(200, "second")];

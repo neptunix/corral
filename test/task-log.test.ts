@@ -1,12 +1,12 @@
 import type { LogEntry, LogKind } from "@shared/board-schema.ts";
-import { LOG_ENTRY_TEXT_MAX } from "@shared/board-schema.ts";
+import { LOG_ENTRY_TEXT_MAX, LogEntrySchema, nowSecs } from "@shared/board-schema.ts";
 import { describe, expect, it } from "vitest";
 
 
 import { appendLogEntry, LOG_NOTE_QUOTA, LOG_SYSTEM_QUOTA } from "../server/task-log.ts";
 
 function entry(kind: LogKind, text: string, at: number): LogEntry {
-  return { at, source: { sessionId: null, name: "s" }, kind, text };
+  return { id: `e${String(at)}`, at, source: { sessionId: null, name: "s" }, kind, text };
 }
 
 function appendAll(seed: readonly LogEntry[], entries: readonly LogEntry[]): LogEntry[] {
@@ -65,5 +65,47 @@ describe("task log entry truncation", () => {
     const [stored] = appendLogEntry([], entry("note", exact, 1));
 
     expect(stored?.text).toBe(exact);
+  });
+});
+
+describe("task log entry ids", () => {
+  it("heals an entry stored without an id rather than refusing to load the board", () => {
+    const parsed = LogEntrySchema.parse({ at: 1, source: "operator", kind: "note", text: "x" });
+    expect(parsed.id).not.toBe("");
+  });
+
+  it("gives two entries written in the same millisecond distinct ids", () => {
+    // `at` is not a key: closing every session on a card is N requests, each stamping its own clock
+    // read, and two can land in the same millisecond.
+    const a = LogEntrySchema.parse({ at: 5, source: "corral", kind: "session_closed", text: "a" });
+    const b = LogEntrySchema.parse({ at: 5, source: "corral", kind: "session_closed", text: "b" });
+    expect(a.id).not.toBe(b.id);
+  });
+});
+
+describe("task log time base", () => {
+  // `at` is MILLIS while the task's createdAt/updatedAt are SECONDS, and both are bare numbers, so
+  // nothing but this test stands between a reader and a missing factor of 1000. Pinned because
+  // `lastLogAt` (millis) is served beside `updatedAt` (seconds) on the same object.
+  it("stamps `at` in epoch millis, three orders of magnitude above the task's seconds", () => {
+    const nowMs = Date.now();
+    const [stored] = appendLogEntry([], entry("note", "x", nowMs));
+
+    expect(stored?.at).toBe(nowMs);
+    expect(stored?.at).toBeGreaterThan(nowSecs() * 100);
+    // A seconds value would be ~1.7e9; a millis value is ~1.7e12.
+    expect(String(stored?.at ?? 0)).toHaveLength(String(nowSecs()).length + 3);
+  });
+});
+
+describe("task log entry truncation — multi-byte text", () => {
+  it("never stores half of a surrogate pair when the cut lands inside one", () => {
+    // "😀" is two UTF-16 code units, so a cap at an odd offset can split it.
+    const text = "a".repeat(LOG_ENTRY_TEXT_MAX - 2) + "😀😀";
+    const [stored] = appendLogEntry([], entry("note", text, 1));
+
+    expect(stored?.text.length).toBeLessThanOrEqual(LOG_ENTRY_TEXT_MAX);
+    // A high surrogate with no low surrogate after it — half a character.
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(stored?.text ?? "")).toBe(false);
   });
 });
