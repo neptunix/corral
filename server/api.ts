@@ -10,6 +10,7 @@ import {
   nowSecs,
   slugifyBoardId,
   sortTasks,
+  toBoardFrame,
 } from "@shared/board-schema.ts";
 import type { DiagnosticsSnapshot } from "@shared/diagnostics-schema";
 import { emptyDiagnostics } from "@shared/diagnostics-schema";
@@ -105,8 +106,10 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
 
   const enrichedTasks: EnrichedTask[] = sortTasks(board.tasks).map((task) => ({
     // An EXPLICIT field list, not `...task`: this frame goes to every open board on every poll tick,
-    // and a spread would put the whole log on every one of them. The two counters are what the board
-    // badges a card from; the log itself is fetched on demand when a card is opened. A field added to
+    // and a spread would put the whole log on every one of them. The two counters are the frame's
+    // whole account of the log — enough for a board to badge a card without carrying the entries.
+    // NOTHING IN THE WEB READS THEM YET; the badge is a later change, and this is the shape it needs
+    // rather than a claim that it exists. A field added to
     // TaskSchema and not added here never reaches the web — the same deliberate trade LiveSessionData
     // already makes, and the reason it is worth it is that the omission that matters is the silent one
     // in the other direction.
@@ -176,7 +179,7 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
     // Same reason as the explicit list above, and not redundant with it: `board` carries its own copy
     // of the task list, so leaving it whole would ship every log on every tick through the other half
     // of the frame.
-    board: { ...board, tasks: board.tasks.map(({ log: _log, ...rest }) => rest) },
+    board: toBoardFrame(board),
     tasks: enrichedTasks,
     unassigned: buildUnassigned(storage, snapshot),
     envs: snapshot.envs,
@@ -677,7 +680,10 @@ export function createApi(opts: {
 
   app.get("/api/boards", (c) => {
     if (opts.storage === undefined) return c.json({ error: { code: "no_storage" } }, 503);
-    return c.json(opts.storage.getAllBoards());
+    // Log-free, exactly as the stream frame is: the web re-fetches this list on mount and after every
+    // task mutation, and the MCP parses it for the fleet digest and the bind picker — none of them
+    // read an entry. `GET /api/boards/:bid` below is the read that carries the log.
+    return c.json(opts.storage.getAllBoards().map(toBoardFrame));
   });
 
   app.post("/api/boards", async (c) => {

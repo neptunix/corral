@@ -1,5 +1,5 @@
 import type { Board } from "@shared/board-schema.ts";
-import { BoardSchema } from "@shared/board-schema.ts";
+import { BoardSchema, LOG_ENTRY_TEXT_MAX } from "@shared/board-schema.ts";
 import type { SessionRow, Snapshot } from "@shared/schema";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,6 +7,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { ENVIRONMENTS } from "../environments.ts";
+import { createClient } from "../mcp/client.ts";
 import { createApi } from "../server/api.ts";
 import type { Poller } from "../server/poller.ts";
 import { createStorage } from "../server/storage.ts";
@@ -137,6 +138,29 @@ describe("POST /api/boards/:bid/tasks/:tid/log", () => {
     expect(storedLog(storage)).toHaveLength(0);
   });
 
+  // The rule that actually protects the card, and the one a naive env+paneId comparison would get
+  // wrong: a link carrying a sessionId binds THAT session, not whoever now holds its pane. Without
+  // this pair, the refusal test above passes against an implementation that only matches the pane —
+  // under which a fresh session inheriting a pane writes onto the previous session's card.
+  it("refuses a different session that inherited the bound pane", async () => {
+    const OTHER = "99999999-2222-3333-4444-555555555555";
+    const { app, storage } = makeApi([row({ sessionId: OTHER })]);
+
+    const res = await app.request("/api/boards/b/tasks/t_abcdefg/log", appendBody());
+
+    expect(res.status).toBe(403);
+    expect(storedLog(storage)).toHaveLength(0);
+  });
+
+  it("accepts the bound session after a herdr restart moved it to another pane", async () => {
+    const { app, storage } = makeApi([row({ paneId: "w1:p7" })]);
+
+    const res = await app.request("/api/boards/b/tasks/t_abcdefg/log", appendBody({ paneId: "w1:p7" }));
+
+    expect(res.status).toBe(201);
+    expect(storedLog(storage)).toHaveLength(1);
+  });
+
   it("404s on an unknown card rather than writing anywhere", async () => {
     const { app } = makeApi([row()]);
 
@@ -145,12 +169,34 @@ describe("POST /api/boards/:bid/tasks/:tid/log", () => {
     expect(res.status).toBe(404);
   });
 
-  it("refuses an empty note and a kind outside the enum", async () => {
+  it("refuses an empty note, a kind outside the enum, an unknown env, and an oversized body", async () => {
     const { app, storage } = makeApi([row()]);
+    const post = async (over: Record<string, unknown>): Promise<number> =>
+      (await app.request("/api/boards/b/tasks/t_abcdefg/log", appendBody(over))).status;
 
-    expect((await app.request("/api/boards/b/tasks/t_abcdefg/log", appendBody({ text: "   " }))).status).toBe(400);
-    expect((await app.request("/api/boards/b/tasks/t_abcdefg/log", appendBody({ kind: "decision" }))).status).toBe(400);
+    expect(await post({ text: "   " })).toBe(400);
+    expect(await post({ kind: "decision" })).toBe(400);
+    // A session may only name an environment corral actually serves.
+    expect(await post({ env: "nope" })).toBe(400);
+    // The stored text is truncated, but the BODY cap is what bounds the work one request can force.
+    expect(await post({ text: "x".repeat(LOG_ENTRY_TEXT_MAX * 20 + 1) })).toBe(400);
     expect(storedLog(storage)).toHaveLength(0);
+  });
+
+  // The client and the route are only ever exercised apart — the route test builds its own body, the
+  // tool tests stub the client. Renaming a response field would leave both green and break every real
+  // corral_task_log call, so this drives the real client against the real route.
+  it("round-trips through the MCP client against the real route", async () => {
+    const { app } = makeApi([row()]);
+    // The client only ever passes a string URL; Hono's `request` takes the same.
+    const client = createClient("http://corral.test", async (input, init) =>
+      app.request(input instanceof URL ? input.toString() : input, init));
+
+    const res = await client.appendLog({
+      boardId: "b", taskId: "t_abcdefg", env: "work-local", paneId: "w1:p1", text: "decided X",
+    });
+
+    expect(res).toEqual({ ok: true, at: expect.any(Number), logCount: 1 });
   });
 
   it("loses nothing when two sessions append at once", async () => {

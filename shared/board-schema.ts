@@ -173,7 +173,9 @@ export const EnrichedSessionLinkSchema = SessionLinkSchema.extend({
 });
 
 // Built on TaskFrameSchema, NOT on TaskSchema: extending the latter would inherit `log` silently and
-// put the whole log back on every frame. The two counters are what the board badges a card from.
+// put the whole log back on every frame. The two counters are what a board badge would read instead
+// of the entries — no web code reads them yet, so they are the shape that change needs, not evidence
+// that it has landed.
 export const EnrichedTaskSchema = TaskFrameSchema.extend({
   sessions: z.array(EnrichedSessionLinkSchema),
   logCount: z.number().default(0),
@@ -202,6 +204,16 @@ export const GlobalStateSchema = z.object({
 export const BoardFrameSchema = BoardSchema.extend({
   tasks: z.array(TaskFrameSchema).default([]),
 });
+
+/**
+ * Drop every task's log. ONE implementation for the two wire paths that must not carry it — the
+ * stream frame and the board LIST — because they are far apart in server/api.ts and a second copy is
+ * how one of them silently stops stripping. `GET /api/boards/:bid` deliberately does NOT use this:
+ * the single-board read is where a card's log is fetched from.
+ */
+export function toBoardFrame(board: Board): BoardFrame {
+  return { ...board, tasks: board.tasks.map(({ log: _log, ...rest }) => rest) };
+}
 
 export const BoardStateSchema = GlobalStateSchema.extend({
   board: BoardFrameSchema,

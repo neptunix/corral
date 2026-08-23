@@ -129,12 +129,9 @@ describe("corral client", () => {
     });
     const boards = await client.boards();
     expect(new URL(urls[0] ?? "").pathname).toBe("/api/boards");
-    // The body above is what a corral server predating the log field answers with; `log` heals to []
-    // on parse rather than failing validation, which is the whole point of the default.
-    expect(boards).toEqual([{
-      ...boardsBody[0],
-      tasks: [{ ...boardsBody[0]?.tasks[0], log: [] }],
-    }]);
+    // The list route serves boards log-free, and the client parses them that way — a `log` in the body
+    // is stripped rather than carried into this process.
+    expect(boards).toEqual(boardsBody);
   });
 
   it("spawns a session with the exact method, URL, and JSON body the route expects", async () => {

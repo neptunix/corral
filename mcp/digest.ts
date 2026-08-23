@@ -1,5 +1,5 @@
 import { linkBindsSession } from "../server/session-binding.ts";
-import type { Board, LogEntry, LogKind, LogSource } from "../shared/board-schema.ts";
+import type { BoardFrame, LogEntry, LogKind, LogSource } from "../shared/board-schema.ts";
 import { closedColumnIds } from "../shared/board-schema.ts";
 import type { AttentionMap, RecapSource, SessionRow, Snapshot } from "../shared/schema.ts";
 import type { WhoamiResolved, WhoamiTask } from "../shared/whoami-schema.ts";
@@ -47,18 +47,18 @@ const DESCRIPTION_LINE_PREFIX = "  | ";
 // copying text back) can tell which block a line came out of. Same defence as above: every rendered
 // log line carries it, so no entry can produce a raw line that reads as one of formatCardDetail's
 // structural rows.
-const LOG_LINE_PREFIX = "  > ";
+export const LOG_LINE_PREFIX = "  > ";
 // How many entries a read returns. The log is capped at 200 stored entries; this is the reading
 // window, and the count of what it leaves out is stated rather than implied.
 export const LOG_ENTRIES_SHOWN = 40;
 // Per-line cap INSIDE an entry — the same reason `description` has one. An entry's text is capped at
 // 400 characters on the write path, so this only bites on an entry stored before that cap existed.
-const LOG_ENTRY_LINE_MAX = 400;
+export const LOG_ENTRY_LINE_MAX = 400;
 // The budget for the whole rendered log block, gutter and headers included. 40 entries × 400
 // characters is ~16 KB of another session's prose; with a header line each and the gutter, 20 000 is
 // the ceiling that block cannot exceed. Stated here rather than left implied by the caps upstream:
 // this is the one number a reader can check the reply against.
-const LOG_BLOCK_MAX = 20_000;
+export const LOG_BLOCK_MAX = 20_000;
 // Shared cap for the smaller single-line identity fields (cwd, statusline account, env error text)
 // that aren't task prose but still carry their own truncation budget.
 const IDENTITY_FIELD_MAX = 200;
@@ -158,7 +158,7 @@ function ageMinutes(sinceMs: number, nowMs: number): string {
 // fourth local re-encoding of this rule (this function, pre-fix) dropped the "no sessionId" guard
 // on the paneId arm, so a link with a stable sessionId still claimed whatever session now occupied
 // its stored pane after a same-pane `/new`. See linkBindsSession's own comment for the full rationale.
-function cardFor(boards: readonly Board[], r: SessionRow): string {
+function cardFor(boards: readonly BoardFrame[], r: SessionRow): string {
   for (const board of boards) {
     for (const task of board.tasks) {
       const hit = task.sessions.some((l) =>
@@ -204,7 +204,7 @@ function recapLabel(source: RecapSource | null): string {
 export function formatFleet(input: {
   readonly snapshot: Snapshot;
   readonly attention: AttentionMap;
-  readonly boards: readonly Board[];
+  readonly boards: readonly BoardFrame[];
   readonly filter: FleetFilter;
   readonly env: string | null;
   readonly limit: number;
@@ -288,7 +288,7 @@ interface PickerRow {
 }
 
 /** The card list `corral_task_bind` returns when called with no arguments. Closed columns are hidden. */
-export function formatTaskPicker(boards: readonly Board[]): string {
+export function formatTaskPicker(boards: readonly BoardFrame[]): string {
   const rows: PickerRow[] = [];
   for (const board of boards) {
     const closed = closedColumnIds(board.columns);
@@ -509,6 +509,20 @@ export function formatSpawnReply(a: {
  * which card it belongs to. Deliberately does NOT repeat formatWhoami's column list or attached-
  * session list — a session calling this already has both, and re-rendering would charge it twice.
  */
+/**
+ * The log as formatWhoami renders it: a SIZE, never entries — the counterpart to describePreview.
+ *
+ * This is the line the counters on WhoamiTask exist for. The model never sees the payload, only this
+ * rendering, so a counter carried all the way here and not printed reaches nobody: a session could
+ * not tell a card holding 37 entries from an empty one, which is the whole reason whoami carries the
+ * counters at all.
+ */
+function describeLog(t: WhoamiTask): string {
+  if (t.logCount === 0) return "log: (empty) — corral_task_log appends to it";
+  const last = t.lastLogAt === null ? "" : `, last ${formatAt(t.lastLogAt)}`;
+  return `log: ${String(t.logCount)} ${t.logCount === 1 ? "entry" : "entries"}${last} — call corral_task_read to read them`;
+}
+
 /** What a card read shows of the log: the window, and what the window leaves out. */
 export interface LogView {
   /** The entries to render, oldest first — already filtered and already windowed by the caller. */
@@ -519,6 +533,13 @@ export interface LogView {
   readonly hidden: number;
   /** The kinds asked for, or null for "everything". */
   readonly kinds: readonly LogKind[] | null;
+  /**
+   * The entries could not be read — `total` then comes from whoami's counter rather than from the
+   * log itself. Load-bearing rather than cosmetic: without it a failed read renders identically to
+   * an empty log, and a session told "no entries" on a card holding forty concludes there is no
+   * history and writes its outcome into `description` — the exact failure the split prevents.
+   */
+  readonly unavailable: boolean;
 }
 
 function formatSource(source: LogSource): string {
@@ -547,6 +568,11 @@ function formatAt(at: number): string {
  */
 function renderLog(view: LogView): string[] {
   const filterNote = view.kinds === null ? "" : ` filtered to ${view.kinds.join(", ")}`;
+  if (view.unavailable) {
+    return [`log: (COULD NOT BE READ — the card holds ${String(view.total)} ${
+      view.total === 1 ? "entry" : "entries"
+    } that are NOT shown here. This is not an empty log; try corral_task_read again.)`];
+  }
   if (view.shown.length === 0) {
     return [`log: (no entries${view.total === 0 ? "" : `${filterNote} — the card holds ${String(view.total)}`})`];
   }
@@ -556,7 +582,10 @@ function renderLog(view: LogView): string[] {
   const push = (line: string): boolean => {
     if (budget <= LOG_LINE_PREFIX.length) return false;
     const full = `${LOG_LINE_PREFIX}${line}`;
-    const kept = truncate(full, Math.min(budget, LOG_ENTRY_LINE_MAX + LOG_LINE_PREFIX.length));
+    // `budget - 1` reserves the newline this line will be joined with. Spending the whole budget on
+    // the text and charging the newline afterwards lets the last line overrun the stated ceiling by
+    // one character — small, but the ceiling is only worth stating if it holds exactly.
+    const kept = truncate(full, Math.min(budget - 1, LOG_ENTRY_LINE_MAX + LOG_LINE_PREFIX.length));
     if (kept !== full) truncated = true;
     lines.push(kept);
     budget -= kept.length + 1; // +1 for the newline `emit` joins with, charged to the same budget
@@ -652,6 +681,7 @@ export function formatWhoami(w: WhoamiResolved): string {
       `card: ${t.boardId}/${t.taskId}  ${t.priority ?? "--"}  ${t.status}  ${title}`,
       columnsLine,
       describePreview(t.description),
+      describeLog(t),
       "sessions on this card:",
       ...shownSessions.map((cs) => {
         const ctx = cs.ctxPct === null ? "—" : `${String(Math.round(cs.ctxPct))}%`;

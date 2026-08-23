@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { BoardSchema, TaskSchema } from "../shared/board-schema.ts";
+import { BoardFrameSchema, BoardSchema, TaskSchema } from "../shared/board-schema.ts";
 import { AttentionMapSchema, SnapshotSchema } from "../shared/schema.ts";
 import { WhoamiResponseSchema } from "../shared/whoami-schema.ts";
 
@@ -94,7 +94,9 @@ export interface CorralClient {
   whoami(q: { paneId: string; cwd: string; socket: string | null }): Promise<z.infer<typeof WhoamiResponseSchema>>;
   attention(): Promise<z.infer<typeof AttentionMapSchema>>;
   state(): Promise<z.infer<typeof SnapshotSchema>>;
-  boards(): Promise<z.infer<typeof BoardSchema>[]>;
+  /** The board LIST, which the route serves log-free — the picker and the fleet digest read titles
+   *  and bindings, never an entry. */
+  boards(): Promise<z.infer<typeof BoardFrameSchema>[]>;
   /** One board, for the card read that needs a task's log. The full-list call would carry every other
    *  board's logs into this process for nothing. */
   board(boardId: string): Promise<z.infer<typeof BoardSchema>>;
@@ -148,7 +150,7 @@ export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralC
     },
     attention: () => request(fetchFn, `${base}/api/attention`, undefined, AttentionMapSchema),
     state: () => request(fetchFn, `${base}/api/state`, undefined, SnapshotSchema),
-    boards: () => request(fetchFn, `${base}/api/boards`, undefined, z.array(BoardSchema)),
+    boards: () => request(fetchFn, `${base}/api/boards`, undefined, z.array(BoardFrameSchema)),
     board: (boardId) => request(fetchFn, `${base}/api/boards/${seg(boardId)}`, undefined, BoardSchema),
     appendLog: (a) =>
       request(

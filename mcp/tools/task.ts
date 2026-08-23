@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { closedColumnIds, LOG_ENTRY_TEXT_MAX } from "../../shared/board-schema.ts";
+import type { LogKind } from "../../shared/board-schema.ts";
+import { closedColumnIds, LOG_ENTRY_TEXT_MAX, LogKindSchema } from "../../shared/board-schema.ts";
 import type { CorralClient, TaskPatch } from "../client.ts";
 import { formatCardDetail, formatStatusRefusal, formatTaskPicker, LOG_ENTRIES_SHOWN, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
 import type { Identity } from "../identity.ts";
@@ -91,22 +92,23 @@ export function bindHandler(deps: TaskDeps, args: BindArgs): Promise<string> {
   });
 }
 
-/** The kinds a session may ask for. `note` is what a model wrote; the rest are corral's own events. */
-export const LOG_KINDS = [
-  "note", "created", "session_spawned", "session_bound", "session_closed", "session_detached", "status_changed",
-] as const;
-
 export interface ReadArgs {
-  readonly kind?: readonly (typeof LOG_KINDS)[number][] | undefined;
+  // Typed from the schema, not from a second hand-written list: a kind added to LogKindSchema and not
+  // here would be silently unselectable through this filter, with no type error to catch it.
+  readonly kind?: readonly LogKind[] | undefined;
 }
 
 export function readHandler(deps: TaskDeps, args: ReadArgs = {}): Promise<string> {
   return runTool(async () => {
     const card = await deps.identity.requireCard();
-    // whoami carries only the log's SIZE, so the entries come from the board read. A board that has
-    // gone missing between the two calls is not worth failing the description read over.
+    // whoami carries only the log's SIZE, so the entries come from a board read. Failing that read is
+    // not worth failing the description read over — but it must not be reported as an empty log
+    // either, so the count from whoami stands in and the reply says the entries are missing.
     const board = await deps.client.board(card.boardId).catch(() => null);
-    const log = board?.tasks.find((t) => t.id === card.taskId)?.log ?? [];
+    if (board === null) {
+      return formatCardDetail(card, { shown: [], total: card.logCount, hidden: 0, kinds: null, unavailable: true });
+    }
+    const log = board.tasks.find((t) => t.id === card.taskId)?.log ?? [];
     const kinds = args.kind === undefined || args.kind.length === 0 ? null : [...args.kind];
     const matched = kinds === null ? log : log.filter((e) => kinds.includes(e.kind));
     const shown = matched.slice(-LOG_ENTRIES_SHOWN);
@@ -115,6 +117,7 @@ export function readHandler(deps: TaskDeps, args: ReadArgs = {}): Promise<string
       total: log.length,
       hidden: matched.length - shown.length,
       kinds,
+      unavailable: false,
     });
   });
 }
@@ -170,7 +173,7 @@ export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string>
  */
 export const TASK_TOOL_DESCRIPTIONS = {
   read:
-    "Read the FULL description of the card THIS session is bound to, plus its log — corral_whoami shows only a one-line description preview and the log's size. Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. The log returns the most recent entries and says how many older ones it left out; `kind` narrows it (pass `note` to skip the session lifecycle lines). Read-only.",
+    "Read the FULL description of the card THIS session is bound to, plus its log — corral_whoami shows only a one-line description preview and the log's size. Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. The log returns the most recent entries and says how many older ones it left out; `kind` narrows it to particular entry kinds. Read-only.",
   log:
     "Append ONE entry to the log of the card THIS session is bound to. The log is APPEND-ONLY and is the card's history, beside `description`, which states the task — writing an outcome into the description destroys the statement of the task, which is what this field exists to prevent. Write an entry when a fact about the task changed that the next session would otherwise have to re-derive: a decision and what it rejected, a limitation or blocker found, a phase finished and what is now true. Do NOT write per-file progress, \"starting work\", a restatement of the diff, or test results — the repository and the PR already record those. One entry, prose, a few sentences; longer text is truncated. The server stamps the time and the writer.",
   update:
@@ -198,8 +201,8 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
       title: "Read this session's card in full",
       description: TASK_TOOL_DESCRIPTIONS.read,
       inputSchema: {
-        kind: z.array(z.enum(LOG_KINDS)).optional().describe(
-          "narrow the log to these kinds; omit for all. `note` is what a session wrote, the rest are corral's own lifecycle events",
+        kind: z.array(LogKindSchema).optional().describe(
+          "narrow the log to these kinds; omit for all. `note` is what a session wrote — the only kind written today. The rest name corral's own lifecycle events and match nothing until corral stamps them.",
         ),
       },
       annotations: { readOnlyHint: true },
