@@ -15,7 +15,7 @@ const resolvedBody: WhoamiResponse = {
   },
   task: {
     boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "T",
-    description: "", status: "doing", priority: null, columns: [{ id: "doing", label: "Doing" }],
+    description: "", status: "doing", priority: null, columns: [{ id: "doing", label: "Doing", closed: false }],
     sessions: [],
   },
   envs: [],

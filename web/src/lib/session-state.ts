@@ -50,6 +50,19 @@ export function sessionStateLabel(s: SessionStateFields | null): string {
 export type SessionStateTone =
   | "working" | "attention" | "idle" | "done" | "unavailable" | "unknown";
 
+// Keyed by tone, NOT by herdr's agent_status — the dot and the label must come from one decision.
+// `unknown` keeps the class the herdr-keyed lookup fell back to, so the closing/resuming transients are
+// not repainted; the values are pinned in test/ui-safety.test.ts. It lives beside the tone rather than
+// in one component because more than one surface paints these dots, and two palettes would drift.
+export const TONE_DOT: Record<SessionStateTone, string> = {
+  working: "bg-emerald-400 light:bg-emerald-600",
+  attention: "bg-red-400 light:bg-red-600",
+  idle: "bg-slate-500",
+  done: "bg-sky-400 light:bg-sky-600",
+  unavailable: "bg-amber-400 light:bg-amber-600",
+  unknown: "bg-slate-500",
+};
+
 /** herdr's `agent_status` vocabulary; anything else (the closing/resuming synthetics) is no claim. */
 function herdrTone(status: string): SessionStateTone {
   if (status === "working") return "working";

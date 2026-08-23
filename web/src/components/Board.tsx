@@ -9,15 +9,17 @@ import {
 } from "@dnd-kit/core";
 import { useDroppable } from "@dnd-kit/core";
 import type { Board as BoardType, BoardState, EnrichedTask, SpawnPreset } from "@shared/board-schema";
-import { defaultColumnId } from "@shared/board-schema";
+import { closedColumnIds, defaultColumnId } from "@shared/board-schema";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import { z } from "zod";
 
+import { CloseCardSessionsModal, type CardSessionOffer } from "./CloseCardSessionsModal";
 import { TaskCard } from "./TaskCard";
 import { TaskEditModal } from "./TaskEditModal";
-import { api } from "../lib/api";
+import { ApiError, api } from "../lib/api";
 import { overrideKey, type OptimisticState } from "../lib/optimistic";
+import { sessionStateLabel, sessionStateTone } from "../lib/session-state";
 
 // Zod schemas for drag data (data.current is Record<string, any>). Only task/column drags remain —
 // session drag-to-attach (the old MiniPool) was removed; sessions attach via "Create task" now.
@@ -107,6 +109,25 @@ function DroppableColumn({ columnId, label, collapsible, tasks, onTaskEdit, onOp
   );
 }
 
+type TaskPatch = Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority">>;
+
+/** Whether a patch would actually change the card. A patch that changes nothing is not worth a write. */
+function changesTask(task: EnrichedTask, patch: TaskPatch): boolean {
+  return (patch.title !== undefined && patch.title !== task.title)
+    || (patch.description !== undefined && patch.description !== task.description)
+    || (patch.status !== undefined && patch.status !== task.status)
+    || (patch.priority !== undefined && patch.priority !== task.priority);
+}
+
+/** A move into a closed column, held unwritten until the operator answers for the sessions on it. */
+interface ClosedMove {
+  readonly taskId: string;
+  readonly taskTitle: string;
+  readonly status: string;
+  readonly columnLabel: string;
+  readonly sessions: readonly CardSessionOffer[];
+}
+
 interface Props {
   readonly boardState: BoardState;
   readonly boards: readonly BoardType[];
@@ -130,6 +151,9 @@ export function Board({
   // Set alongside editingTask only by the fix-issues flow below; TaskEditModal renders it as an
   // ephemeral, unsaved preset ahead of `board.spawnPresets` and pre-selects it. Cleared with the modal.
   const [fixPreset, setFixPreset] = useState<SpawnPreset | null>(null);
+  // A move into a closed column that is waiting to be confirmed, because live sessions are attached.
+  // NOTHING is written while this is set — the card has not moved (see CloseCardSessionsModal).
+  const [pendingMove, setPendingMove] = useState<ClosedMove | null>(null);
 
   // Mutated during render, read inside the effect's async callback below — the "latest ref" pattern.
   // NOT a dependency: reading a fresher board.id at resolve time is the point, not re-running on it.
@@ -174,6 +198,32 @@ export function Board({
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
   );
 
+  // A card landing in a closed column is the operator saying the work is over — the sessions on it
+  // usually are too, but nothing closes them today, so they linger as orphan panes. Ask FIRST: the
+  // status write happens only if they answer, so cancelling leaves the card where it was. Returns the
+  // pending move to confirm, or null when the move needs no question and can just be written.
+  const moveNeedingConfirmation = useCallback((taskId: string, newStatus: string): ClosedMove | null => {
+    if (!closedColumnIds(board.columns).has(newStatus)) return null;
+    const task = tasks.find((t) => t.id === taskId);
+    if (task === undefined) return null;
+    // Detached links are sessions that already ended. Without this filter every card drifting into a
+    // closed column — a tracking strip, an archive — would ask a question with nothing behind it.
+    const live = task.sessions.filter((s) => s.live !== null && !s.live.detached);
+    if (live.length === 0) return null;
+    return {
+      taskId,
+      taskTitle: task.title,
+      status: newStatus,
+      // Snapshotted with the rest: the dialog names the column the card is headed for, which a later
+      // board refresh must not rewrite under it.
+      columnLabel: board.columns.find((c) => c.id === newStatus)?.label ?? newStatus,
+      sessions: live.map((s) => ({
+        env: s.env, paneId: s.paneId, sessionId: s.sessionId, name: s.name,
+        tone: sessionStateTone(s.live), label: sessionStateLabel(s.live),
+      })),
+    };
+  }, [board.columns, tasks]);
+
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     const { active, over } = event;
     if (over === null) return;
@@ -192,6 +242,9 @@ export function Board({
           : "";
 
       if (newColumnId !== "" && tasks.find((t) => t.id === taskId)?.status !== newColumnId) {
+        const pending = moveNeedingConfirmation(taskId, newColumnId);
+        // Nothing is written yet — the card snaps back to its column until the dialog is answered.
+        if (pending !== null) { setPendingMove(pending); return; }
         try {
           await api.tasks.update(board.id, taskId, { status: newColumnId });
         } catch (err) {
@@ -202,7 +255,7 @@ export function Board({
         onBoardStateChange();
       }
     }
-  }, [board.id, tasks, onBoardStateChange]);
+  }, [board.id, tasks, onBoardStateChange, moveNeedingConfirmation]);
 
   const tasksByColumn = new Map<string, EnrichedTask[]>();
   for (const col of board.columns) tasksByColumn.set(col.id, []);
@@ -216,7 +269,23 @@ export function Board({
   // message, instead of closing on a failure it never saw (mirrors BoardSettingsModal's onSave).
   function handleSave(patch: Partial<Pick<EnrichedTask, "title" | "description" | "status" | "priority">>): Promise<void> {
     if (editingTask === null) return Promise.resolve();
-    return api.tasks.update(board.id, editingTask.id, patch).then(() => { onBoardStateChange(); });
+    // The modal submits every field, changed or not, so compare before asking — otherwise renaming a
+    // card that already sits in a closed column would ask about its sessions again.
+    const { id: taskId, status: wasStatus } = editingTask;
+    const pending = patch.status !== undefined && patch.status !== wasStatus
+      ? moveNeedingConfirmation(taskId, patch.status)
+      : null;
+    // Save everything EXCEPT the move when the move needs confirming: dropping the whole save would
+    // throw away title and description edits made in the same submit, which nobody asked about. When
+    // the move is the ONLY change there is nothing left to save — and writing the patch anyway would
+    // bump `updatedAt` on a card that never moved, so cancelling would still have edited it.
+    const immediate = pending === null ? patch : { ...patch, status: wasStatus };
+    const nothingToSave = pending !== null && !changesTask(editingTask, immediate);
+    if (nothingToSave) { setPendingMove(pending); return Promise.resolve(); }
+    return api.tasks.update(board.id, taskId, immediate).then(() => {
+      onBoardStateChange();
+      if (pending !== null) setPendingMove(pending);
+    });
   }
 
   // Same reject-on-refusal contract as onSave. Closing is TaskEditModal's job (it calls onClose once
@@ -256,11 +325,18 @@ export function Board({
     if (key !== null) onMarkOptimistic(key, "closing");
     try {
       await api.tasks.close(board.id, taskId, env, paneId, sessionId);
-      onBoardStateChange();
     } catch (err) {
-      if (key !== null) onClearOptimistic(key);
-      throw err instanceof Error ? err : new Error(String(err));
+      // `no_live_pane` is the END STATE, not a failure: the pane is already gone. Liveness on the
+      // board is up to one poll old, and the session may have been closed from the terminal, from
+      // another tab, or a moment ago from here — so a close arriving late must not report an error
+      // for having got what it asked for. Only refusals about a DIFFERENT session (`pane_reused`) or
+      // a broken request stay errors.
+      if (!(err instanceof ApiError && err.code === "no_live_pane")) {
+        if (key !== null) onClearOptimistic(key);
+        throw err instanceof Error ? err : new Error(String(err));
+      }
     }
+    onBoardStateChange();
   }
 
   // Resume = restart a detached session (`claude --resume <uuid>`), rebinding the link to the new pane,
@@ -328,6 +404,20 @@ export function Board({
           onClose={handleClose}
           initialTab={fixPreset === null ? undefined : "run"}
           extraPreset={fixPreset}
+        />
+      )}
+
+      {pendingMove !== null && (
+        <CloseCardSessionsModal
+          taskTitle={pendingMove.taskTitle}
+          columnLabel={pendingMove.columnLabel}
+          sessions={pendingMove.sessions}
+          onMove={async () => {
+            await api.tasks.update(board.id, pendingMove.taskId, { status: pendingMove.status });
+            onBoardStateChange();
+          }}
+          onCloseOne={(s) => handleCloseSession(pendingMove.taskId, s.env, s.paneId, s.sessionId)}
+          onDismiss={() => { setPendingMove(null); }}
         />
       )}
     </>

@@ -59,6 +59,14 @@ Write at real boundaries — a decision made, a phase finished, a blocker hit �
 per file edited. Move `status` when the work actually changes state; the operator reads column
 position before reading anything else.
 
+**Never into a `(closed)` column on your own judgement** — `corral_whoami` marks them. Between the
+open ones you move freely; the last step out of them you propose and the operator takes. "The work is
+done" is a judgement about yourself that nothing outside you can check, and a card parked in a closed
+column stops being read.
+
+An operator who names the column is making the move themselves — write it without arguing; only
+deciding it for them is forbidden.
+
 `corral_task_read` in the same turn you write, and edit around what it returned.
 
 ## Talking to another session
@@ -142,6 +150,21 @@ Handoff itself follows the procedure below — wait for the operator, never spaw
   answer comes, write it then — that is the whole point. If the operator told you to leave the card
   alone, that is settled and you neither write nor raise it again. Do not re-ask on every turn.
 <!-- card-signal:end -->
+
+## Finishing up
+
+"That's it, wrap up" is one sentence meaning four things — and not a handoff: the work is over, not
+continuing elsewhere. In this order, stopping for an answer at every step after the first:
+
+1. **Write the card** — the outcome, and anything decided here that no durable carrier records.
+   Everything after this can end the session.
+2. **List what the task left lying around** — worktree, branch, scratch files — and ask what to
+   remove. Never remove on your own reading of "wrap up": a worktree can hold work that reached no
+   other carrier, and deleting it is not undoable.
+3. **Offer a column, do not pick one** — the card's columns from `corral_whoami` (see "Keeping the
+   card current").
+4. **Offer `corral_session_close`** — only once they say so. Anything not already on the card is gone
+   the moment it runs.
 
 ## Handing off before context runs out
 

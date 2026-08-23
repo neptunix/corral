@@ -41,3 +41,21 @@ describe("api.diagnostics.refresh", () => {
     await expect(api.diagnostics.refresh()).rejects.toThrow("HTTP 503");
   });
 });
+
+// The board branches on `code`, not on the message: a close that answers "the pane is already gone"
+// is the END STATE, while "the pane now belongs to someone else" is a real refusal. If the client
+// stopped carrying the code, every such close would look like a failure again — and the UI tests,
+// which build their own ApiError, would not notice. This is the only test on the extraction itself.
+describe("api error codes", () => {
+  it("carries the server's error.code onto the rejection", async () => {
+    stubFetch(404, { error: { code: "no_live_pane", message: "pane is not live — nothing to close" } });
+    await expect(api.tasks.close("b1", "t1", "work-local", "w1:p0", null))
+      .rejects.toMatchObject({ code: "no_live_pane", message: "pane is not live — nothing to close" });
+  });
+
+  it("leaves the code null when the body carries none", async () => {
+    stubFetch(404, {});
+    await expect(api.tasks.close("b1", "t1", "work-local", "w1:p0", null))
+      .rejects.toMatchObject({ code: null, message: "HTTP 404" });
+  });
+});
