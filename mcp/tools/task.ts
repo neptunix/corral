@@ -1,8 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { LOG_ENTRY_TEXT_MAX } from "../../server/task-log.ts";
-import { closedColumnIds } from "../../shared/board-schema.ts";
+import { closedColumnIds, LOG_ENTRY_TEXT_MAX } from "../../shared/board-schema.ts";
 import type { CorralClient, TaskPatch } from "../client.ts";
 import { formatCardDetail, formatStatusRefusal, formatTaskPicker, LOG_ENTRIES_SHOWN, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
 import type { Identity } from "../identity.ts";

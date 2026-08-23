@@ -61,6 +61,17 @@ export const LogSourceSchema = z.union([
   z.enum(["corral", "operator"]),
 ]);
 
+/**
+ * One entry's text ceiling, INCLUSIVE of the truncation marker — a stored entry is never longer than
+ * this. A decision with its reasoning fits in 200–300.
+ *
+ * Here rather than beside the eviction logic that enforces it (server/task-log.ts) because the MCP
+ * tool description states the number too, and `shared/` is the only module both sides may import:
+ * reaching into `server/` from `mcp/` for one constant would drag the startup config loader into the
+ * MCP process with it.
+ */
+export const LOG_ENTRY_TEXT_MAX = 400;
+
 // STORED SHAPE — deliberately permissive on `text`, the same reasoning as SpawnPresetSchema and
 // `description`: readBoardFile parses with BoardSchema, so a `.max()` here would turn an entry
 // written before the cap existed into an unloadable board. The 400-character cap lives on the write

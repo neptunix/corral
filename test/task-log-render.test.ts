@@ -108,6 +108,17 @@ describe("formatCardDetail — the log block", () => {
     expect(out).toContain("12 older not shown");
   });
 
+  // The board file is the source here, and a hand edit can put anything in `at`. Formatting must not
+  // take the whole card read down over one unrenderable entry.
+  it("renders an entry whose timestamp is out of range rather than throwing", () => {
+    const out = formatCardDetail(card, {
+      shown: [entry({ at: 1e21, text: "still readable" })], total: 1, hidden: 0, kinds: null,
+    });
+
+    expect(out).toContain("(no time)");
+    expect(out).toContain("still readable");
+  });
+
   it("states an empty log rather than omitting the block", () => {
     expect(formatCardDetail(card, { shown: [], total: 0, hidden: 0, kinds: null })).toContain("log: (no entries)");
   });

@@ -2,13 +2,8 @@ import { normalizeLinkName } from "./link-name.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import { linkBindsSession } from "./session-binding.ts";
 import type { LogEntry, LogKind, LogSource, Task } from "../shared/board-schema.ts";
+import { LOG_ENTRY_TEXT_MAX } from "../shared/board-schema.ts";
 import type { SessionRow } from "../shared/schema.ts";
-
-/**
- * One entry's text ceiling, INCLUSIVE of the truncation marker — a stored entry is never longer than
- * this. A decision with its reasoning fits in 200–300.
- */
-export const LOG_ENTRY_TEXT_MAX = 400;
 
 /**
  * SEPARATE quotas, and that is the whole point rather than a detail.

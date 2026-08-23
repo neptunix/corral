@@ -3,6 +3,7 @@ import {
   type GlobalState, type SessionLink, type Task,
   ColumnSchema,
   DEFAULT_COLUMNS,
+  LOG_ENTRY_TEXT_MAX,
   LogKindSchema,
   defaultColumnId,
   generateTaskId,
@@ -39,7 +40,7 @@ import { composeSessionName, fallbackNamePrefix, NAME_MAX, sanitizeSlug, slugify
 import type { SpawnOpts, SpawnResult } from "./spawn.ts";
 import { aggregateAccounts } from "./statusline.ts";
 import type { Storage } from "./storage.ts";
-import { appendLogEntry, LOG_ENTRY_TEXT_MAX, resolveLogSource } from "./task-log.ts";
+import { appendLogEntry, resolveLogSource } from "./task-log.ts";
 import { readLastActivity, readSessionCwd } from "./transcript.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { writeUploadFile } from "./uploads.ts";

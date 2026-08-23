@@ -1,9 +1,9 @@
 import type { LogEntry, LogKind } from "@shared/board-schema.ts";
+import { LOG_ENTRY_TEXT_MAX } from "@shared/board-schema.ts";
 import { describe, expect, it } from "vitest";
 
-import {
-  appendLogEntry, LOG_ENTRY_TEXT_MAX, LOG_NOTE_QUOTA, LOG_SYSTEM_QUOTA,
-} from "../server/task-log.ts";
+
+import { appendLogEntry, LOG_NOTE_QUOTA, LOG_SYSTEM_QUOTA } from "../server/task-log.ts";
 
 function entry(kind: LogKind, text: string, at: number): LogEntry {
   return { at, source: { sessionId: null, name: "s" }, kind, text };

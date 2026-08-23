@@ -526,10 +526,16 @@ function formatSource(source: LogSource): string {
 }
 
 function formatAt(at: number): string {
+  // `at` is stamped by the server, but this module renders what the BOARD FILE holds — which a hand
+  // edit or an older writer can put anything in, and `toISOString` throws on a value outside the Date
+  // range. A thrown formatter would take the whole card read down over one bad entry, so an
+  // unrenderable timestamp becomes a marker instead.
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return "(no time)";
   // Absolute, not relative: a log is read to reconstruct an order of events, and "14h ago" stops
   // being an answer the moment two sessions compare notes. Minute resolution — the entries are
   // stamped in millis so they sort correctly, not so anyone reads the milliseconds.
-  return new Date(at).toISOString().slice(0, 16).replace("T", " ") + "Z";
+  return `${d.toISOString().slice(0, 16).replace("T", " ")}Z`;
 }
 
 /**
