@@ -1,5 +1,5 @@
 import type { LogEntry, LogKind } from "@shared/board-schema.ts";
-import { LOG_ENTRY_TEXT_MAX, LogEntrySchema, nowSecs } from "@shared/board-schema.ts";
+import { LOG_ENTRY_TEXT_MAX, LogEntrySchema } from "@shared/board-schema.ts";
 import { describe, expect, it } from "vitest";
 
 
@@ -84,17 +84,15 @@ describe("task log entry ids", () => {
 });
 
 describe("task log time base", () => {
-  // `at` is MILLIS while the task's createdAt/updatedAt are SECONDS, and both are bare numbers, so
-  // nothing but this test stands between a reader and a missing factor of 1000. Pinned because
-  // `lastLogAtMs` (millis) is served beside `updatedAt` (seconds) on the same object.
-  it("stamps `at` in epoch millis, three orders of magnitude above the task's seconds", () => {
+  // The UNIT is chosen by the route (server/api.ts) and pinned there — appendLogEntry never stamps a
+  // timestamp, so no assertion here can tell millis from seconds. What this function does owe the
+  // caller is that it does not touch the value it was handed: the log is read in order, and a helper
+  // that rounded or re-stamped `atMs` would reorder entries with nothing else to catch it.
+  it("stores the timestamp it was given, unmodified", () => {
     const nowMs = Date.now();
     const [stored] = appendLogEntry([], entry("note", "x", nowMs));
 
     expect(stored?.atMs).toBe(nowMs);
-    expect(stored?.atMs).toBeGreaterThan(nowSecs() * 100);
-    // A seconds value would be ~1.7e9; a millis value is ~1.7e12.
-    expect(String(stored?.atMs ?? 0)).toHaveLength(String(nowSecs()).length + 3);
   });
 });
 

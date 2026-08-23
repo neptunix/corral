@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import type { LogKind } from "../../shared/board-schema.ts";
-import { closedColumnIds, LOG_ENTRY_TEXT_MAX, LogKindSchema } from "../../shared/board-schema.ts";
+import { closedColumnIds, LOG_ENTRY_BODY_MAX, LOG_ENTRY_TEXT_MAX, LogKindSchema } from "../../shared/board-schema.ts";
 import type { CorralClient, TaskPatch } from "../client.ts";
 import { formatCardDetail, formatStatusRefusal, formatTaskPicker, LOG_ENTRIES_SHOWN, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
 import type { Identity } from "../identity.ts";
@@ -108,7 +108,14 @@ export function readHandler(deps: TaskDeps, args: ReadArgs = {}): Promise<string
     if (board === null) {
       return formatCardDetail(card, { shown: [], total: card.logCount, hidden: 0, kinds: null, unavailable: true });
     }
-    const log = board.tasks.find((t) => t.id === card.taskId)?.log ?? [];
+    // A card that vanished between whoami and this read takes the SAME branch as a failed read, not
+    // the empty-log branch: an empty array here would render as "no entries" on a card that may hold
+    // forty, which is the ambiguity the unavailable flag exists to remove.
+    const task = board.tasks.find((t) => t.id === card.taskId);
+    if (task === undefined) {
+      return formatCardDetail(card, { shown: [], total: card.logCount, hidden: 0, kinds: null, unavailable: true });
+    }
+    const log = task.log;
     const kinds = args.kind === undefined || args.kind.length === 0 ? null : [...args.kind];
     const matched = kinds === null ? log : log.filter((e) => kinds.includes(e.kind));
     const shown = matched.slice(-LOG_ENTRIES_SHOWN);
@@ -177,7 +184,7 @@ export const TASK_TOOL_DESCRIPTIONS = {
   log:
     "Append ONE entry to the log of the card THIS session is bound to. The log is APPEND-ONLY and is the card's history, beside `description`, which states the task — writing an outcome into the description destroys the statement of the task, which is what this field exists to prevent. Write an entry when a fact about the task changed that the next session would otherwise have to re-derive: a decision and what it rejected, a limitation or blocker found, a phase finished and what is now true. Do NOT write per-file progress, \"starting work\", a restatement of the diff, or test results — the repository and the PR already record those. One entry, prose, a few sentences; longer text is truncated. The server stamps the time and the writer.",
   update:
-    "Update the card THIS session is bound to; cannot target another card. `status` is the coarse board state and must be one of the column ids corral_whoami reports. `description` states the TASK and what no durable carrier records — durable means committed to the repo, or the PR itself — so: the problem, what it requires, decisions and why (these stay even after a PR states them), what is verified and what is still assumed, blockers, hazards, and where the code and PR are. Not a log of what you did — files touched, gate runs, review rounds — whatever else records them. Keep it to a screenful — over-long writes are refused. It is a FULL-REPLACEMENT write — read the current value with corral_task_read first and edit around it, or you will silently delete what you never saw.",
+    "Update the card THIS session is bound to; cannot target another card. `status` is the coarse board state and must be one of the column ids corral_whoami reports. `description` states the TASK and what no durable carrier records — durable means committed to the repo, or the PR itself — so: the problem, what it requires, what is verified and what is still assumed, blockers, hazards, and where the code and PR are. What HAPPENED goes to corral_task_log instead — a decision and what it rejected, a limitation found, a phase finished. Not a log of what you did — files touched, gate runs, review rounds — whatever else records them. Keep it to a screenful — over-long writes are refused. It is a FULL-REPLACEMENT write — read the current value with corral_task_read first and edit around it, or you will silently delete what you never saw.",
 } as const;
 
 export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
@@ -216,7 +223,10 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
       title: "Append a note to this session's card",
       description: TASK_TOOL_DESCRIPTIONS.log,
       inputSchema: {
-        text: z.string().min(1).describe(
+        // Bounded HERE as well as at the route, and at the same number: without it a very long paste
+        // is refused by the route's own body bound and the session gets a raw schema error where the
+        // description promised truncation.
+        text: z.string().min(1).max(LOG_ENTRY_BODY_MAX).describe(
           `the note, in prose. Truncated past ${String(LOG_ENTRY_TEXT_MAX)} characters — a decision with its reasoning fits well inside that.`,
         ),
       },

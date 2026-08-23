@@ -83,6 +83,36 @@ describe("the log does not ride the stream frame", () => {
     expect(JSON.stringify(body)).not.toContain("second");
   });
 
+  // The other wire path, and the one the schema comment names beside the frame. Untested, deleting
+  // `.map(toBoardFrame)` from the list route leaves the whole suite green while the board list ships
+  // every card's entries to the web AND into the MCP process. Raw body for the same reason as above.
+  it("keeps the entries off the board LIST as well", async () => {
+    const app = createApi({ poller, envs: ENVIRONMENTS, storage: seedStorage() });
+
+    const res = await app.request("/api/boards");
+    const body: unknown = await res.json();
+
+    expect(JSON.stringify(body)).not.toContain("second");
+    expect(JSON.stringify(body)).toContain("t_abcdefg");
+  });
+
+  // The third client-facing path. A PATCH cannot change the log, so echoing it back is a copy of
+  // another session's prose on a response the web holds as its updated task.
+  it("keeps the entries out of the task PATCH response", async () => {
+    const app = createApi({ poller, envs: ENVIRONMENTS, storage: seedStorage() });
+
+    const res = await app.request("/api/boards/b/tasks/t_abcdefg", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "T2" }),
+    });
+    const body: unknown = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(body)).not.toContain("second");
+    expect(JSON.stringify(body)).toContain("T2");
+  });
+
   it("EnrichedTask has no log field at all", () => {
     const parsed = EnrichedTaskSchema.parse({
       id: "t_abcdefg", title: "T", description: "d", status: "todo", priority: null,

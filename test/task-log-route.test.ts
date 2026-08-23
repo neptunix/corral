@@ -98,6 +98,9 @@ describe("POST /api/boards/:bid/tasks/:tid/log", () => {
     expect(log[0]?.kind).toBe("note");
     expect(log[0]?.id).not.toBe("");
     expect(log[0]?.atMs).toBeGreaterThanOrEqual(before);
+    // The time BASE, pinned where the stamp is actually chosen. A seconds-stamping route (~1.7e9)
+    // fails this; nothing upstream of the route can, because nothing upstream picks the unit.
+    expect(String(log[0]?.atMs ?? 0)).toHaveLength(String(Math.floor(before / 1000)).length + 3);
   });
 
   it("captures the session's own registry name, ungated, over the link's stored one", async () => {
@@ -177,6 +180,12 @@ describe("POST /api/boards/:bid/tasks/:tid/log", () => {
 
     expect(await post({ text: "   " })).toBe(400);
     expect(await post({ kind: "decision" })).toBe(400);
+    // The guard that actually matters, and the one "decision" cannot test: every SYSTEM kind is in
+    // LogKindSchema, so only the route's `.extract(["note"])` refuses it. Without these two, widening
+    // the route to the whole enum leaves the suite green while a session can write a lifecycle line
+    // indistinguishable from one corral stamped.
+    expect(await post({ kind: "session_closed" })).toBe(400);
+    expect(await post({ kind: "created" })).toBe(400);
     // A session may only name an environment corral actually serves.
     expect(await post({ env: "nope" })).toBe(400);
     // The stored text is truncated, but the BODY cap is what bounds the work one request can force.
@@ -207,5 +216,8 @@ describe("POST /api/boards/:bid/tasks/:tid/log", () => {
       app.request("/api/boards/b/tasks/t_abcdefg/log", appendBody({ text: `note ${String(i)}` }))));
 
     expect(storedLog(storage)).toHaveLength(12);
+    // The ids come from the ROUTE's own generator, not from the schema default the unit test covers.
+    // A route stamping one fixed id would pass every other assertion here.
+    expect(new Set(storedLog(storage).map((e) => e.id)).size).toBe(12);
   });
 });

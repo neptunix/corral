@@ -3,7 +3,7 @@ import {
   type GlobalState, type SessionLink, type Task,
   ColumnSchema,
   DEFAULT_COLUMNS,
-  LOG_ENTRY_TEXT_MAX,
+  LOG_ENTRY_BODY_MAX,
   LogKindSchema,
   defaultColumnId,
   generateLogEntryId,
@@ -105,24 +105,18 @@ function buildUnassigned(storage: Storage | undefined, snapshot: Snapshot): Sess
 function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, attention: AttentionMap, diagnostics: DiagnosticsSnapshot): BoardState {
   const index = buildLiveIndex(snapshot.sessions);
 
-  const enrichedTasks: EnrichedTask[] = sortTasks(board.tasks).map((task) => ({
-    // An EXPLICIT field list, not `...task`: this frame goes to every open board on every poll tick,
-    // and a spread would put the whole log on every one of them. The two counters are the frame's
-    // whole account of the log — enough for a board to badge a card without carrying the entries.
-    // NOTHING IN THE WEB READS THEM YET; the badge is a later change, and this is the shape it needs
-    // rather than a claim that it exists. A field added to
-    // TaskSchema and not added here never reaches the web — the same deliberate trade LiveSessionData
-    // already makes, and the reason it is worth it is that the omission that matters is the silent one
-    // in the other direction.
-    id: task.id,
-    title: task.title,
-    description: task.description,
-    status: task.status,
-    priority: task.priority,
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt,
-    logCount: task.log.length,
-    lastLogAtMs: task.log.at(-1)?.atMs ?? null,
+  // `log` is destructured OUT rather than the other fields being listed in: this frame goes to every
+  // open board on every poll tick, and a spread would put the whole log on every one of them. Naming
+  // only what must not ride keeps the omission the compiler checks — EnrichedTaskSchema is
+  // TaskSchema.omit({ log }) extended, so a field added to the card reaches the web without anyone
+  // remembering to add it here, while `log` still cannot. The two counters are the frame's whole
+  // account of the log — enough for a board to badge a card without carrying the entries. NOTHING IN
+  // THE WEB READS THEM YET; the badge is a later change, and this is the shape it needs rather than a
+  // claim that it exists.
+  const enrichedTasks: EnrichedTask[] = sortTasks(board.tasks).map(({ log, ...task }) => ({
+    ...task,
+    logCount: log.length,
+    lastLogAtMs: log.at(-1)?.atMs ?? null,
     sessions: task.sessions.map((link) => {
       // Resolve the live row. When the link carries a stable sessionId, TRUST IT over the stored
       // paneId: a herdr restart reassigns paneIds, so the stored paneId may now belong to a *different*
@@ -267,8 +261,9 @@ const AppendLogBodySchema = z.object({
   kind: LogKindSchema.extract(["note"]),
   // The 400-character cap truncates rather than refusing (server/task-log.ts); this bound only stops
   // an absurd body from being parsed at all, and the min() is what makes "wrote nothing" an error
-  // instead of an entry saying nothing.
-  text: z.string().trim().min(1).max(LOG_ENTRY_TEXT_MAX * 20),
+  // instead of an entry saying nothing. Shared with the MCP tool's own argument bound so the two
+  // refuse at the same size.
+  text: z.string().trim().min(1).max(LOG_ENTRY_BODY_MAX),
   env: z.string(),
   paneId: z.string(),
 });
@@ -821,7 +816,11 @@ export function createApi(opts: {
     });
     if (result === "board_not_found") return c.json({ error: { code: "not_found" } }, 404);
     if (result === "no_columns") return c.json({ error: { code: "validation", message: "board has no columns" } }, 400);
-    return c.json(result.task, 201);
+    // Log-free like every other task-shaped response. A new card's log is empty, so this strips
+    // nothing today — it is here so the rule has no exceptions to remember: `GET /api/boards/:bid`
+    // is the one route that carries a log.
+    const { log: _log, ...frame } = result.task;
+    return c.json(frame, 201);
   });
 
   app.patch("/api/boards/:bid/tasks/:tid", async (c) => {
@@ -854,7 +853,12 @@ export function createApi(opts: {
       return { board: { ...existing, tasks }, result: { found: true, task: updated } };
     });
     if (!result?.found) return c.json({ error: { code: "not_found" } }, 404);
-    return c.json(result.task);
+    // The THIRD client-facing path, and log-free like the other two. A PATCH cannot change the log —
+    // appending has its own route — so echoing it back is a copy nobody asked for on a response the
+    // web holds as its updated task. One-off rather than per-tick, so the cost is not the argument:
+    // the argument is that a card's log is fetched from exactly one place, `GET /api/boards/:bid`.
+    const { log: _log, ...frame } = result.task;
+    return c.json(frame);
   });
 
   // Appending is its own route rather than a field on the task PATCH — see AppendLogBodySchema.
@@ -881,9 +885,8 @@ export function createApi(opts: {
       return c.json({ error: { code: "validation", message: "bad paneId" } }, 400);
     }
     const sessions = opts.poller.getSnapshot().sessions;
-    const atMs = Date.now();
 
-    type AppendResult = "not_found" | "not_bound" | { readonly logCount: number };
+    type AppendResult = "not_found" | "not_bound" | { readonly logCount: number; readonly atMs: number };
     const result = await opts.storage.withBoard<AppendResult>(bid, (existing) => {
       if (existing === null) return { board: null, result: "not_found" };
       const idx = existing.tasks.findIndex((t) => t.id === tid);
@@ -893,12 +896,16 @@ export function createApi(opts: {
       // deleted between the read and the write is a 404 rather than a silent write.
       const source = resolveLogSource(old, { env, paneId }, sessions);
       if (source === null) return { board: existing, result: "not_bound" };
+      // Stamped INSIDE the lock, beside the append it belongs to. Read before it, two requests that
+      // queue on the mutex can be stored in an order their own timestamps contradict — and
+      // `lastLogAtMs`, which reads the last entry, would then report less than the newest entry.
+      const atMs = Date.now();
       const log = appendLogEntry(old.log, { id: generateLogEntryId(), atMs, source, kind, text });
       const tasks = [...existing.tasks];
       // `updatedAt` deliberately untouched: it means "the task statement changed", and the board sorts
       // on createdAt anyway. A note is not an edit of the task.
       tasks[idx] = { ...old, log };
-      return { board: { ...existing, tasks }, result: { logCount: log.length } };
+      return { board: { ...existing, tasks }, result: { logCount: log.length, atMs } };
     });
     if (result === "not_found") return c.json({ error: { code: "not_found" } }, 404);
     if (result === "not_bound") {
@@ -909,7 +916,7 @@ export function createApi(opts: {
         error: { code: "not_bound", message: "this session is not bound to that card — appending from a session bound elsewhere is not available yet" },
       }, 403);
     }
-    return c.json({ ok: true, atMs, logCount: result.logCount }, 201);
+    return c.json({ ok: true, atMs: result.atMs, logCount: result.logCount }, 201);
   });
 
   app.delete("/api/boards/:bid/tasks/:tid", async (c) => {
@@ -1626,7 +1633,8 @@ export function createApi(opts: {
     if (result === "board_not_found") return c.json({ error: { code: "not_found" } }, 404);
     if (result === "conflict") return c.json({ error: { code: "conflict", message: "session already assigned" } }, 409);
     if (result === "no_columns") return c.json({ error: { code: "validation", message: "board has no columns" } }, 400);
-    return c.json(result.task, 201);
+    const { log: _log, ...frame } = result.task;
+    return c.json(frame, 201);
   });
 
   return app;

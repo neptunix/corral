@@ -39,7 +39,8 @@ The card has two fields, and they answer different questions.
 - **`description` — what the task IS.** A FULL-REPLACEMENT write (`corral_task_update`): whatever you
   send replaces the whole field.
 - **`log` — what HAPPENED on the task.** APPEND-ONLY (`corral_task_log`), one entry at a time.
-  Nothing you append can destroy what another session wrote.
+  Nothing you append edits or replaces what another session wrote. It is bounded, not permanent
+  history: the log holds a fixed number of entries and the oldest are dropped once it is full.
 
 Writing an outcome into the description is the failure the split exists to prevent — it overwrites
 the statement of the task with a record of the work, and the next session inherits a card that no
@@ -91,7 +92,7 @@ An operator who names the column is making the move themselves — write it with
 deciding it for them is forbidden.
 
 `corral_task_read` in the same turn you rewrite the description, and edit around what it returned.
-The log needs none of that — appending never touches what is already there.
+The log needs none of that — appending never edits what is already there.
 
 ## Talking to another session
 
@@ -120,6 +121,12 @@ Do not over-verify: send, and let the answer settle it — an unreachable name c
 old, so a session renamed since the last sweep is printed under its old name; the send is the only
 current check. Reach for `ListAgents` when you do not know the name, when two rows share one, or when
 a machine is missing — a Remote Control peer listed there as `offline` has nothing listening.
+
+**A log entry is not a message.** `SendMessage` delivers, within the reach the two markers above
+describe; the log is polled by whoever reads the card next, and **notifies nobody**. That makes it
+the carrier that survives what messaging cannot — an account boundary, a machine with Remote Control
+off, a session that does not exist yet. Write the card for a reader who will arrive later; send a
+message when someone has to know now. Never write an entry and treat it as having told anyone.
 
 **Delivered is not read.** A message is *held* for the receiving operator's hand approval, and
 expires unapproved, when the two sessions' permission modes differ — or when the sender declared none
@@ -202,8 +209,10 @@ usage, so you can notice pressure the operator cannot see and say so:
 **Wait for the answer.** If the operator has their own handoff skill or file convention, use it to
 compose the text and let this procedure carry it. Once they agree:
 
-1. **Write the card first** — everything the next session needs that no durable carrier records:
-   decisions and their reasons, what was ruled out, what is verified versus assumed.
+1. **Write the card first** — everything the next session needs that no durable carrier records.
+   The decisions and what was ruled out go to the log (`corral_task_log`); `corral_task_update` gets
+   what is verified versus assumed, and a corrected `description` only if the task itself turned out
+   to be something else.
 2. **Compose the brief** (below) and `corral_spawn` it. The new session lands on the same card and
    starts from that text. By default it lands in a tab beside this one — same workspace, so a
    worktree checkout stays visible. Pass `repo` only to send it to a *different* project: it then

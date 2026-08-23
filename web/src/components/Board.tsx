@@ -185,10 +185,9 @@ export function Board({
         // it, or true unmount) is safe to fall through: React 18 no-ops a state update on an unmounted
         // component, and a re-run with the SAME board must still open the modal.
         if (latestBoardId.current !== requestBoardId) return;
-        // The created task is the STORED shape; the modal wants the frame shape, which carries the log
-        // as two counters rather than the entries.
-        const { log, ...rest } = created;
-        setEditingTask({ ...rest, sessions: [], logCount: log.length, lastLogAtMs: log.at(-1)?.atMs ?? null });
+        // The route answers with the frame shape, which carries the log as two counters. A card this
+        // call just created has no entries, so both are their empty values.
+        setEditingTask({ ...created, sessions: [], logCount: 0, lastLogAtMs: null });
         setFixPreset(request.preset);
       })
       .catch((err: unknown) => {

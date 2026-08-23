@@ -48,11 +48,21 @@ const DESCRIPTION_LINE_PREFIX = "  | ";
 // log line carries it, so no entry can produce a raw line that reads as one of formatCardDetail's
 // structural rows.
 export const LOG_LINE_PREFIX = "  > ";
+// The two marks that follow the gutter, and the reason a header cannot be forged from an entry's own
+// text: a header is the ONLY line whose gutter is followed by `# `, and every text line's gutter is
+// followed by two spaces — a mark this function writes, never the caller. Indentation alone was not
+// enough. Without the distinct mark a note whose text contains `[note] <time>  operator` renders one
+// line that differs from a real header by two spaces, which attributes that session's prose to the
+// operator, the highest-trust source here.
+export const LOG_ENTRY_HEADER_MARK = "# ";
+export const LOG_ENTRY_TEXT_MARK = "  ";
 // How many entries a read returns. The log is capped at 200 stored entries; this is the reading
 // window, and the count of what it leaves out is stated rather than implied.
 export const LOG_ENTRIES_SHOWN = 40;
-// Per-line cap INSIDE an entry — the same reason `description` has one. An entry's text is capped at
-// 400 characters on the write path, so this only bites on an entry stored before that cap existed.
+// Per-line cap INSIDE an entry, measured on the TEXT — the gutter and the mark are charged on top,
+// because they are this module's own framing and not part of what the writer wrote. Measuring the
+// rendered line instead made an entry stored at exactly the write cap render as cut and flipped the
+// block's TRUNCATED flag, which is the one signal a reader has for "did I see all of it".
 export const LOG_ENTRY_LINE_MAX = 400;
 // The budget for the whole rendered log block, gutter and headers included. 40 entries × 400
 // characters is ~16 KB of another session's prose; with a header line each and the gutter, 20 000 is
@@ -579,31 +589,37 @@ function renderLog(view: LogView): string[] {
   const lines: string[] = [];
   let budget = LOG_BLOCK_MAX;
   let truncated = false;
-  const push = (line: string): boolean => {
-    if (budget <= LOG_LINE_PREFIX.length) return false;
-    const full = `${LOG_LINE_PREFIX}${line}`;
+  // `mark` is always one of this module's two literals, never anything derived from an entry — that
+  // is what makes the header shape unreachable from a caller's text. The per-line cap measures
+  // `line` alone, so the gutter and the mark never eat into what the writer wrote.
+  const push = (mark: string, line: string): boolean => {
+    const gutter = `${LOG_LINE_PREFIX}${mark}`;
+    if (budget <= gutter.length) return false;
+    const full = `${gutter}${line}`;
     // `budget - 1` reserves the newline this line will be joined with. Spending the whole budget on
     // the text and charging the newline afterwards lets the last line overrun the stated ceiling by
     // one character — small, but the ceiling is only worth stating if it holds exactly.
-    const kept = truncate(full, Math.min(budget - 1, LOG_ENTRY_LINE_MAX + LOG_LINE_PREFIX.length));
+    const kept = truncate(full, Math.min(budget - 1, LOG_ENTRY_LINE_MAX + gutter.length));
     if (kept !== full) truncated = true;
     lines.push(kept);
     budget -= kept.length + 1; // +1 for the newline `emit` joins with, charged to the same budget
     return true;
   };
   for (const e of view.shown) {
-    // The entry's own header carries kind, time and who wrote it; the text follows on its own lines,
-    // so a text line can never be mistaken for the header of the next entry.
-    if (!push(`[${e.kind}] ${formatAt(e.atMs)}  ${formatSource(e.source)}`)) { truncated = true; break; }
+    // The entry's own header carries kind, time and who wrote it, behind a mark no text line can
+    // carry; the text follows on its own lines behind the other mark.
+    if (!push(LOG_ENTRY_HEADER_MARK, `[${e.kind}] ${formatAt(e.atMs)}  ${formatSource(e.source)}`)) { truncated = true; break; }
     let stopped = false;
     for (const line of splitLines(e.text)) {
-      if (!push(`  ${line}`)) { stopped = true; break; }
+      if (!push(LOG_ENTRY_TEXT_MARK, line)) { stopped = true; break; }
     }
     if (stopped) { truncated = true; break; }
   }
+  // The two marks are stated to the CONSUMER, not just enforced here: a reader that cannot tell a
+  // header from quoted text gains nothing from the header being unforgeable.
   const header = `log (${String(view.total)} entries on the card${filterNote}; showing ${String(view.shown.length)}${
     view.hidden > 0 ? `, ${String(view.hidden)} older not shown` : ""
-  }${truncated ? ", TRUNCATED" : ""}; each line below carries a leading "${LOG_LINE_PREFIX}" added by this tool):`;
+  }${truncated ? ", TRUNCATED" : ""}; every line below is prefixed by this tool — "${LOG_LINE_PREFIX}${LOG_ENTRY_HEADER_MARK}" starts an entry header corral wrote, "${LOG_LINE_PREFIX}${LOG_ENTRY_TEXT_MARK}" starts that entry's own text):`;
   return [
     header,
     ...lines,

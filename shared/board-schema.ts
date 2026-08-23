@@ -72,6 +72,15 @@ export const LogSourceSchema = z.union([
  */
 export const LOG_ENTRY_TEXT_MAX = 400;
 
+/**
+ * The largest body the append route will parse, and the same bound the MCP tool applies to its own
+ * argument. Well above the stored cap: text between the two is TRUNCATED, which is what the tool
+ * promises; text above it is refused, because a megabyte of prose is a mistake and not a long note.
+ * One constant so the tool refuses in its own words instead of relaying a schema error from the
+ * route.
+ */
+export const LOG_ENTRY_BODY_MAX = LOG_ENTRY_TEXT_MAX * 20;
+
 // STORED SHAPE — deliberately permissive on `text`, the same reasoning as SpawnPresetSchema and
 // `description`: readBoardFile parses with BoardSchema, so a `.max()` here would turn an entry
 // written before the cap existed into an unloadable board. The 400-character cap lives on the write
