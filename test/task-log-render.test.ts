@@ -13,7 +13,7 @@ const card: WhoamiTask = {
   boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
   description: "why and how", status: "doing", priority: "p1",
   columns: [{ id: "doing", label: "Doing", closed: false }],
-  sessions: [], logCount: 0, lastLogAt: null,
+  sessions: [], logCount: 0, lastLogAtMs: null,
 };
 
 const resolved: WhoamiResponse = {
@@ -30,7 +30,7 @@ const resolved: WhoamiResponse = {
 };
 
 function entry(over: Partial<LogEntry> = {}): LogEntry {
-  return { id: "e1", at: 1_700_000_000_000, source: { sessionId: SID, name: "worker-a" }, kind: "note", text: "decided X", ...over };
+  return { id: "e1", atMs: 1_700_000_000_000, source: { sessionId: SID, name: "worker-a" }, kind: "note", text: "decided X", ...over };
 }
 
 function boardWith(log: readonly LogEntry[]): Board {
@@ -49,7 +49,7 @@ function stub(over: Partial<CorralClient>): CorralClient {
     whoami: async () => resolved,
     attention: async () => ({}),
     board: async () => { throw new Error("unused"); },
-    appendLog: async () => ({ ok: true, at: 1, logCount: 1 }),
+    appendLog: async () => ({ ok: true, atMs: 1, logCount: 1 }),
     state: async () => ({ envs: {}, sessions: [] }),
     boards: async () => [],
     patchTask: async () => { throw new Error("unused"); },
@@ -115,7 +115,7 @@ describe("formatCardDetail — the log block", () => {
   // take the whole card read down over one unrenderable entry.
   it("renders an entry whose timestamp is out of range rather than throwing", () => {
     const out = formatCardDetail(card, {
-      shown: [entry({ at: 1e21, text: "still readable" })], total: 1, hidden: 0, kinds: null, unavailable: false,
+      shown: [entry({ atMs: 1e21, text: "still readable" })], total: 1, hidden: 0, kinds: null, unavailable: false,
     });
 
     expect(out).toContain("(no time)");
@@ -159,7 +159,7 @@ describe("formatCardDetail — the log block", () => {
 // nobody.
 describe("formatWhoami — the log's size", () => {
   it("reports the count and the last entry's time, and points at the read tool", () => {
-    const out = formatWhoami({ ...resolved, task: { ...card, logCount: 37, lastLogAt: 1_700_000_000_000 }, resolved: true });
+    const out = formatWhoami({ ...resolved, task: { ...card, logCount: 37, lastLogAtMs: 1_700_000_000_000 }, resolved: true });
 
     expect(out).toContain("log: 37 entries");
     expect(out).toContain("corral_task_read");
@@ -202,7 +202,7 @@ describe("corral_task_read with a log", () => {
   // failure the two-field split exists to prevent. whoami's counter is what stands in.
   it("says the log could not be read rather than reporting it empty", async () => {
     const client = stub({
-      whoami: async () => ({ ...resolved, task: { ...card, logCount: 40, lastLogAt: 99 } }),
+      whoami: async () => ({ ...resolved, task: { ...card, logCount: 40, lastLogAtMs: 99 } }),
       board: async () => { throw new Error("gone"); },
     });
 
@@ -219,7 +219,7 @@ describe("corral_task_log", () => {
   it("appends to the caller's own card and reports the new size", async () => {
     const seen: unknown[] = [];
     const client = stub({
-      appendLog: async (a) => { seen.push(a); return { ok: true, at: 5, logCount: 3 }; },
+      appendLog: async (a) => { seen.push(a); return { ok: true, atMs: 5, logCount: 3 }; },
     });
 
     const out = await logHandler({ client, identity: createIdentity(client, ctx) }, { text: "decided X" });
@@ -233,7 +233,7 @@ describe("corral_task_log", () => {
     const calls: unknown[] = [];
     const client = stub({
       whoami: async () => ({ ...resolved, task: null }),
-      appendLog: async (a) => { calls.push(a); return { ok: true, at: 1, logCount: 1 }; },
+      appendLog: async (a) => { calls.push(a); return { ok: true, atMs: 1, logCount: 1 }; },
     });
 
     const out = await logHandler({ client, identity: createIdentity(client, ctx) }, { text: "x" });

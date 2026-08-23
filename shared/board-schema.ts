@@ -93,10 +93,10 @@ export const LogEntrySchema = z.object({
    *
    * Deliberate: a burst of entries lands inside one second and the log is ordered, so second
    * resolution would erase the order it records. The mismatch is the trap, which is why it is stated
-   * here and pinned by a test: `lastLogAt` (millis) sits beside `updatedAt` (seconds) on the same
+   * here and pinned by a test: `lastLogAtMs` (millis) sits beside `updatedAt` (seconds) on the same
    * object, and anything converting between them needs the factor of 1000.
    */
-  at: z.number(),
+  atMs: z.number(),
   source: LogSourceSchema,
   kind: LogKindSchema,
   text: z.string(),
@@ -128,7 +128,7 @@ export const TaskSchema = z.object({
  *
  * `BoardState` is re-sent on every poll tick to every open board, so a growing log would be
  * retransmitted whole on each one. The log is fetched by a dedicated read when a card is opened;
- * the frame carries only `logCount`/`lastLogAt` (EnrichedTaskSchema) so the board can badge a card.
+ * the frame carries only `logCount`/`lastLogAtMs` (EnrichedTaskSchema) so the board can badge a card.
  *
  * This fixes the WIRE, not the parse: `buildUnassigned` re-reads and re-parses every board file on
  * every tick, and the log lives inside TaskSchema, so it is parsed there regardless. That cost is
@@ -196,7 +196,7 @@ export const EnrichedSessionLinkSchema = SessionLinkSchema.extend({
 export const EnrichedTaskSchema = TaskFrameSchema.extend({
   sessions: z.array(EnrichedSessionLinkSchema),
   logCount: z.number().default(0),
-  lastLogAt: z.number().nullable().default(null),
+  lastLogAtMs: z.number().nullable().default(null),
 });
 
 // The board-independent slice of a stream frame. `/api/stream` with no (or an unknown) board sends

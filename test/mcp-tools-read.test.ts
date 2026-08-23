@@ -28,7 +28,7 @@ function stub(over: Partial<CorralClient>): CorralClient {
     whoami: async () => resolved,
     attention: async () => ({}),
     board: async () => { throw new Error("unused"); },
-    appendLog: async () => ({ ok: true, at: 1, logCount: 1 }),
+    appendLog: async () => ({ ok: true, atMs: 1, logCount: 1 }),
     state: async () => ({ envs: {}, sessions: [] }),
     boards: async () => [],
     patchTask: async () => { throw new Error("unused"); },
@@ -97,7 +97,7 @@ describe("readHandler", () => {
     boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
     description, status: "doing", priority: null,
     columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
-    sessions: [], logCount: 0, lastLogAt: null,
+    sessions: [], logCount: 0, lastLogAtMs: null,
   };
 
   it("returns the bound card's full description, past whoami's preview budget", async () => {

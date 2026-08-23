@@ -188,7 +188,7 @@ export function Board({
         // The created task is the STORED shape; the modal wants the frame shape, which carries the log
         // as two counters rather than the entries.
         const { log, ...rest } = created;
-        setEditingTask({ ...rest, sessions: [], logCount: log.length, lastLogAt: log.at(-1)?.at ?? null });
+        setEditingTask({ ...rest, sessions: [], logCount: log.length, lastLogAtMs: log.at(-1)?.atMs ?? null });
         setFixPreset(request.preset);
       })
       .catch((err: unknown) => {

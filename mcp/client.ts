@@ -127,7 +127,7 @@ const SpawnResultSchema = z.object({
 // its entry landed on a card that already holds N.
 const AppendLogResultSchema = z.object({
   ok: z.boolean(),
-  at: z.number(),
+  atMs: z.number(),
   logCount: z.number(),
 });
 const SpawnTargetsSchema = z.object({

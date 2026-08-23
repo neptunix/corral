@@ -30,7 +30,7 @@ function makeTask(overrides: Partial<EnrichedTask> = {}): EnrichedTask {
     createdAt: 0,
     updatedAt: 0,
     logCount: 0,
-    lastLogAt: null,
+    lastLogAtMs: null,
     ...overrides,
   };
 }

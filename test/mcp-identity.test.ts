@@ -16,7 +16,7 @@ const resolvedBody: WhoamiResponse = {
   task: {
     boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "T",
     description: "", status: "doing", priority: null, columns: [{ id: "doing", label: "Doing", closed: false }],
-    sessions: [], logCount: 0, lastLogAt: null,
+    sessions: [], logCount: 0, lastLogAtMs: null,
   },
   envs: [],
 };
@@ -26,7 +26,7 @@ function client(body: WhoamiResponse, counter?: { n: number }): CorralClient {
     whoami: async () => { if (counter !== undefined) counter.n += 1; return body; },
     attention: async () => ({}),
     board: async () => { throw new Error("unused"); },
-    appendLog: async () => ({ ok: true, at: 1, logCount: 1 }),
+    appendLog: async () => ({ ok: true, atMs: 1, logCount: 1 }),
     state: async () => ({ envs: {}, sessions: [] }),
     boards: async () => [],
     patchTask: async () => { throw new Error("unused"); },

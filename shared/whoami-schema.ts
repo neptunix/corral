@@ -72,7 +72,7 @@ export const WhoamiTaskSchema = z.object({
    * otherwise fail validation on every card read.
    */
   logCount: z.number().default(0),
-  lastLogAt: z.number().nullable().default(null),
+  lastLogAtMs: z.number().nullable().default(null),
 });
 
 export const WhoamiSessionSchema = z.object({

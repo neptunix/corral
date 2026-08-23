@@ -519,7 +519,7 @@ export function formatSpawnReply(a: {
  */
 function describeLog(t: WhoamiTask): string {
   if (t.logCount === 0) return "log: (empty) — corral_task_log appends to it";
-  const last = t.lastLogAt === null ? "" : `, last ${formatAt(t.lastLogAt)}`;
+  const last = t.lastLogAtMs === null ? "" : `, last ${formatAt(t.lastLogAtMs)}`;
   return `log: ${String(t.logCount)} ${t.logCount === 1 ? "entry" : "entries"}${last} — call corral_task_read to read them`;
 }
 
@@ -546,12 +546,12 @@ function formatSource(source: LogSource): string {
   return typeof source === "string" ? source : source.name;
 }
 
-function formatAt(at: number): string {
+function formatAt(atMs: number): string {
   // `at` is stamped by the server, but this module renders what the BOARD FILE holds — which a hand
   // edit or an older writer can put anything in, and `toISOString` throws on a value outside the Date
   // range. A thrown formatter would take the whole card read down over one bad entry, so an
   // unrenderable timestamp becomes a marker instead.
-  const d = new Date(at);
+  const d = new Date(atMs);
   if (Number.isNaN(d.getTime())) return "(no time)";
   // Absolute, not relative: a log is read to reconstruct an order of events, and "14h ago" stops
   // being an answer the moment two sessions compare notes. Minute resolution — the entries are
@@ -594,7 +594,7 @@ function renderLog(view: LogView): string[] {
   for (const e of view.shown) {
     // The entry's own header carries kind, time and who wrote it; the text follows on its own lines,
     // so a text line can never be mistaken for the header of the next entry.
-    if (!push(`[${e.kind}] ${formatAt(e.at)}  ${formatSource(e.source)}`)) { truncated = true; break; }
+    if (!push(`[${e.kind}] ${formatAt(e.atMs)}  ${formatSource(e.source)}`)) { truncated = true; break; }
     let stopped = false;
     for (const line of splitLines(e.text)) {
       if (!push(`  ${line}`)) { stopped = true; break; }

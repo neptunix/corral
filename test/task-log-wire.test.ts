@@ -16,7 +16,7 @@ import { buildWhoami } from "../server/whoami.ts";
 const SID = "11111111-2222-3333-4444-555555555555";
 
 function entry(at: number, text: string): LogEntry {
-  return { id: `e${String(at)}`, at, source: { sessionId: SID, name: "worker-a" }, kind: "note", text };
+  return { id: `e${String(at)}`, atMs: at, source: { sessionId: SID, name: "worker-a" }, kind: "note", text };
 }
 
 const LOG: LogEntry[] = [entry(100, "first"), entry(200, "second")];
@@ -69,7 +69,7 @@ const poller: Poller = {
 };
 
 describe("the log does not ride the stream frame", () => {
-  it("serves logCount and lastLogAt instead of the entries, in both halves of the frame", async () => {
+  it("serves logCount and lastLogAtMs instead of the entries, in both halves of the frame", async () => {
     const app = createApi({ poller, envs: ENVIRONMENTS, storage: seedStorage() });
 
     const res = await app.request("/api/state?board=b");
@@ -77,7 +77,7 @@ describe("the log does not ride the stream frame", () => {
     const state = BoardStateSchema.parse(body);
 
     expect(state.tasks[0]?.logCount).toBe(2);
-    expect(state.tasks[0]?.lastLogAt).toBe(200);
+    expect(state.tasks[0]?.lastLogAtMs).toBe(200);
     // The raw body, not the parsed value: the schema strips unknown keys, so parsing first would
     // hide a log that really was sent.
     expect(JSON.stringify(body)).not.toContain("second");
@@ -86,7 +86,7 @@ describe("the log does not ride the stream frame", () => {
   it("EnrichedTask has no log field at all", () => {
     const parsed = EnrichedTaskSchema.parse({
       id: "t_abcdefg", title: "T", description: "d", status: "todo", priority: null,
-      createdAt: 1, updatedAt: 2, sessions: [], log: LOG, logCount: 2, lastLogAt: 200,
+      createdAt: 1, updatedAt: 2, sessions: [], log: LOG, logCount: 2, lastLogAtMs: 200,
     });
     expect(Object.keys(parsed)).not.toContain("log");
   });
@@ -102,7 +102,7 @@ describe("whoami carries the log's existence", () => {
     expect(out.resolved).toBe(true);
     const task = out.resolved ? out.task : null;
     expect(task?.logCount).toBe(2);
-    expect(task?.lastLogAt).toBe(200);
+    expect(task?.lastLogAtMs).toBe(200);
   });
 
   it("defaults the counters when an older corral server omits them", () => {
@@ -111,6 +111,6 @@ describe("whoami carries the log's existence", () => {
       status: "todo", priority: null, columns: [], sessions: [],
     });
     expect(parsed.logCount).toBe(0);
-    expect(parsed.lastLogAt).toBeNull();
+    expect(parsed.lastLogAtMs).toBeNull();
   });
 });

@@ -89,7 +89,7 @@ describe("POST /api/boards/:bid/tasks/:tid/log", () => {
     const { app, storage } = makeApi([row()]);
     const before = Date.now();
 
-    const res = await app.request("/api/boards/b/tasks/t_abcdefg/log", appendBody({ at: 5 }));
+    const res = await app.request("/api/boards/b/tasks/t_abcdefg/log", appendBody({ atMs: 5 }));
 
     expect(res.status).toBe(201);
     const log = storedLog(storage);
@@ -97,7 +97,7 @@ describe("POST /api/boards/:bid/tasks/:tid/log", () => {
     expect(log[0]?.text).toBe("decided X because Y");
     expect(log[0]?.kind).toBe("note");
     expect(log[0]?.id).not.toBe("");
-    expect(log[0]?.at).toBeGreaterThanOrEqual(before);
+    expect(log[0]?.atMs).toBeGreaterThanOrEqual(before);
   });
 
   it("captures the session's own registry name, ungated, over the link's stored one", async () => {
@@ -197,7 +197,7 @@ describe("POST /api/boards/:bid/tasks/:tid/log", () => {
       boardId: "b", taskId: "t_abcdefg", env: "work-local", paneId: "w1:p1", text: "decided X",
     });
 
-    expect(res).toEqual({ ok: true, at: expect.any(Number), logCount: 1 });
+    expect(res).toEqual({ ok: true, atMs: expect.any(Number), logCount: 1 });
   });
 
   it("loses nothing when two sessions append at once", async () => {

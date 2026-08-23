@@ -122,7 +122,7 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     logCount: task.log.length,
-    lastLogAt: task.log.at(-1)?.at ?? null,
+    lastLogAtMs: task.log.at(-1)?.atMs ?? null,
     sessions: task.sessions.map((link) => {
       // Resolve the live row. When the link carries a stable sessionId, TRUST IT over the stored
       // paneId: a herdr restart reassigns paneIds, so the stored paneId may now belong to a *different*
@@ -881,7 +881,7 @@ export function createApi(opts: {
       return c.json({ error: { code: "validation", message: "bad paneId" } }, 400);
     }
     const sessions = opts.poller.getSnapshot().sessions;
-    const at = Date.now();
+    const atMs = Date.now();
 
     type AppendResult = "not_found" | "not_bound" | { readonly logCount: number };
     const result = await opts.storage.withBoard<AppendResult>(bid, (existing) => {
@@ -893,7 +893,7 @@ export function createApi(opts: {
       // deleted between the read and the write is a 404 rather than a silent write.
       const source = resolveLogSource(old, { env, paneId }, sessions);
       if (source === null) return { board: existing, result: "not_bound" };
-      const log = appendLogEntry(old.log, { id: generateLogEntryId(), at, source, kind, text });
+      const log = appendLogEntry(old.log, { id: generateLogEntryId(), atMs, source, kind, text });
       const tasks = [...existing.tasks];
       // `updatedAt` deliberately untouched: it means "the task statement changed", and the board sorts
       // on createdAt anyway. A note is not an edit of the task.
@@ -909,7 +909,7 @@ export function createApi(opts: {
         error: { code: "not_bound", message: "this session is not bound to that card — appending from a session bound elsewhere is not available yet" },
       }, 403);
     }
-    return c.json({ ok: true, at, logCount: result.logCount }, 201);
+    return c.json({ ok: true, atMs, logCount: result.logCount }, 201);
   });
 
   app.delete("/api/boards/:bid/tasks/:tid", async (c) => {

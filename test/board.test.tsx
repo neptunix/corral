@@ -29,7 +29,7 @@ function makeBoard(overrides: Partial<BoardType> = {}): BoardType {
 function makeTask(overrides: Partial<EnrichedTask> = {}): EnrichedTask {
   return {
     id: "t_new1", title: "Fix 1 corral issue", description: "", status: "c1", priority: null,
-    sessions: [], createdAt: 0, updatedAt: 0, logCount: 0, lastLogAt: null, ...overrides,
+    sessions: [], createdAt: 0, updatedAt: 0, logCount: 0, lastLogAtMs: null, ...overrides,
   };
 }
 

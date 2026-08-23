@@ -50,7 +50,7 @@ function makeBoard(overrides: Partial<Board> = {}): Board {
 function makeTask(): EnrichedTask {
   return {
     id: "t_abc1234", title: "Original title", description: "", status: "c1",
-    priority: null, sessions: [], createdAt: 0, updatedAt: 0, logCount: 0, lastLogAt: null,
+    priority: null, sessions: [], createdAt: 0, updatedAt: 0, logCount: 0, lastLogAtMs: null,
   };
 }
 
