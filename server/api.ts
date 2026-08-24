@@ -1098,6 +1098,7 @@ export function createApi(opts: {
   // never closed out from under a stranger.
   app.post("/api/boards/:bid/tasks/:tid/sessions/:env/:paneId/close", async (c) => {
     if (opts.storage === undefined) return c.json({ error: { code: "no_storage" } }, 503);
+    const storage = opts.storage; // captured so the stampClosed closure keeps the narrowed type
     const bid = c.req.param("bid");
     if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
     const tid = c.req.param("tid");
@@ -1131,9 +1132,7 @@ export function createApi(opts: {
     }
     // The one board write close makes (§13a lists it as a stamping route): the LINK is untouched — the
     // card still renders detached and stays resumable — but a session_closed entry records the suspend.
-    // Stamped once the guards have PROVEN the pane is ours, so a refused close leaves no false entry,
-    // and before the deferred self-close returns, so a session closing itself still lands its own line.
-    await opts.storage.withBoard(bid, (existing) => {
+    const stampClosed = (): Promise<void> => storage.withBoard(bid, (existing) => {
       if (existing === null) return { board: null, result: undefined };
       const tIdx = existing.tasks.findIndex((t) => t.id === tid);
       const t = tIdx === -1 ? undefined : existing.tasks[tIdx];
@@ -1147,6 +1146,9 @@ export function createApi(opts: {
     // runs EVERY guard above, responds, and only then closes the pane on a short unref'd timer.
     // Post-response failures are logged only; the zombie reaper collects any straggler tab.
     if (c.req.query("deferred") === "1") {
+      // Stamped BEFORE the response here, because the deferred kill happens after it and the caller
+      // may be closing itself — there is no later moment this route still runs to record the suspend.
+      await stampClosed();
       setTimeout(() => {
         closePaneFn(env, paneId).catch((err: unknown) => {
           console.warn(`[close] deferred close of ${env.id}:${paneId} failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1157,8 +1159,11 @@ export function createApi(opts: {
     try {
       await closePaneFn(env, paneId);
     } catch (err) {
+      // Stamp only on the sync path's SUCCESS: a failed close returns 502 and must not leave the
+      // append-only log claiming a session was suspended that is still live.
       return c.json({ error: { code: "close_failed", message: err instanceof Error ? err.message : String(err) } }, 502);
     }
+    await stampClosed();
     return c.json({ ok: true });
   });
 

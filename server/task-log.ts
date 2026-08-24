@@ -71,7 +71,7 @@ export function appendLogEntry(log: readonly LogEntry[], entry: LogEntry): LogEn
  * label: the log records what the session was called when it wrote, and a derived name is the honest
  * answer to that. It is still normalized, because it is stored.
  */
-export function sourceForLink(link: SessionLink, sessions: readonly SessionRow[]): LogSource {
+function sourceForLink(link: SessionLink, sessions: readonly SessionRow[]): LogSource {
   const row = resolveLiveRow(link, buildLiveIndex(sessions));
   const claudeName = row?.claudeName === null || row?.claudeName === undefined ? "" : normalizeLinkName(row.claudeName);
   return {
@@ -123,8 +123,10 @@ export function resolveWriter(
  * Stamp one of corral's own lifecycle entries on a task. Called INSIDE the board's `withBoard`
  * callback, so the clock is read under the same lock that orders the entries.
  */
-export function stampSystem(task: Task, kind: Exclude<LogKind, "note">, text: string, source: LogSource = "corral"): Task {
-  const entry: LogEntry = { id: generateLogEntryId(), atMs: Date.now(), source, kind, text };
+export function stampSystem(task: Task, kind: Exclude<LogKind, "note">, text: string): Task {
+  // `source` is always the literal `corral`: a lifecycle entry is corral recording its own action,
+  // and the session it concerns is named in `text` via sessionRef, not in the source.
+  const entry: LogEntry = { id: generateLogEntryId(), atMs: Date.now(), source: "corral", kind, text };
   return { ...task, log: appendLogEntry(task.log, entry) };
 }
 

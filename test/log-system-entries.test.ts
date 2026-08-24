@@ -144,6 +144,17 @@ describe("created — provenance is the first log entry, never the description",
     expect(entries[0]).toMatchObject({ kind: "created", source: "corral", text: "card created" });
   });
 
+  it("falls back to the raw env:paneId key when the creator's coordinates resolve to no card", async () => {
+    // Coordinates present, but the pane is bound to no card anywhere — the middle branch between a
+    // named creator and the web add. The entry must name the key, never crash or say "undefined".
+    const { app, storage } = makeApi([board([])], [row({ paneId: "w1:p9", sessionId: null })]);
+
+    const res = await app.request("/api/boards/b/tasks", json({ title: "Orphan", env: "work-local", paneId: "w1:p9" }));
+    const created = await res.json() as { id: string };
+
+    expect(log(storage, "b", created.id)[0]?.text).toBe("created by work-local:w1:p9");
+  });
+
   it("keeps the created entry off the create RESPONSE — the log rides one route only", async () => {
     const { app } = makeApi([board([])], []);
     const res = await app.request("/api/boards/b/tasks", json({ title: "x", env: "work-local", paneId: "w1:p1" }));
@@ -227,6 +238,23 @@ describe("session_spawned / session_closed", () => {
 
     const entries = log(storage, "b", "t_aaaaaaa");
     expect(entries.some((e) => e.kind === "session_spawned" && e.source === "corral")).toBe(true);
+  });
+
+  it("stamps NO session_spawned when the spawn is idempotent (an existing pane is adopted, not launched)", async () => {
+    const SID2 = "22222222-2222-3333-4444-555555555555";
+    // The card already carries the link the idempotent spawn will re-point to; the pane is live.
+    const existing = link({ paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1", sessionId: SID2 });
+    const spawn: SpawnFn = vi.fn(async () => ({ ...spawnResult, idempotent: true }));
+    const { app, storage } = makeApi(
+      [board([task({ id: "t_aaaaaaa", sessions: [existing] })])],
+      [row({ paneId: "w1:p2", sessionId: SID2 })],
+      { spawn },
+    );
+
+    const res = await app.request("/api/boards/b/tasks/t_aaaaaaa/spawn", json({ env: "work-local", brief: "go", repo: "corral" }));
+    expect(res.status).toBe(200);
+    // A wrong impl that hoisted the stamp out of the "new session" arm would emit a spurious line here.
+    expect(log(storage, "b", "t_aaaaaaa").some((e) => e.kind === "session_spawned")).toBe(false);
   });
 
   it("stamps session_closed while KEEPING the link (suspend, not destroy)", async () => {
