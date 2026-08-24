@@ -12,7 +12,13 @@ description: Use when this session runs under corral (the corral_* MCP tools exi
 - **Column ids exist only on the bound card.** An unbound session sees none, and they are per board,
   not global — so a status value cannot be guessed before binding.
 - **There is no "list all boards" tool.** `corral_task_bind` with no arguments is the only listing,
-  and it hides cards in closed columns. A card you cannot see there cannot be bound to.
+  and it hides cards in closed columns. A card you cannot see there cannot be bound to. To survey ONE
+  board including its closed-column cards — how you find a session still running behind a closed card —
+  use `corral_board_read`.
+- **A card is addressed by `{boardId, taskId}` together, never a bare `taskId`.** A task id is a
+  nanoid unique only within its board. `corral_task_read`, `corral_task_log` and `corral_spawn` default
+  to this session's own card and take an optional `{boardId, taskId}` to reach another; you learn
+  another card's `boardId` from the no-argument `corral_task_bind` listing or `corral_board_read`.
 - **`corral_whoami`'s description counts are a heuristic, not proof.** An edit that preserves both the
   length and the line count is invisible in the preview, and the write path has no concurrency check.
   Use the counts to skip a redundant re-read; never to license a full-replacement write.
@@ -30,7 +36,8 @@ description: Use when this session runs under corral (the corral_* MCP tools exi
 2. **Bound** → the card is the assignment. `corral_task_read` for its description — the task — and its
    log — what has already happened on it. Start from both, not from zero.
 3. **Unbound** → `corral_task_bind` with no arguments, then bind to the card this work belongs to. If
-   nothing fits, say so and ask — the tools cannot create a card.
+   no card fits and the work is a genuinely new task, `corral_task_create` makes one — it does not
+   bind or spawn; bind to it afterwards. When in doubt whether a new card is wanted, ask.
 
 ## Keeping the card current
 
@@ -41,6 +48,10 @@ The card has two fields, and they answer different questions.
 - **`log` — what HAPPENED on the task.** APPEND-ONLY (`corral_task_log`), one entry at a time.
   Nothing you append edits or replaces what another session wrote. It is bounded, not permanent
   history: the log holds a fixed number of entries and the oldest are dropped once it is full.
+  Corral also stamps its own lifecycle entries here (a card created, a session spawned/bound/closed,
+  a status change); `corral_task_read`'s `kind` filter pulls the notes back out of that noise. You may
+  append to ANOTHER card's log (`corral_task_log` with its `{boardId, taskId}`) even though you can
+  only rewrite your own — adding to a card you are not bound to is allowed; changing it is not.
 
 Writing an outcome into the description is the failure the split exists to prevent — it overwrites
 the statement of the task with a record of the work, and the next session inherits a card that no

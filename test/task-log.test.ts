@@ -1,9 +1,9 @@
-import type { LogEntry, LogKind } from "@shared/board-schema.ts";
+import type { LogEntry, LogKind, SessionLink } from "@shared/board-schema.ts";
 import { LOG_ENTRY_TEXT_MAX, LogEntrySchema } from "@shared/board-schema.ts";
+import type { SessionRow } from "@shared/schema";
 import { describe, expect, it } from "vitest";
 
-
-import { appendLogEntry, LOG_NOTE_QUOTA, LOG_SYSTEM_QUOTA } from "../server/task-log.ts";
+import { appendLogEntry, LOG_NOTE_QUOTA, LOG_SYSTEM_QUOTA, resolveWriter, sessionRef, stampSystem } from "../server/task-log.ts";
 
 function entry(kind: LogKind, text: string, at: number): LogEntry {
   return { id: `e${String(at)}`, atMs: at, source: { sessionId: null, name: "s" }, kind, text };
@@ -105,5 +105,74 @@ describe("task log entry truncation — multi-byte text", () => {
     expect(stored?.text.length).toBeLessThanOrEqual(LOG_ENTRY_TEXT_MAX);
     // A high surrogate with no low surrogate after it — half a character.
     expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(stored?.text ?? "")).toBe(false);
+  });
+});
+
+function baseTask(log: readonly LogEntry[] = []): Parameters<typeof stampSystem>[0] {
+  return { id: "t_aaaaaaa", title: "T", description: "", status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 2, log: [...log] };
+}
+
+describe("stampSystem", () => {
+  it("appends a corral-sourced system entry", () => {
+    const out = stampSystem(baseTask(), "created", "card created");
+    expect(out.log).toHaveLength(1);
+    expect(out.log[0]).toMatchObject({ kind: "created", source: "corral", text: "card created" });
+  });
+
+  it("evicts against the SYSTEM quota, leaving notes untouched", () => {
+    // A card already at its note quota plus one system entry; a burst of system stamps must evict
+    // only system entries — the failure separate quotas exist to prevent.
+    const seed = appendAll([], [
+      ...Array.from({ length: LOG_NOTE_QUOTA }, (_, i) => entry("note", `n${String(i)}`, i)),
+    ]);
+    let task = baseTask(seed);
+    for (let i = 0; i < LOG_SYSTEM_QUOTA + 5; i++) task = stampSystem(task, "session_bound", `b${String(i)}`);
+    expect(task.log.filter((e) => e.kind === "note")).toHaveLength(LOG_NOTE_QUOTA);
+    expect(task.log.filter((e) => e.kind !== "note")).toHaveLength(LOG_SYSTEM_QUOTA);
+  });
+});
+
+function liveRow(over: Partial<SessionRow> = {}): SessionRow {
+  return {
+    env: "work-local", paneId: "w1:p1", status: "working", agent: "claude", cwd: "/repo",
+    tab: "t", workspace: "w", tabId: "tab1", workspaceId: "ws1", sessionId: null,
+    recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null,
+    statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null,
+    registryStatus: null, claudeName: null, claudeNameUserSet: null, ...over,
+  };
+}
+
+const storedLink = (name: string, paneId = "w1:p1", sessionId: string | null = null): SessionLink => ({
+  env: "work-local", paneId, tabId: "tb", tabLabel: "x", workspaceId: "ws", workspaceLabel: "w",
+  name, cwdSnapshot: "/x", sessionId,
+});
+
+describe("resolveWriter", () => {
+  it("resolves a pane to the link that binds it, across groups", () => {
+    const src = resolveWriter(
+      [{ sessions: [] }, { sessions: [storedLink("worker-a")] }],
+      { env: "work-local", paneId: "w1:p1" },
+      [liveRow()],
+    );
+    expect(src).toEqual({ sessionId: null, name: "worker-a" });
+  });
+
+  it("returns null for a pane bound in no group", () => {
+    expect(resolveWriter([{ sessions: [storedLink("x", "w1:p9")] }], { env: "work-local", paneId: "w1:p1" }, [])).toBeNull();
+  });
+
+  it("prefers the FIRST group's link — the target card's fresh copy over a stale fleet snapshot", () => {
+    const src = resolveWriter(
+      [{ sessions: [storedLink("fresh")] }, { sessions: [storedLink("stale")] }],
+      { env: "work-local", paneId: "w1:p1" },
+      [liveRow()],
+    );
+    expect(src).toEqual({ sessionId: null, name: "fresh" });
+  });
+});
+
+describe("sessionRef", () => {
+  it("names a session by its card label and fleet key", () => {
+    expect(sessionRef({ name: "worker-a", env: "work-local", paneId: "w1:p1" })).toBe("worker-a (work-local:w1:p1)");
   });
 });

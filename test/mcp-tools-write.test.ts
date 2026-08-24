@@ -45,6 +45,7 @@ function stub(over: Partial<CorralClient>): CorralClient {
     attention: async () => ({}),
     board: async () => { throw new Error("unused"); },
     appendLog: async () => ({ ok: true, atMs: 1, logCount: 1 }),
+    createTask: async () => ({ id: "t_new1234", title: "T", description: "", status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1 }),
     state: async () => ({ envs: {}, sessions: [] }),
     boards: async () => boards,
     patchTask: async () => ({ id: "t_abcdefg", title: "T", description: "", status: "doing", priority: null, sessions: [], log: [], createdAt: 1, updatedAt: 2 }),
