@@ -70,16 +70,17 @@ export const LogSourceSchema = z.union([
  * reaching into `server/` from `mcp/` for one constant would drag the startup config loader into the
  * MCP process with it.
  */
-export const LOG_ENTRY_TEXT_MAX = 400;
+export const LOG_ENTRY_TEXT_MAX = 800;
 
 /**
- * The largest body the append route will parse, and the same bound the MCP tool applies to its own
- * argument. Well above the stored cap: text between the two is TRUNCATED, which is what the tool
- * promises; text above it is refused, because a megabyte of prose is a mistake and not a long note.
- * One constant so the tool refuses in its own words instead of relaying a schema error from the
- * route.
+ * The refusal for a note over the cap — one wording for the MCP tool and the route, naming the
+ * overage so the writer shortens by that much and logs again. A note is REFUSED, never truncated:
+ * a cut thought loses its conclusion, and a limit the writer is told about is one it can meet.
+ * Truncation survives only for corral's own system entries (server/task-log.ts).
  */
-export const LOG_ENTRY_BODY_MAX = LOG_ENTRY_TEXT_MAX * 20;
+export function logTooLong(length: number): string {
+  return `note is ${String(length - LOG_ENTRY_TEXT_MAX)} characters over the ${String(LOG_ENTRY_TEXT_MAX)}-character limit — shorten it and log again; nothing was written`;
+}
 
 /**
  * SEPARATE quotas, and that is the whole point rather than a detail.
@@ -95,8 +96,9 @@ export const LOG_SYSTEM_QUOTA = 140;
 
 // STORED SHAPE — deliberately permissive on `text`, the same reasoning as SpawnPresetSchema and
 // `description`: readBoardFile parses with BoardSchema, so a `.max()` here would turn an entry
-// written before the cap existed into an unloadable board. The 400-character cap lives on the write
-// path (server/task-log.ts).
+// written before the cap existed into an unloadable board. The cap (LOG_ENTRY_TEXT_MAX) lives on
+// the write path: a note over it is refused by the append route and the MCP tool, a system entry is
+// truncated in server/task-log.ts.
 export const LogEntrySchema = z.object({
   /**
    * A stable identity for one entry. `at` cannot serve as one: closing every session on a card is N
