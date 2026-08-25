@@ -34,6 +34,8 @@ describe("TaskCard — duplicate session links (server-bug safety net)", () => {
     render(
       <TaskCard
         task={task}
+        boardId="b1"
+        onOpenLog={vi.fn()}
         onEdit={vi.fn()}
         onOpenSession={vi.fn()}
         onDetachSession={vi.fn()}
@@ -56,6 +58,8 @@ describe("TaskCard — which string a live row shows", () => {
     render(
       <TaskCard
         task={task}
+        boardId="b1"
+        onOpenLog={vi.fn()}
         onEdit={vi.fn()}
         onOpenSession={vi.fn()}
         onDetachSession={vi.fn()}

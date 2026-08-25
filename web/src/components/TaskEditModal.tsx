@@ -3,6 +3,7 @@ import type { JSX } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { SpawnFields } from "./SpawnFields";
+import { TaskLogTab } from "./TaskLogTab";
 import type { SpawnRequestBody } from "../lib/api";
 import type { SpawnEnvOption } from "../lib/use-spawn-form";
 import { useSpawnForm } from "../lib/use-spawn-form";
@@ -34,7 +35,7 @@ const DESC_CHROME = 18; // py-2 + 1px borders
 const DESC_MIN_ROWS = 3;
 const DESC_MAX_ROWS = 12;
 
-type Tab = "task" | "run";
+export type Tab = "task" | "log" | "run";
 
 export function TaskEditModal({
   task, board, envs, onSave, onDelete, onSpawn, onOpenSession, boards, onMove, onClose,
@@ -156,6 +157,8 @@ export function TaskEditModal({
           <div role="tablist" aria-label="Edit task sections" className="flex gap-[3px] p-[3px] bg-muted rounded-lg">
             <button role="tab" aria-selected={tab === "task"} disabled={spawn.spawning}
               onClick={() => { setTab("task"); }} className={tabClass("task", false)}>Task</button>
+            <button role="tab" aria-selected={tab === "log"} disabled={spawn.spawning}
+              onClick={() => { setTab("log"); }} className={tabClass("log", false)}>Log</button>
             <button role="tab" aria-selected={tab === "run"} disabled={spawn.spawning}
               onClick={() => { setTab("run"); }} className={tabClass("run", true)}>▶ Run Claude</button>
           </div>
@@ -214,6 +217,8 @@ export function TaskEditModal({
                 ))}
               </div>
             </div>
+          ) : tab === "log" ? (
+            <TaskLogTab boardId={board.id} taskId={task.id} />
           ) : (
             <div role="tabpanel">
               <SpawnFields form={spawn} hasSessions={task.sessions.length > 0} />
@@ -241,19 +246,19 @@ export function TaskEditModal({
               {tab === "task" && !dirty && <span className="text-xs text-muted-foreground">no changes</span>}
               <button onClick={onClose} disabled={saving || deleting || spawn.spawning}
                 className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50">Cancel</button>
-              {tab === "task"
-                ? (
-                  <button onClick={() => { void handleSave(); }} disabled={!dirty || saving || deleting || spawn.spawning}
-                    className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90 disabled:opacity-50">
-                    {saving ? "Saving…" : "Save"}
-                  </button>
-                )
-                : (
-                  <button onClick={() => { void spawn.submit(); }} disabled={spawn.spawning || !spawn.canSpawn}
-                    className="px-4 py-2 bg-success text-success-foreground text-sm rounded hover:bg-success/90 disabled:opacity-50">
-                    {spawn.spawning ? "Starting…" : "Run Claude"}
-                  </button>
-                )}
+              {/* The log is append-only and written elsewhere: no action button on its tab. */}
+              {tab === "task" && (
+                <button onClick={() => { void handleSave(); }} disabled={!dirty || saving || deleting || spawn.spawning}
+                  className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90 disabled:opacity-50">
+                  {saving ? "Saving…" : "Save"}
+                </button>
+              )}
+              {tab === "run" && (
+                <button onClick={() => { void spawn.submit(); }} disabled={spawn.spawning || !spawn.canSpawn}
+                  className="px-4 py-2 bg-success text-success-foreground text-sm rounded hover:bg-success/90 disabled:opacity-50">
+                  {spawn.spawning ? "Starting…" : "Run Claude"}
+                </button>
+              )}
             </div>
           </div>
         </div>

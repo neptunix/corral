@@ -6,6 +6,7 @@ import type { JSX } from "react";
 import { CloseSessionModal } from "./CloseSessionModal";
 import { RestoreSessionModal } from "./RestoreSessionModal";
 import { api } from "../lib/api";
+import { newSince, readLogSeen, seenKey } from "../lib/log-seen";
 import { CLOSING_STATUS, RESUMING_STATUS } from "../lib/optimistic";
 import { TONE_DOT, sessionStateLabel, sessionStateTone } from "../lib/session-state";
 import { relativeTime } from "../lib/time";
@@ -20,14 +21,16 @@ const PRIORITY_LABEL: Record<string, string> = { p0: "P0", p1: "P1", p2: "P2", p
 
 interface Props {
   readonly task: EnrichedTask;
+  readonly boardId: string;
   readonly onEdit: () => void;
+  readonly onOpenLog: () => void;
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly onDetachSession: (env: string, paneId: string, sessionId: string | null) => void;
   readonly onCloseSession: (env: string, paneId: string, sessionId: string | null) => Promise<void>;
   readonly onResumeSession: (env: string, paneId: string, sessionId: string | null) => void;
 }
 
-export function TaskCard({ task, onEdit, onOpenSession, onDetachSession, onCloseSession, onResumeSession }: Props): JSX.Element {
+export function TaskCard({ task, boardId, onEdit, onOpenLog, onOpenSession, onDetachSession, onCloseSession, onResumeSession }: Props): JSX.Element {
   // Opening a session always uses awaitAgent=false (attach once). Retry-until-registered is only for
   // the post-spawn auto-open (TaskEditModal); a manual reopen of a LIVE session attaches immediately,
   // and a manual open of a DEAD one should fail fast with a clear message — not spin "starting…" for
@@ -78,6 +81,7 @@ export function TaskCard({ task, onEdit, onOpenSession, onDetachSession, onClose
           >⚙</button>
         </div>
       </div>
+      <LogBadge task={task} boardId={boardId} onOpenLog={onOpenLog} hasSessions={dedupedSessions.length > 0} />
       {dedupedSessions.length > 0 && (
         <div className="flex flex-col gap-1 mt-2">
           {dedupedSessions.map((s) => (
@@ -96,6 +100,52 @@ export function TaskCard({ task, onEdit, onOpenSession, onDetachSession, onClose
         </div>
       )}
     </div>
+  );
+}
+
+const LOG_ICON_PATH = "M3 4h10M3 8h10M3 12h6";
+
+/**
+ * Three states: new entries this browser has not displayed (accent, "N new"), a quiet log (muted
+ * count), and a card with a session that has written nothing (warning — the card-signal case).
+ * "New" is per viewer and derived from the counters on the frame (log-seen.ts): the server holds
+ * no seen notion. A card with no session and no log shows nothing — there is nobody to have written.
+ */
+function LogBadge({ task, boardId, onOpenLog, hasSessions }: {
+  readonly task: EnrichedTask;
+  readonly boardId: string;
+  readonly onOpenLog: () => void;
+  readonly hasSessions: boolean;
+}): JSX.Element | null {
+  if (task.logCount === 0 && !hasSessions) return null;
+  const fresh = newSince(task, readLogSeen(seenKey(boardId, task.id)));
+  const tone = task.logCount === 0 ? "text-warning" : fresh > 0 ? "text-primary" : "text-muted-foreground/55";
+  return (
+    <button
+      type="button"
+      onPointerDown={(e) => { e.stopPropagation(); }}
+      onClick={(e) => { e.stopPropagation(); onOpenLog(); }}
+      className={`flex items-center gap-1.5 mb-2 -mx-1 px-1 rounded hover:bg-muted ${tone}`}
+      title={task.logCount === 0 ? "This card's sessions have written nothing to its log yet" : "Open the card's log"}
+      data-testid="log-badge"
+    >
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+        <path d={LOG_ICON_PATH} />
+      </svg>
+      {task.logCount === 0
+        ? <span className="text-[11px]">nothing written</span>
+        : (
+          <>
+            <span className="font-mono text-[11px]">{task.logCount}</span>
+            {fresh > 0 && (
+              <>
+                <span className="w-[5px] h-[5px] rounded-full bg-current" aria-hidden="true" />
+                <span className="text-[11px] opacity-80">{fresh} new</span>
+              </>
+            )}
+          </>
+        )}
+    </button>
   );
 }
 

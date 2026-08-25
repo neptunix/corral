@@ -2,20 +2,11 @@ import { normalizeLinkName } from "./link-name.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import { linkBindsSession } from "./session-binding.ts";
 import type { Board, LogEntry, LogKind, LogSource, SessionLink, Task } from "../shared/board-schema.ts";
-import { generateLogEntryId, LOG_ENTRY_TEXT_MAX } from "../shared/board-schema.ts";
+import { generateLogEntryId, LOG_ENTRY_TEXT_MAX, LOG_NOTE_QUOTA, LOG_SYSTEM_QUOTA } from "../shared/board-schema.ts";
 import type { SessionRow } from "../shared/schema.ts";
 
-/**
- * SEPARATE quotas, and that is the whole point rather than a detail.
- *
- * A single shared cap would be actively harmful: moving a card into a closing column offers to close
- * every live session on it in one operator action, so a card with fifteen sessions produces a burst
- * of `session_closed` lines — under one cap that burst would evict exactly the notes the log exists
- * for. The `kind` filter lets a reader ignore the noise; only separate quotas stop the noise from
- * DELETING the signal.
- */
-export const LOG_NOTE_QUOTA = 60;
-export const LOG_SYSTEM_QUOTA = 140;
+// Defined in shared/ (the board's Log tab prints them); re-exported so this stays their server home.
+export { LOG_NOTE_QUOTA, LOG_SYSTEM_QUOTA };
 
 function isNote(entry: LogEntry): boolean {
   return entry.kind === "note";

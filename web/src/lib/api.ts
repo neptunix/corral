@@ -1,4 +1,5 @@
 import type { Board, BoardFrame, BoardState, SessionLink, Task, TaskFrame } from "@shared/board-schema";
+import { BoardSchema } from "@shared/board-schema";
 import type { DiagnosticsSnapshot } from "@shared/diagnostics-schema";
 import { DiagnosticsSnapshotSchema } from "@shared/diagnostics-schema";
 import type { PaneRead } from "@shared/schema";
@@ -64,6 +65,9 @@ export const api = {
     // `GET /api/boards/:bid` is log-free, and `req` is an unvalidated generic, so this
     // declaration is the only thing that says so on this side.
     list: () => req<BoardFrame[]>("/api/boards"),
+    // The ONE route that carries a card's log, fetched when a card's Log tab opens. Parsed rather
+    // than trusted: this is the boundary every entry another session wrote comes through.
+    get: async (bid: string): Promise<Board> => BoardSchema.parse(await req<unknown>(`/api/boards/${bid}`)),
     create: (label: string) =>
       req<Board>("/api/boards", {
         method: "POST",

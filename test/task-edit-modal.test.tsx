@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TaskEditModal } from "../web/src/components/TaskEditModal";
+import { api } from "../web/src/lib/api";
 
 afterEach(cleanup);
 
@@ -292,5 +293,34 @@ describe("TaskEditModal — Board/Project row layout", () => {
     // A <select> won't shrink below its widest option on its own — min-w-0 is what lets the flex-1
     // box actually shrink instead of pushing this row's shrink-0 sibling (the Move button) out.
     expect(select.className.split(/\s+/)).toContain("min-w-0");
+  });
+});
+
+describe("TaskEditModal — Log tab", () => {
+  it("opens on the Log tab when asked, fetches the log, and offers no Save or Run there", async () => {
+    const board = makeBoard();
+    const task = makeTask({ logCount: 1, lastLogAtMs: 1_000 });
+    const get = vi.spyOn(api.boards, "get").mockResolvedValue({
+      ...board, tasks: [{ ...task, sessions: [], log: [{ id: "e1", atMs: 1_000, source: "operator", kind: "status_changed", text: "Todo → Doing." }] }],
+    });
+    render(<TaskEditModal task={task} board={board} {...baseProps} onSave={vi.fn()} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()} initialTab="log" />);
+
+    expect(screen.getByRole("tab", { name: "Log" }).getAttribute("aria-selected")).toBe("true");
+    await screen.findByText("Todo → Doing.");
+    expect(get).toHaveBeenCalledWith("b1");
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Run Claude" })).toBeNull();
+    get.mockRestore();
+  });
+
+  it("the Log tab is reachable from the Task tab, and the log is fetched only once it is opened", async () => {
+    const board = makeBoard();
+    const get = vi.spyOn(api.boards, "get").mockResolvedValue({ ...board, tasks: [{ ...makeTask(), sessions: [], log: [] }] });
+    render(<TaskEditModal task={makeTask()} board={board} {...baseProps} onSave={vi.fn()} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()} />);
+    expect(get).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("tab", { name: "Log" }));
+    await screen.findByText("Nothing written yet.");
+    expect(get).toHaveBeenCalledTimes(1);
+    get.mockRestore();
   });
 });
