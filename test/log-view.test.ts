@@ -45,7 +45,7 @@ describe("logCounts", () => {
 });
 
 describe("groupByDay", () => {
-  it("newest day first, entries inside a day in the order they were written", () => {
+  it("newest first throughout — days and the entries inside them, never ascending within a day", () => {
     const log = [
       entry({ id: "y1", atMs: NOON - DAY - HOUR }),
       entry({ id: "y2", atMs: NOON - DAY }),
@@ -54,8 +54,8 @@ describe("groupByDay", () => {
     ];
     const groups = groupByDay(log, NOON);
     expect(groups.map((g) => g.label)).toEqual(["Today", "Yesterday"]);
-    expect(groups[0]?.entries.map((e) => e.id)).toEqual(["t1", "t2"]);
-    expect(groups[1]?.entries.map((e) => e.id)).toEqual(["y1", "y2"]);
+    expect(groups[0]?.entries.map((e) => e.id)).toEqual(["t2", "t1"]);
+    expect(groups[1]?.entries.map((e) => e.id)).toEqual(["y2", "y1"]);
   });
 
   it("sorts by atMs before grouping — an out-of-order file must not split one day into two groups", () => {
@@ -66,12 +66,12 @@ describe("groupByDay", () => {
     ];
     const groups = groupByDay(log, NOON);
     expect(groups).toHaveLength(2);
-    expect(groups[0]?.entries.map((e) => e.id)).toEqual(["t1", "t2"]);
+    expect(groups[0]?.entries.map((e) => e.id)).toEqual(["t2", "t1"]);
   });
 
-  it("two entries in the same millisecond keep their file order", () => {
+  it("two entries in the same millisecond: the later-written one is still on top", () => {
     const log = [entry({ id: "first" }), entry({ id: "second" })];
-    expect(groupByDay(log, NOON)[0]?.entries.map((e) => e.id)).toEqual(["first", "second"]);
+    expect(groupByDay(log, NOON)[0]?.entries.map((e) => e.id)).toEqual(["second", "first"]);
   });
 
   it("a day older than yesterday gets a date, never a relative word", () => {

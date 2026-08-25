@@ -38,10 +38,11 @@ function dayLabel(ms: number, now: number): string {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) });
 }
 
-// Newest day first, oldest entry first inside a day. Sorted (stably) by atMs before grouping so a
-// file whose order disagrees with its timestamps cannot split one day into two groups.
+// Newest first throughout — days and the entries inside them — so what just landed is at the top,
+// where the badge's "N new" points. Sorted (stably) by atMs before grouping so a file whose order
+// disagrees with its timestamps cannot split one day into two groups.
 export function groupByDay(log: readonly LogEntry[], now: number = Date.now()): DayGroup[] {
-  const sorted = [...log].sort((a, b) => a.atMs - b.atMs);
+  const sorted = [...log].sort((a, b) => a.atMs - b.atMs).reverse();
   const groups: { label: string; key: string; entries: LogEntry[] }[] = [];
   for (const e of sorted) {
     const key = localDayKey(e.atMs);
@@ -49,7 +50,7 @@ export function groupByDay(log: readonly LogEntry[], now: number = Date.now()): 
     if (last?.key === key) last.entries.push(e);
     else groups.push({ label: dayLabel(e.atMs, now), key, entries: [e] });
   }
-  return groups.reverse().map(({ label, entries }) => ({ label, entries }));
+  return groups.map(({ label, entries }) => ({ label, entries }));
 }
 
 export function entryTime(ms: number): string {
