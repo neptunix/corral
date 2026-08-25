@@ -38,16 +38,20 @@ function capText(text: string): string {
 }
 
 /**
- * Append one entry, capping its text and evicting the oldest entries of ITS OWN family until that
- * family fits its quota. Append order across families is preserved — the log is read as one
- * chronological sequence and only the eviction is per-family.
+ * Append one entry and evict the oldest entries of ITS OWN family until that family fits its quota.
+ * Append order across families is preserved — the log is read as one chronological sequence and
+ * only the eviction is per-family.
+ *
+ * Only a SYSTEM entry's text is capped here. A note over the cap is refused before it gets here
+ * (the route and the MCP tool both say by how much), so the session shortens it and the stored
+ * thought is whole; corral's own stamps must never fail, and a cut lifecycle line loses nothing.
  *
  * Eviction is a rewrite, which §4's append-only rule does not forbid: entries are never EDITED in
  * place, and two sessions appending concurrently still never destroy each other's text. The board
  * file is rewritten whole on every mutation regardless, so eviction costs nothing extra.
  */
 export function appendLogEntry(log: readonly LogEntry[], entry: LogEntry): LogEntry[] {
-  const next = [...log, { ...entry, text: capText(entry.text) }];
+  const next = [...log, isNote(entry) ? entry : { ...entry, text: capText(entry.text) }];
   const quota = quotaFor(entry.kind);
   const sameFamily = (e: LogEntry): boolean => isNote(e) === isNote(entry);
   let excess = next.filter(sameFamily).length - quota;

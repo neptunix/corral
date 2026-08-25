@@ -1,6 +1,6 @@
 import { linkBindsSession } from "../server/session-binding.ts";
 import type { BoardFrame, LogEntry, LogKind, LogSource } from "../shared/board-schema.ts";
-import { closedColumnIds } from "../shared/board-schema.ts";
+import { closedColumnIds, LOG_ENTRY_TEXT_MAX } from "../shared/board-schema.ts";
 import type { AttentionMap, RecapSource, SessionRow, Snapshot } from "../shared/schema.ts";
 import type { WhoamiResolved, WhoamiTask } from "../shared/whoami-schema.ts";
 
@@ -62,13 +62,14 @@ export const LOG_ENTRIES_SHOWN = 40;
 // Per-line cap INSIDE an entry, measured on the TEXT — the gutter and the mark are charged on top,
 // because they are this module's own framing and not part of what the writer wrote. Measuring the
 // rendered line instead made an entry stored at exactly the write cap render as cut and flipped the
-// block's TRUNCATED flag, which is the one signal a reader has for "did I see all of it".
-export const LOG_ENTRY_LINE_MAX = 400;
-// The budget for the whole rendered log block, gutter and headers included. 40 entries × 400
-// characters is ~16 KB of another session's prose; with a header line each and the gutter, 20 000 is
+// block's TRUNCATED flag, which is the one signal a reader has for "did I see all of it". Equal to
+// the write cap, so a whole stored note always renders whole.
+export const LOG_ENTRY_LINE_MAX = LOG_ENTRY_TEXT_MAX;
+// The budget for the whole rendered log block, gutter and headers included. 40 entries × 800
+// characters is ~32 KB of another session's prose; with a header line each and the gutter, 40 000 is
 // the ceiling that block cannot exceed. Stated here rather than left implied by the caps upstream:
 // this is the one number a reader can check the reply against.
-export const LOG_BLOCK_MAX = 20_000;
+export const LOG_BLOCK_MAX = 40_000;
 // Shared cap for the smaller single-line identity fields (cwd, statusline account, env error text)
 // that aren't task prose but still carry their own truncation budget.
 const IDENTITY_FIELD_MAX = 200;

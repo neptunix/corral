@@ -188,9 +188,24 @@ describe("POST /api/boards/:bid/tasks/:tid/log", () => {
     expect(await post({ kind: "created" })).toBe(400);
     // A session may only name an environment corral actually serves.
     expect(await post({ env: "nope" })).toBe(400);
-    // The stored text is truncated, but the BODY cap is what bounds the work one request can force.
-    expect(await post({ text: "x".repeat(LOG_ENTRY_TEXT_MAX * 20 + 1) })).toBe(400);
+    expect(await post({ text: "x".repeat(LOG_ENTRY_TEXT_MAX + 1) })).toBe(400);
     expect(storedLog(storage)).toHaveLength(0);
+  });
+
+  // Refused, not truncated — and the writer is told by how much. A truncating implementation
+  // answers 201 here and stores a cut thought; a schema-bound one answers 400 without the overage.
+  it("refuses a note over the cap with the overage, and stores one at the cap whole", async () => {
+    const { app, storage } = makeApi([row()]);
+
+    const over = await app.request("/api/boards/b/tasks/t_abcdefg/log", appendBody({ text: "x".repeat(LOG_ENTRY_TEXT_MAX + 7) }));
+    expect(over.status).toBe(400);
+    expect(await over.json()).toMatchObject({ error: { code: "too_long", message: expect.stringContaining("7 characters over") } });
+    expect(storedLog(storage)).toHaveLength(0);
+
+    const exact = "y".repeat(LOG_ENTRY_TEXT_MAX);
+    const ok = await app.request("/api/boards/b/tasks/t_abcdefg/log", appendBody({ text: exact }));
+    expect(ok.status).toBe(201);
+    expect(storedLog(storage)[0]?.text).toBe(exact);
   });
 
   // The client and the route are only ever exercised apart — the route test builds its own body, the

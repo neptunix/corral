@@ -87,7 +87,7 @@ The exclusion is the event, not the finding — "the gate ran" is out, a limit i
 decision and goes in. The log is not a wall of text, and nothing forces an entry: an entry written to
 have written one is a formality the next reader has to skip past.
 
-An entry is prose, a few sentences — longer text is truncated. The time and the writer are stamped by
+An entry is prose, a few sentences, within the tool's character limit — a longer one is refused with the overage, never truncated; shorten it and log again. The time and the writer are stamped by
 the server; do not write them into the text.
 
 Write at real boundaries — a decision made, a phase finished, a blocker hit — not on a timer and not

@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 import type { LogEntry, LogKind } from "../../shared/board-schema.ts";
-import { closedColumnIds, LOG_ENTRY_BODY_MAX, LOG_ENTRY_TEXT_MAX, LogKindSchema } from "../../shared/board-schema.ts";
+import { closedColumnIds, LOG_ENTRY_TEXT_MAX, LogKindSchema, logTooLong } from "../../shared/board-schema.ts";
 import type { CorralClient, TaskPatch } from "../client.ts";
 import type { LogView } from "../digest.ts";
 import { formatBoardOverview, formatCardDetail, formatStatusRefusal, formatTaskPicker, LOG_ENTRIES_SHOWN, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
@@ -200,11 +200,14 @@ export function logHandler(deps: TaskDeps, args: LogArgs): Promise<string> {
     if (me.task === null) {
       return "this session is not bound to a task — call corral_task_bind first (with no arguments to list open cards)";
     }
-    if (args.text.trim() === "") return "nothing to log — pass the note's text";
+    const text = args.text.trim();
+    if (text === "") return "nothing to log — pass the note's text";
+    // Refused here, before the network, in the tool's own words; the route refuses the same way.
+    if (text.length > LOG_ENTRY_TEXT_MAX) return logTooLong(text.length);
     const boardId = target.kind === "card" ? target.boardId : me.task.boardId;
     const taskId = target.kind === "card" ? target.taskId : me.task.taskId;
-    const res = await deps.client.appendLog({ boardId, taskId, env: me.session.env, paneId: me.session.paneId, text: args.text });
-    return `logged to ${boardId}/${taskId} — the card now holds ${String(res.logCount)} ${res.logCount === 1 ? "entry" : "entries"}. Entries over ${String(LOG_ENTRY_TEXT_MAX)} characters are truncated; the oldest are evicted once the log is full.`;
+    const res = await deps.client.appendLog({ boardId, taskId, env: me.session.env, paneId: me.session.paneId, text });
+    return `logged to ${boardId}/${taskId} — the card now holds ${String(res.logCount)} ${res.logCount === 1 ? "entry" : "entries"}. The oldest are evicted once the log is full.`;
   });
 }
 
@@ -272,7 +275,7 @@ export const TASK_TOOL_DESCRIPTIONS = {
   read:
     "Read the FULL description of a card, plus its log — corral_whoami shows only a one-line description preview and the log's size. Defaults to the card THIS session is bound to; pass `boardId` AND `taskId` together to read ANY card on the machine (a bare `taskId` is refused — a task id is unique only within its board, and corral_task_bind with no arguments lists both). Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. The log returns the most recent entries and says how many older ones it left out; `kind` narrows it to particular entry kinds. Read-only.",
   log:
-    "Append ONE entry to a card's log. The log is APPEND-ONLY and is the card's history, beside `description`, which states the task — writing an outcome into the description destroys the statement of the task, which is what this field exists to prevent. Defaults to the card THIS session is bound to; pass `boardId` AND `taskId` together to append to ANOTHER card — a session may add to any card even though it may only rewrite its own. Write an entry when a fact about the task changed that the next session would otherwise have to re-derive: a decision and what it rejected, a limitation or blocker found, a phase finished and what is now true. Do NOT write per-file progress, \"starting work\", a restatement of the diff, or test results — the repository and the PR already record those. One entry, prose, a few sentences; longer text is truncated. The server stamps the time and the writer.",
+    "Append ONE entry to a card's log. The log is APPEND-ONLY and is the card's history, beside `description`, which states the task — writing an outcome into the description destroys the statement of the task, which is what this field exists to prevent. Defaults to the card THIS session is bound to; pass `boardId` AND `taskId` together to append to ANOTHER card — a session may add to any card even though it may only rewrite its own. Write an entry when a fact about the task changed that the next session would otherwise have to re-derive: a decision and what it rejected, a limitation or blocker found, a phase finished and what is now true. Do NOT write per-file progress, \"starting work\", a restatement of the diff, or test results — the repository and the PR already record those. One entry, prose, a few sentences. Over the character limit the entry is REFUSED with the overage — shorten it and log again; nothing is truncated. The server stamps the time and the writer.",
   create:
     "Create a NEW card on a board. Defaults to this session's own board; pass `boardId` to create it elsewhere. The card lands in the board's first open column with NO session attached — this does not spawn; corral_spawn onto the returned {boardId, taskId} to staff it, a deliberately separate step so a constructive tool never smuggles a destructive one. `description` states the task; do NOT put provenance there — which session created the card, and which card it follows up, is written by corral as the card's first log entry, because `description` is a full-replacement write that the first edit would erase.",
   boardRead:
@@ -332,11 +335,10 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
       title: "Append a note to a card",
       description: TASK_TOOL_DESCRIPTIONS.log,
       inputSchema: {
-        // Bounded HERE as well as at the route, and at the same number: without it a very long paste
-        // is refused by the route's own body bound and the session gets a raw schema error where the
-        // description promised truncation.
-        text: z.string().min(1).max(LOG_ENTRY_BODY_MAX).describe(
-          `the note, in prose. Truncated past ${String(LOG_ENTRY_TEXT_MAX)} characters — a decision with its reasoning fits well inside that.`,
+        // No `.max()` here: the handler refuses an over-limit note in its own words, with the
+        // overage, where a schema bound would hand the session a raw validation error.
+        text: z.string().min(1).describe(
+          `the note, in prose, at most ${String(LOG_ENTRY_TEXT_MAX)} characters — a decision with its reasoning fits well inside that. Longer is refused, not truncated.`,
         ),
         boardId: z.string().optional().describe("with taskId, append to another card; omit both for this session's own card"),
         taskId: z.string().optional().describe("with boardId, append to another card; a bare taskId is refused"),

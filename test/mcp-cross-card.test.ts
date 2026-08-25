@@ -1,4 +1,5 @@
 import type { Board } from "@shared/board-schema.ts";
+import { LOG_ENTRY_TEXT_MAX } from "@shared/board-schema.ts";
 import type { WhoamiResponse, WhoamiTask } from "@shared/whoami-schema.ts";
 import { describe, expect, it, vi } from "vitest";
 
@@ -106,6 +107,21 @@ describe("addressing — a bare taskId is refused, a valid pair is honoured, a w
     const out = await logHandler(deps(stub({ appendLog })), { text: "note", boardId: "other", taskId: "t_other11" });
     expect(out).toContain("logged to other/t_other11");
     expect(appendLog).toHaveBeenCalledWith(expect.objectContaining({ boardId: "other", taskId: "t_other11", env: "work-local", paneId: "w1:p1", text: "note" }));
+  });
+
+  it("log: refuses a note over the cap in its own words, with the overage, before any network call", async () => {
+    const appendLog = appendLogSpy();
+    const out = await logHandler(deps(stub({ appendLog })), { text: "x".repeat(LOG_ENTRY_TEXT_MAX + 12) });
+    expect(out).toContain("12 characters over");
+    expect(out).toContain("nothing was written");
+    expect(appendLog).not.toHaveBeenCalled();
+  });
+
+  it("log: surrounding whitespace does not count against the cap", async () => {
+    const appendLog = appendLogSpy();
+    const out = await logHandler(deps(stub({ appendLog })), { text: `  ${"x".repeat(LOG_ENTRY_TEXT_MAX)}  ` });
+    expect(out).toContain("logged to");
+    expect(appendLog).toHaveBeenCalledTimes(1);
   });
 });
 

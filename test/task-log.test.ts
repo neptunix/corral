@@ -51,18 +51,25 @@ describe("task log quotas", () => {
   });
 });
 
-describe("task log entry truncation", () => {
-  it("truncates text over the cap with a marker and never exceeds the cap", () => {
+describe("task log entry truncation — system entries only", () => {
+  it("truncates a system entry over the cap with a marker and never exceeds the cap", () => {
     const long = "x".repeat(LOG_ENTRY_TEXT_MAX + 50);
-    const [stored] = appendLogEntry([], entry("note", long, 1));
+    const [stored] = appendLogEntry([], entry("session_closed", long, 1));
 
     expect(stored?.text).toHaveLength(LOG_ENTRY_TEXT_MAX);
     expect(stored?.text.endsWith("…")).toBe(true);
   });
 
+  it("never cuts a note — the route refuses one over the cap, so what arrives here is stored whole", () => {
+    const long = "x".repeat(LOG_ENTRY_TEXT_MAX + 50);
+    const [stored] = appendLogEntry([], entry("note", long, 1));
+
+    expect(stored?.text).toBe(long);
+  });
+
   it("leaves text at exactly the cap untouched", () => {
     const exact = "y".repeat(LOG_ENTRY_TEXT_MAX);
-    const [stored] = appendLogEntry([], entry("note", exact, 1));
+    const [stored] = appendLogEntry([], entry("created", exact, 1));
 
     expect(stored?.text).toBe(exact);
   });
@@ -100,7 +107,7 @@ describe("task log entry truncation — multi-byte text", () => {
   it("never stores half of a surrogate pair when the cut lands inside one", () => {
     // "😀" is two UTF-16 code units, so a cap at an odd offset can split it.
     const text = "a".repeat(LOG_ENTRY_TEXT_MAX - 2) + "😀😀";
-    const [stored] = appendLogEntry([], entry("note", text, 1));
+    const [stored] = appendLogEntry([], entry("session_spawned", text, 1));
 
     expect(stored?.text.length).toBeLessThanOrEqual(LOG_ENTRY_TEXT_MAX);
     // A high surrogate with no low surrogate after it — half a character.

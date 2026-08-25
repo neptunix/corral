@@ -3,8 +3,9 @@ import {
   type GlobalState, type SessionLink, type Task,
   ColumnSchema,
   DEFAULT_COLUMNS,
-  LOG_ENTRY_BODY_MAX,
+  LOG_ENTRY_TEXT_MAX,
   LogKindSchema,
+  logTooLong,
   defaultColumnId,
   generateLogEntryId,
   generateTaskId,
@@ -268,11 +269,9 @@ const PatchTaskBodySchema = z.object({
  */
 const AppendLogBodySchema = z.object({
   kind: LogKindSchema.extract(["note"]),
-  // The 400-character cap truncates rather than refusing (server/task-log.ts); this bound only stops
-  // an absurd body from being parsed at all, and the min() is what makes "wrote nothing" an error
-  // instead of an entry saying nothing. Shared with the MCP tool's own argument bound so the two
-  // refuse at the same size.
-  text: z.string().trim().min(1).max(LOG_ENTRY_BODY_MAX),
+  // The length cap is applied below with a message that says by how much, not here as a schema
+  // bound; the min() is what makes "wrote nothing" an error instead of an entry saying nothing.
+  text: z.string().trim().min(1),
   env: z.string(),
   paneId: z.string(),
 });
@@ -906,6 +905,11 @@ export function createApi(opts: {
     const tid = c.req.param("tid");
     if (!TID_RE.test(tid)) return c.json({ error: { code: "validation", message: "bad taskId" } }, 400);
     const { kind, text, env, paneId } = parsed.data;
+    // Refused, not truncated: a note is a thought, and a cut one loses its conclusion. The overage
+    // is named so the writer can shorten by that much and log again.
+    if (text.length > LOG_ENTRY_TEXT_MAX) {
+      return c.json({ error: { code: "too_long", message: logTooLong(text.length) } }, 400);
+    }
     if (!opts.envs.find((e) => e.id === env)) {
       return c.json({ error: { code: "validation", message: "unknown env" } }, 400);
     }
