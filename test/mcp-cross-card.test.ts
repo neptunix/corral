@@ -117,6 +117,15 @@ describe("addressing — a bare taskId is refused, a valid pair is honoured, a w
     expect(appendLog).not.toHaveBeenCalled();
   });
 
+  it("log: a stored entry that ran long is accepted, and the reply says so — a short one gets no nudge", async () => {
+    const long = await logHandler(deps(stub({})), { text: "x".repeat(LOG_ENTRY_TEXT_MAX / 2 + 1) });
+    expect(long).toContain("logged to");
+    expect(long).toContain("ran long");
+    const short = await logHandler(deps(stub({})), { text: "decided X over Y: Z." });
+    expect(short).toContain("logged to");
+    expect(short).not.toContain("ran long");
+  });
+
   it("log: surrounding whitespace does not count against the cap", async () => {
     const appendLog = appendLogSpy();
     const out = await logHandler(deps(stub({ appendLog })), { text: `  ${"x".repeat(LOG_ENTRY_TEXT_MAX)}  ` });

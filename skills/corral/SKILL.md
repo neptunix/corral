@@ -87,8 +87,13 @@ The exclusion is the event, not the finding — "the gate ran" is out, a limit i
 decision and goes in. The log is not a wall of text, and nothing forces an entry: an entry written to
 have written one is a formality the next reader has to skip past.
 
-An entry is prose, a few sentences, within the tool's character limit — a longer one is refused with the overage, never truncated; shorten it and log again. The time and the writer are stamped by
-the server; do not write them into the text.
+**Shape of an entry — one decision or fact per entry, and the decision comes first.** Lead with
+it in one short line; then at most two sentences of why, or what was rejected. Around 200
+characters is the norm; the tool's limit (800) is a ceiling, not a target, and an entry past it is
+refused with the overage, never truncated — shorten it and log again. No lists, no headings, no
+retelling of the diff: the board renders the log as a column of entries, and a paragraph per entry
+turns it into a wall the operator stops reading. The time and the writer are stamped by the server;
+do not write them into the text.
 
 Write at real boundaries — a decision made, a phase finished, a blocker hit — not on a timer and not
 per file edited. Move `status` when the work actually changes state; the operator reads column
