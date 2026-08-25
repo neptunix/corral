@@ -78,6 +78,7 @@ describe("the log does not ride the stream frame", () => {
 
     expect(state.tasks[0]?.logCount).toBe(2);
     expect(state.tasks[0]?.lastLogAtMs).toBe(200);
+    expect(state.tasks[0]?.noteCount).toBe(2);
     // The raw body, not the parsed value: the schema strips unknown keys, so parsing first would
     // hide a log that really was sent.
     expect(JSON.stringify(body)).not.toContain("second");
@@ -116,7 +117,7 @@ describe("the log does not ride the stream frame", () => {
   it("EnrichedTask has no log field at all", () => {
     const parsed = EnrichedTaskSchema.parse({
       id: "t_abcdefg", title: "T", description: "d", status: "todo", priority: null,
-      createdAt: 1, updatedAt: 2, sessions: [], log: LOG, logCount: 2, lastLogAtMs: 200,
+      createdAt: 1, updatedAt: 2, sessions: [], log: LOG, logCount: 2, noteCount: 0, lastLogAtMs: 200,
     });
     expect(Object.keys(parsed)).not.toContain("log");
   });

@@ -11,6 +11,11 @@ import { entryTime, filterLog, groupByDay, logCounts, sourceName } from "../lib/
 interface Props {
   readonly boardId: string;
   readonly taskId: string;
+  // The frame's counters for this card. They move when a session appends while the tab is open,
+  // and the tab refetches on that — otherwise the badge behind the modal says "new" and the open
+  // tab cannot show it.
+  readonly logCount: number;
+  readonly lastLogAtMs: number | null;
 }
 
 type Load =
@@ -30,7 +35,7 @@ const FILTERS: readonly { readonly id: LogFilter; readonly label: string }[] = [
  * this tab last showed, so the mark is taken from the fetched entries rather than the frame's
  * counters, which can lag the fetch.
  */
-export function TaskLogTab({ boardId, taskId }: Props): JSX.Element {
+export function TaskLogTab({ boardId, taskId, logCount, lastLogAtMs }: Props): JSX.Element {
   const [load, setLoad] = useState<Load>({ state: "loading" });
   const [filter, setFilter] = useState<LogFilter>("all");
 
@@ -51,7 +56,7 @@ export function TaskLogTab({ boardId, taskId }: Props): JSX.Element {
         if (!cancelled) setLoad({ state: "error", message: err instanceof Error ? err.message : String(err) });
       });
     return () => { cancelled = true; };
-  }, [boardId, taskId]);
+  }, [boardId, taskId, logCount, lastLogAtMs]);
 
   const all = load.state === "ready" ? load.log : [];
   const shown = filterLog(all, filter);

@@ -30,7 +30,7 @@ function makeTask(overrides: Partial<EnrichedTask> = {}): EnrichedTask {
     sessions: [],
     createdAt: 0,
     updatedAt: 0,
-    logCount: 0,
+    logCount: 0, noteCount: 0,
     lastLogAtMs: null,
     ...overrides,
   };
@@ -299,7 +299,7 @@ describe("TaskEditModal — Board/Project row layout", () => {
 describe("TaskEditModal — Log tab", () => {
   it("opens on the Log tab when asked, fetches the log, and offers no Save or Run there", async () => {
     const board = makeBoard();
-    const task = makeTask({ logCount: 1, lastLogAtMs: 1_000 });
+    const task = makeTask({ logCount: 1, noteCount: 0, lastLogAtMs: 1_000 });
     const get = vi.spyOn(api.boards, "get").mockResolvedValue({
       ...board, tasks: [{ ...task, sessions: [], log: [{ id: "e1", atMs: 1_000, source: "operator", kind: "status_changed", text: "Todo → Doing." }] }],
     });

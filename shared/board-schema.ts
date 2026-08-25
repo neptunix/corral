@@ -217,6 +217,9 @@ export const EnrichedSessionLinkSchema = SessionLinkSchema.extend({
 export const EnrichedTaskSchema = TaskFrameSchema.extend({
   sessions: z.array(EnrichedSessionLinkSchema),
   logCount: z.number().default(0),
+  // Notes only. Every card carries lifecycle entries from birth (`created`), so `logCount` cannot
+  // say whether a session has written anything — this is what the badge's "nothing written" reads.
+  noteCount: z.number().default(0),
   lastLogAtMs: z.number().nullable().default(null),
 });
 

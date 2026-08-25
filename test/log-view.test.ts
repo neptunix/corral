@@ -80,6 +80,23 @@ describe("groupByDay", () => {
     expect(groups[0]?.label).toMatch(/22/);
   });
 
+  it("a day in another year carries its year; a day in this year does not", () => {
+    const lastYear = new Date(2025, 0, 3, 12).getTime();
+    const thisYear = new Date(2026, 0, 3, 12).getTime();
+    const labels = groupByDay([entry({ id: "a", atMs: lastYear }), entry({ id: "b", atMs: thisYear })], NOON).map((g) => g.label);
+    expect(labels[0]).not.toMatch(/2026/);
+    expect(labels[1]).toMatch(/2025/);
+  });
+
+  it("\"Yesterday\" is the previous calendar day even when the clocks changed overnight", () => {
+    // Iterate every day of the year: on a DST day, `now - 24h` lands on the wrong date.
+    for (let day = 1; day <= 366; day++) {
+      const now = new Date(2026, 0, day, 0, 30).getTime();
+      const prev = new Date(2026, 0, day - 1, 23, 30).getTime();
+      expect(groupByDay([entry({ id: "p", atMs: prev })], now)[0]?.label).toBe("Yesterday");
+    }
+  });
+
   it("day boundaries follow the calendar, not 24-hour windows from now", () => {
     // 23:00 the day before is only two hours before 01:00, and still "Yesterday".
     const now = new Date(2026, 7, 25, 1, 0, 0).getTime();

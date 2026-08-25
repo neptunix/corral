@@ -218,7 +218,7 @@ export function TaskEditModal({
               </div>
             </div>
           ) : tab === "log" ? (
-            <TaskLogTab boardId={board.id} taskId={task.id} />
+            <TaskLogTab boardId={board.id} taskId={task.id} logCount={task.logCount} lastLogAtMs={task.lastLogAtMs} />
           ) : (
             <div role="tabpanel">
               <SpawnFields form={spawn} hasSessions={task.sessions.length > 0} />

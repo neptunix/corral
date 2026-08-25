@@ -5,9 +5,6 @@ import type { Board, LogEntry, LogKind, LogSource, SessionLink, Task } from "../
 import { generateLogEntryId, LOG_ENTRY_TEXT_MAX, LOG_NOTE_QUOTA, LOG_SYSTEM_QUOTA } from "../shared/board-schema.ts";
 import type { SessionRow } from "../shared/schema.ts";
 
-// Defined in shared/ (the board's Log tab prints them); re-exported so this stays their server home.
-export { LOG_NOTE_QUOTA, LOG_SYSTEM_QUOTA };
-
 function isNote(entry: LogEntry): boolean {
   return entry.kind === "note";
 }

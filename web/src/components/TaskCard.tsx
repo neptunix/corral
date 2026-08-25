@@ -81,7 +81,7 @@ export function TaskCard({ task, boardId, onEdit, onOpenLog, onOpenSession, onDe
           >⚙</button>
         </div>
       </div>
-      <LogBadge task={task} boardId={boardId} onOpenLog={onOpenLog} hasSessions={dedupedSessions.length > 0} />
+      <LogBadge task={task} boardId={boardId} onOpenLog={onOpenLog} />
       {dedupedSessions.length > 0 && (
         <div className="flex flex-col gap-1 mt-2">
           {dedupedSessions.map((s) => (
@@ -107,32 +107,33 @@ const LOG_ICON_PATH = "M3 4h10M3 8h10M3 12h6";
 
 /**
  * Three states: new entries this browser has not displayed (accent, "N new"), a quiet log (muted
- * count), and a card with a session that has written nothing (warning — the card-signal case).
- * "New" is per viewer and derived from the counters on the frame (log-seen.ts): the server holds
- * no seen notion. A card with no session and no log shows nothing — there is nobody to have written.
+ * count), and a card with a session but no NOTE yet (warning — the card-signal case; `logCount`
+ * cannot tell, every card carries lifecycle entries from birth). "New" is per viewer and derived
+ * from the counters on the frame (log-seen.ts): the server holds no seen notion. A card with no
+ * session and no log shows nothing — there is nobody to have written.
  */
-function LogBadge({ task, boardId, onOpenLog, hasSessions }: {
+function LogBadge({ task, boardId, onOpenLog }: {
   readonly task: EnrichedTask;
   readonly boardId: string;
   readonly onOpenLog: () => void;
-  readonly hasSessions: boolean;
 }): JSX.Element | null {
-  if (task.logCount === 0 && !hasSessions) return null;
+  const silent = task.noteCount === 0 && task.sessions.length > 0;
+  if (task.logCount === 0 && !silent) return null;
   const fresh = newSince(task, readLogSeen(seenKey(boardId, task.id)));
-  const tone = task.logCount === 0 ? "text-warning" : fresh > 0 ? "text-primary" : "text-muted-foreground/55";
+  const tone = silent ? "text-warning" : fresh > 0 ? "text-primary" : "text-muted-foreground/55";
   return (
     <button
       type="button"
       onPointerDown={(e) => { e.stopPropagation(); }}
       onClick={(e) => { e.stopPropagation(); onOpenLog(); }}
       className={`flex items-center gap-1.5 mb-2 -mx-1 px-1 rounded hover:bg-muted ${tone}`}
-      title={task.logCount === 0 ? "This card's sessions have written nothing to its log yet" : "Open the card's log"}
+      title={silent ? "This card's sessions have written no note to its log yet" : "Open the card's log"}
       data-testid="log-badge"
     >
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
         <path d={LOG_ICON_PATH} />
       </svg>
-      {task.logCount === 0
+      {silent
         ? <span className="text-[11px]">nothing written</span>
         : (
           <>

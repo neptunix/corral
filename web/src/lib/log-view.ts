@@ -30,7 +30,9 @@ function localDayKey(ms: number): string {
 function dayLabel(ms: number, now: number): string {
   const key = localDayKey(ms);
   if (key === localDayKey(now)) return "Today";
-  if (key === localDayKey(now - 86_400_000)) return "Yesterday";
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1); // calendar day, not 24h — a DST day is 23 or 25 hours
+  if (key === localDayKey(yesterday.getTime())) return "Yesterday";
   const d = new Date(ms);
   const sameYear = d.getFullYear() === new Date(now).getFullYear();
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) });

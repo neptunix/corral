@@ -192,9 +192,9 @@ export function Board({
         // it, or true unmount) is safe to fall through: React 18 no-ops a state update on an unmounted
         // component, and a re-run with the SAME board must still open the modal.
         if (latestBoardId.current !== requestBoardId) return;
-        // The route answers with the frame shape, which carries the log as two counters. A card this
-        // call just created has no entries, so both are their empty values.
-        setEditingTask({ ...created, sessions: [], logCount: 0, lastLogAtMs: null });
+        // The route answers with the frame shape, without the log's counters. Placeholders until the
+        // next frame carries the card: the modal renders the live card from `tasks` once it does.
+        setEditingTask({ ...created, sessions: [], logCount: 0, noteCount: 0, lastLogAtMs: null });
         setFixPreset(request.preset);
       })
       .catch((err: unknown) => {
@@ -396,7 +396,9 @@ export function Board({
         // useState(task.x) field initializers keep the old task's stale values under the new task's id.
         <TaskEditModal
           key={editingTask.id}
-          task={editingTask}
+          // The live card, so the Log tab sees the frame's counters move while the modal is open;
+          // the snapshot only until the next frame carries the card (a just-created one).
+          task={tasks.find((t) => t.id === editingTask.id) ?? editingTask}
           board={board}
           envs={Object.entries(envs).map(([id, e]) => ({ id, label: e.label ?? id, kind: e.kind ?? null, reachable: e.reachable }))}
           onSave={handleSave}

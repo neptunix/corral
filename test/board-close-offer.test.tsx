@@ -45,7 +45,7 @@ function link(overrides: Partial<EnrichedSessionLink> = {}): EnrichedSessionLink
 function makeTask(overrides: Partial<EnrichedTask> = {}): EnrichedTask {
   return {
     id: "t1", title: "Refactor the API", description: "", status: "c1", priority: null,
-    sessions: [], createdAt: 0, updatedAt: 0, logCount: 0, lastLogAtMs: null, ...overrides,
+    sessions: [], createdAt: 0, updatedAt: 0, logCount: 0, noteCount: 0, lastLogAtMs: null, ...overrides,
   };
 }
 
