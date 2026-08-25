@@ -59,3 +59,24 @@ describe("api error codes", () => {
       .rejects.toMatchObject({ code: null, message: "HTTP 404" });
   });
 });
+
+// The one client path every other session's log text enters through. The component tests mock
+// `api.boards.get` itself, so only here does `BoardSchema.parse` actually run — an unparsed
+// `req<Board>` would leave every other test green.
+describe("api.boards.get — the one log-carrying route is parsed, not trusted", () => {
+  const task = { id: "t1", title: "T", status: "c1", createdAt: 0, updatedAt: 0 };
+  const board = (log: unknown) => ({ id: "b1", label: "B", columns: [], tasks: [{ ...task, log }] });
+
+  it("GETs the board and hands back its log, healing an entry stored without an id", async () => {
+    stubFetch(200, board([{ atMs: 5, source: "corral", kind: "created", text: "x" }]));
+    const parsed = await api.boards.get("b1");
+    expect(calls[0]?.url).toBe("/api/boards/b1");
+    expect(parsed.tasks[0]?.log[0]?.text).toBe("x");
+    expect(typeof parsed.tasks[0]?.log[0]?.id).toBe("string");
+  });
+
+  it("rejects a body whose log entry is not an entry — a wrong kind never reaches the tab", async () => {
+    stubFetch(200, board([{ atMs: "soon", source: "corral", kind: "exploded", text: "x" }]));
+    await expect(api.boards.get("b1")).rejects.toThrow();
+  });
+});

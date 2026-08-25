@@ -29,7 +29,7 @@ function makeBoard(overrides: Partial<BoardType> = {}): BoardType {
 function makeTask(overrides: Partial<EnrichedTask> = {}): EnrichedTask {
   return {
     id: "t_new1", title: "Fix 1 corral issue", description: "", status: "c1", priority: null,
-    sessions: [], createdAt: 0, updatedAt: 0, logCount: 0, lastLogAtMs: null, ...overrides,
+    sessions: [], createdAt: 0, updatedAt: 0, logCount: 0, noteCount: 0, lastLogAtMs: null, ...overrides,
   };
 }
 
@@ -159,5 +159,25 @@ describe("Board — TaskEditModal remounts on a task-identity swap", () => {
       expect(screen.getByRole("tab", { name: /Run Claude/ }).getAttribute("aria-selected")).toBe("true");
     });
     expect(screen.queryByDisplayValue("Existing task")).toBeNull();
+  });
+});
+
+describe("Board — the card's log badge", () => {
+  it("opens the modal on Log; closing it returns the next ⚙ click to the Task tab", async () => {
+    const t = makeTask({ id: "t1", logCount: 2, noteCount: 1, lastLogAtMs: 1 });
+    const boardState = makeBoardState({ board: makeBoard({ tasks: [t] }), tasks: [t] });
+    vi.spyOn(api.boards, "get").mockResolvedValue({ ...boardState.board, tasks: [{ ...makeStoredTask({ id: "t1" }) }] });
+
+    render(<Board boardState={boardState} boards={[boardState.board]}
+      onOpenSession={vi.fn()} onMarkOptimistic={vi.fn()} onClearOptimistic={vi.fn()}
+      onBoardStateChange={vi.fn()} pendingFixIssues={null} onFixIssuesConsumed={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId("log-badge"));
+    expect(screen.getByRole("tab", { name: "Log" }).getAttribute("aria-selected")).toBe("true");
+    await screen.findByText("Nothing written yet.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByTitle("Edit task"));
+    expect(screen.getByRole("tab", { name: "Task" }).getAttribute("aria-selected")).toBe("true");
   });
 });

@@ -109,13 +109,12 @@ function buildBoardState(board: Board, storage: Storage, snapshot: Snapshot, att
   // open board on every poll tick, and a spread would put the whole log on every one of them. Naming
   // only what must not ride keeps the omission the compiler checks — EnrichedTaskSchema is
   // TaskSchema.omit({ log }) extended, so a field added to the card reaches the web without anyone
-  // remembering to add it here, while `log` still cannot. The two counters are the frame's whole
-  // account of the log — enough for a board to badge a card without carrying the entries. NOTHING IN
-  // THE WEB READS THEM YET; the badge is a later change, and this is the shape it needs rather than a
-  // claim that it exists.
+  // remembering to add it here, while `log` still cannot. The counters are the frame's whole account
+  // of the log — what the card's badge reads (web/src/components/TaskCard.tsx) without the entries.
   const enrichedTasks: EnrichedTask[] = sortTasks(board.tasks).map(({ log, ...task }) => ({
     ...task,
     logCount: log.length,
+    noteCount: log.filter((e) => e.kind === "note").length,
     lastLogAtMs: log.at(-1)?.atMs ?? null,
     sessions: task.sessions.map((link) => {
       // Resolve the live row. When the link carries a stable sessionId, TRUST IT over the stored
@@ -841,9 +840,8 @@ export function createApi(opts: {
     });
     if (result === "board_not_found") return c.json({ error: { code: "not_found" } }, 404);
     if (result === "no_columns") return c.json({ error: { code: "validation", message: "board has no columns" } }, 400);
-    // Log-free like every other task-shaped response. A new card's log is empty, so this strips
-    // nothing today — it is here so the rule has no exceptions to remember: `GET /api/boards/:bid`
-    // is the one route that carries a log.
+    // Log-free like every other task-shaped response — the `created` entry just stamped stays behind:
+    // `GET /api/boards/:bid` is the one route that carries a log.
     const { log: _log, ...frame } = result.task;
     return c.json(frame, 201);
   });

@@ -81,6 +81,18 @@ export const LOG_ENTRY_TEXT_MAX = 400;
  */
 export const LOG_ENTRY_BODY_MAX = LOG_ENTRY_TEXT_MAX * 20;
 
+/**
+ * SEPARATE quotas, and that is the whole point rather than a detail.
+ *
+ * A single shared cap would be actively harmful: moving a card into a closing column offers to close
+ * every live session on it in one operator action, so a card with fifteen sessions produces a burst
+ * of `session_closed` lines — under one cap that burst would evict exactly the notes the log exists
+ * for. The `kind` filter lets a reader ignore the noise; only separate quotas stop the noise from
+ * DELETING the signal. Enforced in server/task-log.ts; here because the board's Log tab names them.
+ */
+export const LOG_NOTE_QUOTA = 60;
+export const LOG_SYSTEM_QUOTA = 140;
+
 // STORED SHAPE — deliberately permissive on `text`, the same reasoning as SpawnPresetSchema and
 // `description`: readBoardFile parses with BoardSchema, so a `.max()` here would turn an entry
 // written before the cap existed into an unloadable board. The 400-character cap lives on the write
@@ -199,12 +211,15 @@ export const EnrichedSessionLinkSchema = SessionLinkSchema.extend({
 });
 
 // Built on TaskFrameSchema, NOT on TaskSchema: extending the latter would inherit `log` silently and
-// put the whole log back on every frame. The two counters are what a board badge would read instead
-// of the entries — no web code reads them yet, so they are the shape that change needs, not evidence
-// that it has landed.
+// put the whole log back on every frame. The two counters are what the board's card badge reads
+// (web/src/components/TaskCard.tsx) instead of the entries; "new since I looked" is derived from
+// them per viewer in the browser (web/src/lib/log-seen.ts) — the server holds no seen notion.
 export const EnrichedTaskSchema = TaskFrameSchema.extend({
   sessions: z.array(EnrichedSessionLinkSchema),
   logCount: z.number().default(0),
+  // Notes only. Every card carries lifecycle entries from birth (`created`), so `logCount` cannot
+  // say whether a session has written anything — this is what the badge's "nothing written" reads.
+  noteCount: z.number().default(0),
   lastLogAtMs: z.number().nullable().default(null),
 });
 

@@ -15,6 +15,9 @@ you work on, and lets you respond in place.
 - **Kanban board over live sessions** — group sessions into boards and task cards; every
   card shows real-time status (working / blocked / idle), the session's recap, and Claude
   metrics (model, context %, cost, account rate-limit windows).
+- **Card log** — each card carries an append-only log beside its description: sessions write
+  decisions and blockers, corral stamps the lifecycle. The board badges a card with entries you
+  have not seen; the card's Log tab shows them, filterable to notes only.
 - **Attention feed** — a deterministic transition detector (no LLM, no polling races) that
   tells you which session blocked or finished, with a tail of its output.
 - **Live terminal** — click a card, get a fully bidirectional xterm.js terminal attached to

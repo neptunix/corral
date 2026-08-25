@@ -21,7 +21,7 @@ describe("TaskCard — duplicate session links (server-bug safety net)", () => {
   it("collapses two links resolving to the same (env, paneId, sessionId) into one row", () => {
     const task: EnrichedTask = {
       id: "t1", title: "Weight Management Timeline", description: "", status: "todo", priority: null,
-      createdAt: 0, updatedAt: 0, logCount: 0, lastLogAtMs: null,
+      createdAt: 0, updatedAt: 0, logCount: 0, noteCount: 0, lastLogAtMs: null,
       sessions: [
         link({}), // exact duplicate of itself below
         link({}),
@@ -34,6 +34,8 @@ describe("TaskCard — duplicate session links (server-bug safety net)", () => {
     render(
       <TaskCard
         task={task}
+        boardId="b1"
+        onOpenLog={vi.fn()}
         onEdit={vi.fn()}
         onOpenSession={vi.fn()}
         onDetachSession={vi.fn()}
@@ -51,11 +53,13 @@ describe("TaskCard — which string a live row shows", () => {
   function renderOne(over: Partial<EnrichedSessionLink>): void {
     const task: EnrichedTask = {
       id: "t1", title: "T", description: "", status: "todo", priority: null,
-      createdAt: 0, updatedAt: 0, logCount: 0, lastLogAtMs: null, sessions: [link(over)],
+      createdAt: 0, updatedAt: 0, logCount: 0, noteCount: 0, lastLogAtMs: null, sessions: [link(over)],
     };
     render(
       <TaskCard
         task={task}
+        boardId="b1"
+        onOpenLog={vi.fn()}
         onEdit={vi.fn()}
         onOpenSession={vi.fn()}
         onDetachSession={vi.fn()}

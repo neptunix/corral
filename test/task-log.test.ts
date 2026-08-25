@@ -3,7 +3,8 @@ import { LOG_ENTRY_TEXT_MAX, LogEntrySchema } from "@shared/board-schema.ts";
 import type { SessionRow } from "@shared/schema";
 import { describe, expect, it } from "vitest";
 
-import { appendLogEntry, LOG_NOTE_QUOTA, LOG_SYSTEM_QUOTA, resolveWriter, sessionRef, stampSystem } from "../server/task-log.ts";
+import { appendLogEntry, resolveWriter, sessionRef, stampSystem } from "../server/task-log.ts";
+import { LOG_NOTE_QUOTA, LOG_SYSTEM_QUOTA } from "../shared/board-schema.ts";
 
 function entry(kind: LogKind, text: string, at: number): LogEntry {
   return { id: `e${String(at)}`, atMs: at, source: { sessionId: null, name: "s" }, kind, text };

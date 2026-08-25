@@ -16,6 +16,7 @@ import { z } from "zod";
 
 import { CloseCardSessionsModal, type CardSessionOffer } from "./CloseCardSessionsModal";
 import { TaskCard } from "./TaskCard";
+import type { Tab } from "./TaskEditModal";
 import { TaskEditModal } from "./TaskEditModal";
 import { ApiError, api } from "../lib/api";
 import { overrideKey, type OptimisticState } from "../lib/optimistic";
@@ -38,14 +39,16 @@ interface DroppableColumnProps {
   readonly label: string;
   readonly collapsible: boolean;
   readonly tasks: readonly EnrichedTask[];
-  readonly onTaskEdit: (task: EnrichedTask) => void;
+  readonly boardId: string;
+  // `tab` opens the modal on that section instead of the default (the card's log badge → "log").
+  readonly onTaskEdit: (task: EnrichedTask, tab?: Tab) => void;
   readonly onOpenSession: (env: string, paneId: string, awaitAgent?: boolean, title?: string) => void;
   readonly onDetachSession: (taskId: string, env: string, paneId: string, sessionId: string | null) => void;
   readonly onCloseSession: (taskId: string, env: string, paneId: string, sessionId: string | null) => Promise<void>;
   readonly onResumeSession: (taskId: string, env: string, paneId: string, sessionId: string | null) => void;
 }
 
-function DroppableColumn({ columnId, label, collapsible, tasks, onTaskEdit, onOpenSession, onDetachSession, onCloseSession, onResumeSession }: DroppableColumnProps): JSX.Element {
+function DroppableColumn({ columnId, label, collapsible, tasks, boardId, onTaskEdit, onOpenSession, onDetachSession, onCloseSession, onResumeSession }: DroppableColumnProps): JSX.Element {
   const { setNodeRef, isOver } = useDroppable({ id: `col:${columnId}`, data: { type: "column", columnId } });
   // Closed columns start collapsed on every load (in-memory only, no persistence). Toggle to peek.
   const [collapsed, setCollapsed] = useState(collapsible);
@@ -97,7 +100,9 @@ function DroppableColumn({ columnId, label, collapsible, tasks, onTaskEdit, onOp
           <TaskCard
             key={task.id}
             task={task}
+            boardId={boardId}
             onEdit={() => { onTaskEdit(task); }}
+            onOpenLog={() => { onTaskEdit(task, "log"); }}
             onOpenSession={onOpenSession}
             onDetachSession={(env, paneId, sessionId) => { onDetachSession(task.id, env, paneId, sessionId); }}
             onCloseSession={(env, paneId, sessionId) => onCloseSession(task.id, env, paneId, sessionId)}
@@ -151,6 +156,8 @@ export function Board({
   // Set alongside editingTask only by the fix-issues flow below; TaskEditModal renders it as an
   // ephemeral, unsaved preset ahead of `board.spawnPresets` and pre-selects it. Cleared with the modal.
   const [fixPreset, setFixPreset] = useState<SpawnPreset | null>(null);
+  // The section the modal opens on; set with editingTask by the card's log badge, cleared with it.
+  const [editingTab, setEditingTab] = useState<Tab | undefined>(undefined);
   // A move into a closed column that is waiting to be confirmed, because live sessions are attached.
   // NOTHING is written while this is set — the card has not moved (see CloseCardSessionsModal).
   const [pendingMove, setPendingMove] = useState<ClosedMove | null>(null);
@@ -185,9 +192,9 @@ export function Board({
         // it, or true unmount) is safe to fall through: React 18 no-ops a state update on an unmounted
         // component, and a re-run with the SAME board must still open the modal.
         if (latestBoardId.current !== requestBoardId) return;
-        // The route answers with the frame shape, which carries the log as two counters. A card this
-        // call just created has no entries, so both are their empty values.
-        setEditingTask({ ...created, sessions: [], logCount: 0, lastLogAtMs: null });
+        // The route answers with the frame shape, without the log's counters. Placeholders until the
+        // next frame carries the card: the modal renders the live card from `tasks` once it does.
+        setEditingTask({ ...created, sessions: [], logCount: 0, noteCount: 0, lastLogAtMs: null });
         setFixPreset(request.preset);
       })
       .catch((err: unknown) => {
@@ -301,6 +308,7 @@ export function Board({
   function handleClose(): void {
     setEditingTask(null);
     setFixPreset(null);
+    setEditingTab(undefined);
   }
 
   // Remove a single session link from a task (the ✕ on a session row). Uses the existing detach route;
@@ -371,7 +379,8 @@ export function Board({
               label={col.label}
               collapsible={col.type === "closed"}
               tasks={tasksByColumn.get(col.id) ?? []}
-              onTaskEdit={setEditingTask}
+              boardId={board.id}
+              onTaskEdit={(task, tab) => { setEditingTask(task); setEditingTab(tab); }}
               onOpenSession={onOpenSession}
               onDetachSession={handleDetachSession}
               onCloseSession={handleCloseSession}
@@ -387,7 +396,9 @@ export function Board({
         // useState(task.x) field initializers keep the old task's stale values under the new task's id.
         <TaskEditModal
           key={editingTask.id}
-          task={editingTask}
+          // The live card, so the Log tab sees the frame's counters move while the modal is open;
+          // the snapshot only until the next frame carries the card (a just-created one).
+          task={tasks.find((t) => t.id === editingTask.id) ?? editingTask}
           board={board}
           envs={Object.entries(envs).map(([id, e]) => ({ id, label: e.label ?? id, kind: e.kind ?? null, reachable: e.reachable }))}
           onSave={handleSave}
@@ -404,7 +415,7 @@ export function Board({
             onBoardStateChange();
           }}
           onClose={handleClose}
-          initialTab={fixPreset === null ? undefined : "run"}
+          initialTab={fixPreset === null ? editingTab : "run"}
           extraPreset={fixPreset}
         />
       )}

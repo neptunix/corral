@@ -107,7 +107,7 @@ describe("readHandler", () => {
     boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
     description, status: "doing", priority: null,
     columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
-    sessions: [], logCount: 0, lastLogAtMs: null,
+    sessions: [], logCount: 0, noteCount: 0, lastLogAtMs: null,
   };
 
   it("returns the bound card's full description, past whoami's preview budget", async () => {
