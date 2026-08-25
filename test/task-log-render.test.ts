@@ -4,7 +4,7 @@ import type { WhoamiResponse, WhoamiTask } from "@shared/whoami-schema.ts";
 import { describe, expect, it } from "vitest";
 
 import type { CorralClient } from "../mcp/client.ts";
-import { formatCardDetail, formatWhoami, LOG_BLOCK_MAX, LOG_ENTRY_HEADER_MARK, LOG_ENTRY_LINE_MAX, LOG_ENTRY_TEXT_MARK, LOG_LINE_PREFIX } from "../mcp/digest.ts";
+import { formatCardDetail, formatWhoami, LOG_BLOCK_MAX, LOG_ENTRIES_SHOWN, LOG_ENTRY_HEADER_MARK, LOG_ENTRY_LINE_MAX, LOG_ENTRY_TEXT_MARK, LOG_LINE_PREFIX } from "../mcp/digest.ts";
 import { createIdentity } from "../mcp/identity.ts";
 import { logHandler, readHandler } from "../mcp/tools/task.ts";
 
@@ -152,6 +152,17 @@ describe("formatCardDetail — the log block", () => {
 
     expect(out).toContain(text);
     expect(out).not.toContain("TRUNCATED");
+  });
+
+  // Pins the block budget to the write cap: a full reading window of notes at the cap must render
+  // whole, or the one signal a reader has for "did I see all of it" fires falsely.
+  it("renders a full reading window of notes at the write cap whole", () => {
+    const text = "z".repeat(LOG_ENTRY_TEXT_MAX);
+    const shown = Array.from({ length: LOG_ENTRIES_SHOWN }, (_, i) => entry({ id: `e${String(i)}`, atMs: 1_700_000_000_000 + i, text }));
+    const out = formatCardDetail(card, { shown, total: LOG_ENTRIES_SHOWN, hidden: 0, kinds: null, unavailable: false });
+
+    expect(out).not.toContain("TRUNCATED");
+    expect(out.split(text)).toHaveLength(LOG_ENTRIES_SHOWN + 1);
   });
 
   // The narrower half of the firewall case above: the gutter alone kept forged text inside the

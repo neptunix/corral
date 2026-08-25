@@ -189,6 +189,9 @@ export interface LogArgs {
   readonly taskId?: string | undefined;
 }
 
+// Past this a stored entry reads as a paragraph on the board; the reply nudges the writer, once.
+const LOG_ENTRY_LONG = LOG_ENTRY_TEXT_MAX / 2;
+
 export function logHandler(deps: TaskDeps, args: LogArgs): Promise<string> {
   return runTool(async () => {
     const target = await resolveTarget(deps, args.boardId, args.taskId);
@@ -276,9 +279,6 @@ export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string>
  * carries what the field is FOR, which is the only statement of that a session without the skill
  * ever sees; both halves are pinned in test/mcp-tools-read.test.ts.
  */
-// Past this a stored entry reads as a paragraph on the board; the reply nudges the writer, once.
-const LOG_ENTRY_LONG = LOG_ENTRY_TEXT_MAX / 2;
-
 export const TASK_TOOL_DESCRIPTIONS = {
   read:
     "Read the FULL description of a card, plus its log — corral_whoami shows only a one-line description preview and the log's size. Defaults to the card THIS session is bound to; pass `boardId` AND `taskId` together to read ANY card on the machine (a bare `taskId` is refused — a task id is unique only within its board, and corral_task_bind with no arguments lists both). Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. The log returns the most recent entries and says how many older ones it left out; `kind` narrows it to particular entry kinds. Read-only.",

@@ -84,8 +84,9 @@ export function logTooLong(length: number): string {
 
 // STORED SHAPE — deliberately permissive on `text`, the same reasoning as SpawnPresetSchema and
 // `description`: readBoardFile parses with BoardSchema, so a `.max()` here would turn an entry
-// written before the cap existed into an unloadable board. The 400-character cap lives on the write
-// path (server/task-log.ts).
+// written before the cap existed into an unloadable board. The cap (LOG_ENTRY_TEXT_MAX) lives on
+// the write path: a note over it is refused by the append route and the MCP tool, a system entry is
+// truncated in server/task-log.ts.
 export const LogEntrySchema = z.object({
   /**
    * A stable identity for one entry. `at` cannot serve as one: closing every session on a card is N
