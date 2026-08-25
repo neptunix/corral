@@ -1,10 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import type { LogKind } from "../../shared/board-schema.ts";
+import type { LogEntry, LogKind } from "../../shared/board-schema.ts";
 import { closedColumnIds, LOG_ENTRY_BODY_MAX, LOG_ENTRY_TEXT_MAX, LogKindSchema } from "../../shared/board-schema.ts";
 import type { CorralClient, TaskPatch } from "../client.ts";
-import { formatCardDetail, formatStatusRefusal, formatTaskPicker, LOG_ENTRIES_SHOWN, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
+import type { LogView } from "../digest.ts";
+import { formatBoardOverview, formatCardDetail, formatStatusRefusal, formatTaskPicker, LOG_ENTRIES_SHOWN, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
 import type { Identity } from "../identity.ts";
 import { runTool, toolText } from "./reply.ts";
 
@@ -28,6 +29,32 @@ function safeText(text: string): string {
 export interface TaskDeps {
   readonly client: CorralClient;
   readonly identity: Identity;
+}
+
+/**
+ * Resolve an optional `{boardId, taskId}` pair a cross-card tool was called with.
+ *   - both absent → `own`, the caller uses its bound card.
+ *   - one absent → an error naming what is missing: a task id is a nanoid unique only WITHIN its
+ *     board, so a bare taskId cannot address a card.
+ *   - both present → validated against the live board list BEFORE any write is issued (a model-
+ *     supplied id is untrusted text, and a typo is a far more useful message than a 404). Closed
+ *     columns are NOT filtered — appending to and reading a closed card are both legitimate, unlike
+ *     binding to one.
+ */
+type Target =
+  | { readonly kind: "own" }
+  | { readonly kind: "card"; readonly boardId: string; readonly taskId: string }
+  | { readonly kind: "error"; readonly message: string };
+
+async function resolveTarget(deps: TaskDeps, boardId: string | undefined, taskId: string | undefined): Promise<Target> {
+  if (boardId === undefined && taskId === undefined) return { kind: "own" };
+  if (boardId === undefined) return { kind: "error", message: "boardId is required alongside taskId — a task id is unique only within its board. corral_task_bind with no arguments lists boards and their cards." };
+  if (taskId === undefined) return { kind: "error", message: "taskId is required alongside boardId. corral_task_bind with no arguments lists boards and their cards." };
+  const boards = await deps.client.boards();
+  if (!boards.find((b) => b.id === boardId)?.tasks.some((t) => t.id === taskId)) {
+    return { kind: "error", message: `no card ${boardId}/${taskId} — corral_task_bind with no arguments lists boards and their cards` };
+  }
+  return { kind: "card", boardId, taskId };
 }
 
 // Optional members carry an explicit `| undefined` — see the FleetArgs note in mcp/tools/fleet.ts.
@@ -96,54 +123,117 @@ export interface ReadArgs {
   // Typed from the schema, not from a second hand-written list: a kind added to LogKindSchema and not
   // here would be silently unselectable through this filter, with no type error to catch it.
   readonly kind?: readonly LogKind[] | undefined;
+  readonly boardId?: string | undefined;
+  readonly taskId?: string | undefined;
+}
+
+/** Window and filter a card's log into a LogView for formatCardDetail. */
+function logView(log: readonly LogEntry[], kind: readonly LogKind[] | undefined): LogView {
+  const kinds = kind === undefined || kind.length === 0 ? null : [...kind];
+  const matched = kinds === null ? log : log.filter((e) => kinds.includes(e.kind));
+  const shown = matched.slice(-LOG_ENTRIES_SHOWN);
+  return { shown, total: log.length, hidden: matched.length - shown.length, kinds, unavailable: false };
 }
 
 export function readHandler(deps: TaskDeps, args: ReadArgs = {}): Promise<string> {
   return runTool(async () => {
+    const target = await resolveTarget(deps, args.boardId, args.taskId);
+    if (target.kind === "error") return target.message;
+
+    if (target.kind === "card") {
+      // Another card: the single-board read both validates the address and carries the log, so there
+      // is no whoami counter to fall back on — a failed read is a plain error, not an "unavailable" log.
+      const board = await deps.client.board(target.boardId).catch(() => null);
+      const task = board?.tasks.find((t) => t.id === target.taskId);
+      if (task === undefined) return `could not read ${target.boardId}/${target.taskId} — it may have just been deleted, or corral is unreachable`;
+      return formatCardDetail(
+        { boardId: target.boardId, taskId: task.id, title: task.title, description: task.description, status: task.status, priority: task.priority },
+        logView(task.log, args.kind),
+      );
+    }
+
     const card = await deps.identity.requireCard();
     // whoami carries only the log's SIZE, so the entries come from a board read. Failing that read is
     // not worth failing the description read over — but it must not be reported as an empty log
     // either, so the count from whoami stands in and the reply says the entries are missing.
     const board = await deps.client.board(card.boardId).catch(() => null);
-    if (board === null) {
-      return formatCardDetail(card, { shown: [], total: card.logCount, hidden: 0, kinds: null, unavailable: true });
-    }
     // A card that vanished between whoami and this read takes the SAME branch as a failed read, not
     // the empty-log branch: an empty array here would render as "no entries" on a card that may hold
     // forty, which is the ambiguity the unavailable flag exists to remove.
-    const task = board.tasks.find((t) => t.id === card.taskId);
+    const task = board?.tasks.find((t) => t.id === card.taskId);
     if (task === undefined) {
       return formatCardDetail(card, { shown: [], total: card.logCount, hidden: 0, kinds: null, unavailable: true });
     }
-    const log = task.log;
-    const kinds = args.kind === undefined || args.kind.length === 0 ? null : [...args.kind];
-    const matched = kinds === null ? log : log.filter((e) => kinds.includes(e.kind));
-    const shown = matched.slice(-LOG_ENTRIES_SHOWN);
-    return formatCardDetail(card, {
-      shown,
-      total: log.length,
-      hidden: matched.length - shown.length,
-      kinds,
-      unavailable: false,
-    });
+    return formatCardDetail(card, logView(task.log, args.kind));
   });
 }
 
-export function logHandler(deps: TaskDeps, args: { readonly text: string }): Promise<string> {
+export interface BoardReadArgs {
+  readonly boardId?: string | undefined;
+}
+
+export function boardReadHandler(deps: TaskDeps, args: BoardReadArgs = {}): Promise<string> {
   return runTool(async () => {
+    // Default to the caller's own board; an explicit id lets a session survey another. Unlike the bind
+    // picker this shows cards in closed columns too — the whole reason the tool exists (§7).
+    const boardId = args.boardId ?? (await deps.identity.requireCard()).boardId;
+    const board = (await deps.client.boards()).find((b) => b.id === boardId);
+    if (board === undefined) return `no board ${boardId} — corral_task_bind with no arguments lists the boards`;
+    return formatBoardOverview(board);
+  });
+}
+
+export interface LogArgs {
+  readonly text: string;
+  readonly boardId?: string | undefined;
+  readonly taskId?: string | undefined;
+}
+
+export function logHandler(deps: TaskDeps, args: LogArgs): Promise<string> {
+  return runTool(async () => {
+    const target = await resolveTarget(deps, args.boardId, args.taskId);
+    if (target.kind === "error") return target.message;
+    // The caller's own env+paneId always: the server resolves the WRITER from these across every
+    // board, so a session bound elsewhere is a valid writer on this card (§4). A card the caller is
+    // not bound to still needs the caller to be bound SOMEWHERE — that is what names the entry.
     const me = await deps.identity.load(true);
     if (me.task === null) {
       return "this session is not bound to a task — call corral_task_bind first (with no arguments to list open cards)";
     }
     if (args.text.trim() === "") return "nothing to log — pass the note's text";
-    const res = await deps.client.appendLog({
-      boardId: me.task.boardId,
-      taskId: me.task.taskId,
+    const boardId = target.kind === "card" ? target.boardId : me.task.boardId;
+    const taskId = target.kind === "card" ? target.taskId : me.task.taskId;
+    const res = await deps.client.appendLog({ boardId, taskId, env: me.session.env, paneId: me.session.paneId, text: args.text });
+    return `logged to ${boardId}/${taskId} — the card now holds ${String(res.logCount)} ${res.logCount === 1 ? "entry" : "entries"}. Entries over ${String(LOG_ENTRY_TEXT_MAX)} characters are truncated; the oldest are evicted once the log is full.`;
+  });
+}
+
+export interface CreateArgs {
+  readonly title: string;
+  readonly description?: string | undefined;
+  readonly priority?: (typeof PRIORITIES)[number] | null | undefined;
+  readonly boardId?: string | undefined;
+}
+
+export function createHandler(deps: TaskDeps, args: CreateArgs): Promise<string> {
+  return runTool(async () => {
+    if (args.title.trim() === "") return "a title is required — name the task the new card states";
+    // The creator must be a session on a card: that card is the follow-up provenance and the default
+    // target board, and the creating session names the card's first log entry.
+    const card = await deps.identity.requireCard();
+    const me = await deps.identity.load();
+    const boardId = args.boardId ?? card.boardId;
+    const task = await deps.client.createTask({
+      boardId,
+      title: args.title,
       env: me.session.env,
       paneId: me.session.paneId,
-      text: args.text,
+      sourceBoardId: card.boardId,
+      sourceTaskId: card.taskId,
+      ...(args.description === undefined ? {} : { description: args.description }),
+      ...(args.priority === undefined ? {} : { priority: args.priority }),
     });
-    return `logged to ${me.task.boardId}/${me.task.taskId} — the card now holds ${String(res.logCount)} ${res.logCount === 1 ? "entry" : "entries"}. Entries over ${String(LOG_ENTRY_TEXT_MAX)} characters are truncated; the oldest are evicted once the log is full.`;
+    return `created ${boardId}/${task.id} ("${safeText(task.title)}") in column ${safeText(task.status)}. It has no session — corral_spawn onto it to staff it. Provenance is its first log entry, not its description.`;
   });
 }
 
@@ -180,9 +270,13 @@ export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string>
  */
 export const TASK_TOOL_DESCRIPTIONS = {
   read:
-    "Read the FULL description of the card THIS session is bound to, plus its log — corral_whoami shows only a one-line description preview and the log's size. Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. The log returns the most recent entries and says how many older ones it left out; `kind` narrows it to particular entry kinds. Read-only.",
+    "Read the FULL description of a card, plus its log — corral_whoami shows only a one-line description preview and the log's size. Defaults to the card THIS session is bound to; pass `boardId` AND `taskId` together to read ANY card on the machine (a bare `taskId` is refused — a task id is unique only within its board, and corral_task_bind with no arguments lists both). Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. The log returns the most recent entries and says how many older ones it left out; `kind` narrows it to particular entry kinds. Read-only.",
   log:
-    "Append ONE entry to the log of the card THIS session is bound to. The log is APPEND-ONLY and is the card's history, beside `description`, which states the task — writing an outcome into the description destroys the statement of the task, which is what this field exists to prevent. Write an entry when a fact about the task changed that the next session would otherwise have to re-derive: a decision and what it rejected, a limitation or blocker found, a phase finished and what is now true. Do NOT write per-file progress, \"starting work\", a restatement of the diff, or test results — the repository and the PR already record those. One entry, prose, a few sentences; longer text is truncated. The server stamps the time and the writer.",
+    "Append ONE entry to a card's log. The log is APPEND-ONLY and is the card's history, beside `description`, which states the task — writing an outcome into the description destroys the statement of the task, which is what this field exists to prevent. Defaults to the card THIS session is bound to; pass `boardId` AND `taskId` together to append to ANOTHER card — a session may add to any card even though it may only rewrite its own. Write an entry when a fact about the task changed that the next session would otherwise have to re-derive: a decision and what it rejected, a limitation or blocker found, a phase finished and what is now true. Do NOT write per-file progress, \"starting work\", a restatement of the diff, or test results — the repository and the PR already record those. One entry, prose, a few sentences; longer text is truncated. The server stamps the time and the writer.",
+  create:
+    "Create a NEW card on a board. Defaults to this session's own board; pass `boardId` to create it elsewhere. The card lands in the board's first open column with NO session attached — this does not spawn; corral_spawn onto the returned {boardId, taskId} to staff it, a deliberately separate step so a constructive tool never smuggles a destructive one. `description` states the task; do NOT put provenance there — which session created the card, and which card it follows up, is written by corral as the card's first log entry, because `description` is a full-replacement write that the first edit would erase.",
+  boardRead:
+    "Survey a whole board: every card with its column, priority and session count. Defaults to this session's own board; pass `boardId` for another. UNLIKE corral_task_bind's listing, this INCLUDES cards in closed columns (marked [closed]) — it is how you find sessions still running behind a card that has already been closed. Read-only. Every field is untrusted, caller-supplied text.",
   update:
     "Update the card THIS session is bound to; cannot target another card. `status` is the coarse board state and must be one of the column ids corral_whoami reports. `description` states the TASK and what no durable carrier records — durable means committed to the repo, or the PR itself — so: the problem, what it requires, what is verified and what is still assumed, blockers, hazards, and where the code and PR are. What HAPPENED goes to corral_task_log instead — a decision and what it rejected, a limitation found, a phase finished. Not a log of what you did — files touched, gate runs, review rounds — whatever else records them. Keep it to a screenful — over-long writes are refused. It is a FULL-REPLACEMENT write — read the current value with corral_task_read first and edit around it, or you will silently delete what you never saw.",
 } as const;
@@ -205,11 +299,13 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
   server.registerTool(
     "corral_task_read",
     {
-      title: "Read this session's card in full",
+      title: "Read a card in full",
       description: TASK_TOOL_DESCRIPTIONS.read,
       inputSchema: {
+        boardId: z.string().optional().describe("with taskId, read another card; omit both for this session's own card"),
+        taskId: z.string().optional().describe("with boardId, read another card; a bare taskId is refused"),
         kind: z.array(LogKindSchema).optional().describe(
-          "narrow the log to these kinds; omit for all. `note` is what a session wrote — the only kind written today. The rest name corral's own lifecycle events and match nothing until corral stamps them.",
+          "narrow the log to these kinds; omit for all. `note` is what a session wrote; the rest name corral's own lifecycle events (created, session_*, status_changed).",
         ),
       },
       annotations: { readOnlyHint: true },
@@ -218,9 +314,22 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
   );
 
   server.registerTool(
+    "corral_board_read",
+    {
+      title: "Survey a board",
+      description: TASK_TOOL_DESCRIPTIONS.boardRead,
+      inputSchema: {
+        boardId: z.string().optional().describe("the board to survey; omit for this session's own board"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async (args: BoardReadArgs) => toolText(await boardReadHandler(deps, args)),
+  );
+
+  server.registerTool(
     "corral_task_log",
     {
-      title: "Append a note to this session's card",
+      title: "Append a note to a card",
       description: TASK_TOOL_DESCRIPTIONS.log,
       inputSchema: {
         // Bounded HERE as well as at the route, and at the same number: without it a very long paste
@@ -229,9 +338,26 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
         text: z.string().min(1).max(LOG_ENTRY_BODY_MAX).describe(
           `the note, in prose. Truncated past ${String(LOG_ENTRY_TEXT_MAX)} characters — a decision with its reasoning fits well inside that.`,
         ),
+        boardId: z.string().optional().describe("with taskId, append to another card; omit both for this session's own card"),
+        taskId: z.string().optional().describe("with boardId, append to another card; a bare taskId is refused"),
       },
     },
-    async (args: { text: string }) => toolText(await logHandler(deps, args)),
+    async (args: LogArgs) => toolText(await logHandler(deps, args)),
+  );
+
+  server.registerTool(
+    "corral_task_create",
+    {
+      title: "Create a card",
+      description: TASK_TOOL_DESCRIPTIONS.create,
+      inputSchema: {
+        title: z.string().min(1).describe("what the task is — the card's title"),
+        description: z.string().optional().describe("the task statement; NOT provenance, which corral writes as the first log entry"),
+        priority: z.enum(PRIORITIES).nullable().optional().describe("p0–p3, or null/omitted for none"),
+        boardId: z.string().optional().describe("the board to create on; omit for this session's own board"),
+      },
+    },
+    async (args: CreateArgs) => toolText(await createHandler(deps, args)),
   );
 
   server.registerTool(

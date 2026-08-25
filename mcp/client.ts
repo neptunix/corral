@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { BoardFrameSchema, BoardSchema, TaskSchema } from "../shared/board-schema.ts";
+import { BoardFrameSchema, BoardSchema, TaskFrameSchema, TaskSchema } from "../shared/board-schema.ts";
 import { AttentionMapSchema, SnapshotSchema } from "../shared/schema.ts";
 import { WhoamiResponseSchema } from "../shared/whoami-schema.ts";
 
@@ -101,6 +101,14 @@ export interface CorralClient {
    *  board's logs into this process for nothing. */
   board(boardId: string): Promise<z.infer<typeof BoardSchema>>;
   appendLog(a: { boardId: string; taskId: string; env: string; paneId: string; text: string }): Promise<z.infer<typeof AppendLogResultSchema>>;
+  /** Create a card on a board. The card's provenance (creator, follow-up-of) is written by the route
+   *  as the first log entry, from these coordinates — never trusted from a body field. Returns the
+   *  new card log-free, like every task-returning route. */
+  createTask(a: {
+    boardId: string; title: string; env: string; paneId: string;
+    description?: string | undefined; priority?: "p0" | "p1" | "p2" | "p3" | null | undefined;
+    sourceBoardId?: string | undefined; sourceTaskId?: string | undefined;
+  }): Promise<z.infer<typeof TaskFrameSchema>>;
   patchTask(a: { boardId: string; taskId: string; patch: TaskPatch }): Promise<z.infer<typeof TaskSchema>>;
   attach(a: { boardId: string; taskId: string; env: string; paneId: string; name: string }): Promise<void>;
   spawn(a: { boardId: string; taskId: string; env: string; brief: string; name?: string | undefined; model?: string | undefined; remoteControl?: boolean | undefined; targetWorkspaceId?: string | undefined; repo?: string | undefined }): Promise<z.infer<typeof SpawnResultSchema>>;
@@ -159,6 +167,21 @@ export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralC
         // `at` is deliberately absent: the server stamps it.
         post({ kind: "note", text: a.text, env: a.env, paneId: a.paneId }),
         AppendLogResultSchema,
+      ),
+    createTask: (a) =>
+      request(
+        fetchFn,
+        `${base}/api/boards/${seg(a.boardId)}/tasks`,
+        post({
+          title: a.title,
+          env: a.env,
+          paneId: a.paneId,
+          ...(a.description === undefined ? {} : { description: a.description }),
+          ...(a.priority === undefined ? {} : { priority: a.priority }),
+          ...(a.sourceBoardId === undefined ? {} : { sourceBoardId: a.sourceBoardId }),
+          ...(a.sourceTaskId === undefined ? {} : { sourceTaskId: a.sourceTaskId }),
+        }),
+        TaskFrameSchema,
       ),
     patchTask: (a) =>
       request(

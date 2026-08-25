@@ -27,6 +27,7 @@ function client(body: WhoamiResponse, counter?: { n: number }): CorralClient {
     attention: async () => ({}),
     board: async () => { throw new Error("unused"); },
     appendLog: async () => ({ ok: true, atMs: 1, logCount: 1 }),
+    createTask: async () => ({ id: "t_new1234", title: "T", description: "", status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1 }),
     state: async () => ({ envs: {}, sessions: [] }),
     boards: async () => [],
     patchTask: async () => { throw new Error("unused"); },

@@ -42,7 +42,7 @@ import { composeSessionName, fallbackNamePrefix, NAME_MAX, sanitizeSlug, slugify
 import type { SpawnOpts, SpawnResult } from "./spawn.ts";
 import { aggregateAccounts } from "./statusline.ts";
 import type { Storage } from "./storage.ts";
-import { appendLogEntry, resolveLogSource } from "./task-log.ts";
+import { appendLogEntry, resolveLogSource, resolveWriter, sessionRef, stampSystem } from "./task-log.ts";
 import { readLastActivity, readSessionCwd } from "./transcript.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { writeUploadFile } from "./uploads.ts";
@@ -236,6 +236,15 @@ const CreateTaskBodySchema = z.object({
   status: z.string().optional(),
   priority: z.enum(["p0", "p1", "p2", "p3"]).nullable().optional(),
   description: DescriptionInputSchema.optional(),
+  // Provenance for the card's FIRST log entry (corral_task_create). `env`/`paneId` name the creating
+  // session; `sourceBoardId`/`sourceTaskId` the card it follows up. All optional: the web "add task"
+  // omits them and the `created` entry is stamped without a session named. Placed in the log, never
+  // in `description` — description is a full-replacement write and would erase provenance on its first
+  // rewrite (design §7).
+  env: z.string().optional(),
+  paneId: z.string().optional(),
+  sourceBoardId: z.string().optional(),
+  sourceTaskId: z.string().optional(),
 });
 
 
@@ -796,12 +805,27 @@ export function createApi(opts: {
     const bid = c.req.param("bid");
     if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
     const now = nowSecs();
+    // Provenance for the first log entry: who created the card (resolved from the fleet, never trusted
+    // from the body) and which card it follows up. `env`/`paneId` absent → the web "add task": no
+    // session, so the entry is stamped by corral with no creator named.
+    const { env: creatorEnv, paneId: creatorPane, sourceBoardId, sourceTaskId } = parsed.data;
+    let createdText = "card created";
+    if (creatorEnv !== undefined && creatorPane !== undefined) {
+      const snapshot = opts.poller.getSnapshot().sessions;
+      const writer = resolveWriter(opts.storage.getAllBoards().flatMap((b) => b.tasks), { env: creatorEnv, paneId: creatorPane }, snapshot);
+      const who = writer !== null && typeof writer !== "string"
+        ? sessionRef({ name: writer.name, env: creatorEnv, paneId: creatorPane })
+        : `${creatorEnv}:${creatorPane}`;
+      createdText = sourceBoardId !== undefined && sourceTaskId !== undefined
+        ? `created by ${who}, follow-up of ${sourceBoardId}/${sourceTaskId}`
+        : `created by ${who}`;
+    }
     type CreateResult = "board_not_found" | "no_columns" | { ok: true; task: Task };
     const result = await opts.storage.withBoard<CreateResult>(bid, (existing) => {
       if (existing === null) return { board: null, result: "board_not_found" };
       const status = parsed.data.status ?? defaultColumnId(existing.columns);
       if (status === undefined) return { board: existing, result: "no_columns" };
-      const newTask = {
+      const base = {
         id: generateTaskId(),
         title: parsed.data.title,
         description: parsed.data.description ?? "",
@@ -812,6 +836,7 @@ export function createApi(opts: {
         createdAt: now,
         updatedAt: now,
       };
+      const newTask = stampSystem(base, "created", createdText);
       return { board: { ...existing, tasks: [...existing.tasks, newTask] }, result: { ok: true, task: newTask } };
     });
     if (result === "board_not_found") return c.json({ error: { code: "not_found" } }, 404);
@@ -848,9 +873,15 @@ export function createApi(opts: {
         ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
         updatedAt: nowSecs(),
       };
+      // Stamp status_changed only on an ACTUAL move — columns and nothing more (§10): the fact that
+      // "this ended the task" already lives on the board via the closing-column marker, and a copy
+      // here would diverge the first time a column is renamed.
+      const stamped = parsed.data.status !== undefined && parsed.data.status !== old.status
+        ? stampSystem(updated, "status_changed", `${old.status} → ${parsed.data.status}`)
+        : updated;
       const tasks = [...existing.tasks];
-      tasks[idx] = updated;
-      return { board: { ...existing, tasks }, result: { found: true, task: updated } };
+      tasks[idx] = stamped;
+      return { board: { ...existing, tasks }, result: { found: true, task: stamped } };
     });
     if (!result?.found) return c.json({ error: { code: "not_found" } }, 404);
     // The THIRD client-facing path, and log-free like the other two. A PATCH cannot change the log —
@@ -885,6 +916,10 @@ export function createApi(opts: {
       return c.json({ error: { code: "validation", message: "bad paneId" } }, 400);
     }
     const sessions = opts.poller.getSnapshot().sessions;
+    // Every board's links, so a session bound to ANOTHER card resolves as a valid writer — §4 permits
+    // appending to a card you are not bound to. Read outside the target lock; the callback prepends
+    // the target card's own (freshly locked) links so an attach that raced this read still wins.
+    const allBoards = opts.storage.getAllBoards();
 
     type AppendResult = "not_found" | "not_bound" | { readonly logCount: number; readonly atMs: number };
     const result = await opts.storage.withBoard<AppendResult>(bid, (existing) => {
@@ -892,9 +927,9 @@ export function createApi(opts: {
       const idx = existing.tasks.findIndex((t) => t.id === tid);
       const old = idx === -1 ? undefined : existing.tasks[idx];
       if (old === undefined) return { board: existing, result: "not_found" };
-      // Resolved from the card INSIDE the lock: a card the caller is not on is a refusal, and a card
+      // Resolved from the fleet INSIDE the lock: the writer may be bound to any card, but a card
       // deleted between the read and the write is a 404 rather than a silent write.
-      const source = resolveLogSource(old, { env, paneId }, sessions);
+      const source = resolveLogSource(old, allBoards, { env, paneId }, sessions);
       if (source === null) return { board: existing, result: "not_bound" };
       // Stamped INSIDE the lock, beside the append it belongs to. Read before it, two requests that
       // queue on the mutex can be stored in an order their own timestamps contradict — and
@@ -909,11 +944,11 @@ export function createApi(opts: {
     });
     if (result === "not_found") return c.json({ error: { code: "not_found" } }, 404);
     if (result === "not_bound") {
-      // "not bound to THAT card", never "may not write to another card": appending to another card is
-      // an ADD, which the invariant permits — it is unavailable only because this route resolves the
-      // writer from the target card's own links and nothing yet resolves a session bound elsewhere.
+      // The writer resolved to NO card anywhere: a log entry's `source` is a session on some card, so
+      // a pane bound nowhere has no identity to stamp. Appending to ANOTHER card is fine — §4 permits
+      // it — which is why this no longer says "not bound to THIS card".
       return c.json({
-        error: { code: "not_bound", message: "this session is not bound to that card — appending from a session bound elsewhere is not available yet" },
+        error: { code: "not_bound", message: "this session is not bound to any card — call corral_task_bind first" },
       }, 403);
     }
     return c.json({ ok: true, atMs: result.atMs, logCount: result.logCount }, 201);
@@ -995,7 +1030,8 @@ export function createApi(opts: {
         sessionId: liveRow?.sessionId ?? null,
       };
       const tasks = [...existing.tasks];
-      tasks[taskIdx] = { ...task, sessions: [...task.sessions, link], updatedAt: nowSecs() };
+      const bound = { ...task, sessions: [...task.sessions, link], updatedAt: nowSecs() };
+      tasks[taskIdx] = stampSystem(bound, "session_bound", `bound ${sessionRef(link)}`);
       return { board: { ...existing, tasks }, result: "ok" as const };
     });
 
@@ -1036,9 +1072,13 @@ export function createApi(opts: {
         env: parsed.data.env, paneId: parsed.data.paneId,
         sessionId: parsed.data.sessionId, liveSessionId: liveRow?.sessionId ?? null,
       });
+      // Idempotent no-op when nothing resolved — and then no entry: a detach that unlinked nothing is
+      // not a lifecycle event, only a request that found its target already gone.
+      const removed = idx === -1 ? undefined : task.sessions[idx];
       const sessions = idx === -1 ? task.sessions : task.sessions.filter((_, i) => i !== idx);
+      const unlinked = { ...task, sessions, updatedAt: nowSecs() };
       const tasks = [...existing.tasks];
-      tasks[taskIdx] = { ...task, sessions, updatedAt: nowSecs() };
+      tasks[taskIdx] = removed === undefined ? unlinked : stampSystem(unlinked, "session_detached", `detached ${sessionRef(removed)}`);
       return { board: { ...existing, tasks }, result: "ok" as const };
     });
 
@@ -1051,12 +1091,14 @@ export function createApi(opts: {
   // Task-scoped "close" kills a running Claude session with `herdr pane close <paneId>`, which cascades
   // pane → tab → workspace (herdr refuses `tab close` on a workspace's last tab, so pane close is the
   // one primitive that always works and cleans up the empty workspace when it was ours). It keeps the
-  // task→session LINK — distinct from /detach above, which only unlinks — and does NOT mutate the
-  // board; the session disappears from the next poll and the card renders detached. A live row for the
+  // task→session LINK — distinct from /detach above, which only unlinks — and mutates the board only
+  // to append a session_closed log entry (below); the session disappears from the next poll and the
+  // card renders detached, link intact and resumable. A live row for the
   // pane is REQUIRED, and its sessionId must match the link's, so a detached or churn-reused pane is
   // never closed out from under a stranger.
   app.post("/api/boards/:bid/tasks/:tid/sessions/:env/:paneId/close", async (c) => {
     if (opts.storage === undefined) return c.json({ error: { code: "no_storage" } }, 503);
+    const storage = opts.storage; // captured so the stampClosed closure keeps the narrowed type
     const bid = c.req.param("bid");
     if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
     const tid = c.req.param("tid");
@@ -1088,11 +1130,25 @@ export function createApi(opts: {
     if (!ownsBySession && !ownsByTab) {
       return c.json({ error: { code: "pane_reused", message: "pane now belongs to a different session" } }, 409);
     }
+    // The one board write close makes (§13a lists it as a stamping route): the LINK is untouched — the
+    // card still renders detached and stays resumable — but a session_closed entry records the suspend.
+    const stampClosed = (): Promise<void> => storage.withBoard(bid, (existing) => {
+      if (existing === null) return { board: null, result: undefined };
+      const tIdx = existing.tasks.findIndex((t) => t.id === tid);
+      const t = tIdx === -1 ? undefined : existing.tasks[tIdx];
+      if (t === undefined) return { board: existing, result: undefined };
+      const tasks = [...existing.tasks];
+      tasks[tIdx] = stampSystem(t, "session_closed", `closed ${sessionRef(link)}`);
+      return { board: { ...existing, tasks }, result: undefined };
+    });
     // §5.4 (MCP design): a SELF-close must deliver its response before the pane dies — killing the
     // caller's own pane also kills the MCP process making this request. With ?deferred=1 the route
     // runs EVERY guard above, responds, and only then closes the pane on a short unref'd timer.
     // Post-response failures are logged only; the zombie reaper collects any straggler tab.
     if (c.req.query("deferred") === "1") {
+      // Stamped BEFORE the response here, because the deferred kill happens after it and the caller
+      // may be closing itself — there is no later moment this route still runs to record the suspend.
+      await stampClosed();
       setTimeout(() => {
         closePaneFn(env, paneId).catch((err: unknown) => {
           console.warn(`[close] deferred close of ${env.id}:${paneId} failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1103,8 +1159,11 @@ export function createApi(opts: {
     try {
       await closePaneFn(env, paneId);
     } catch (err) {
+      // Stamp only on the sync path's SUCCESS: a failed close returns 502 and must not leave the
+      // append-only log claiming a session was suspended that is still live.
       return c.json({ error: { code: "close_failed", message: err instanceof Error ? err.message : String(err) } }, 502);
     }
+    await stampClosed();
     return c.json({ ok: true });
   });
 
@@ -1469,8 +1528,12 @@ export function createApi(opts: {
         if (t === undefined) return { board: b, result: { link, alreadyOnCard: false } };
         const existing = t.sessions.find((s) => linkBindsSession(s, { env: targetEnv.id, paneId: result.paneId, liveSessionId }));
         if (existing === undefined) {
+          // Stamp session_spawned only on a genuinely new session — the churn-heal and idempotent-adopt
+          // branches below re-point an existing link and are not a launch.
           return {
-            board: { ...b, tasks: b.tasks.map((x) => x.id === tid ? { ...x, sessions: [...x.sessions, link], updatedAt: nowSecs() } : x) },
+            board: { ...b, tasks: b.tasks.map((x) => x.id === tid
+              ? stampSystem({ ...x, sessions: [...x.sessions, link], updatedAt: nowSecs() }, "session_spawned", `spawned ${sessionRef(link)}`)
+              : x) },
             result: { link, alreadyOnCard: false },
           };
         }
@@ -1548,7 +1611,11 @@ export function createApi(opts: {
         if (landing === undefined) return { boardA: target, boardB: source, result: "target_no_columns" };
         status = landing;
       }
-      const movedTask: Task = { ...task, status, updatedAt: nowSecs() };
+      const moved: Task = { ...task, status, updatedAt: nowSecs() };
+      // A move that lands in a different column is a status change; a move that keeps the column is
+      // not. Columns and nothing more (§10) — the entry does not record the board hop, which the
+      // card's new home already makes plain.
+      const movedTask = status === task.status ? moved : stampSystem(moved, "status_changed", `${task.status} → ${status}`);
       return {
         boardA: { ...target, tasks: [...target.tasks, movedTask] },
         boardB: { ...source, tasks: source.tasks.filter((t) => t.id !== tid) },
@@ -1616,7 +1683,7 @@ export function createApi(opts: {
         cwdSnapshot: liveRow !== undefined ? liveRow.cwd : parsed.data.cwdSnapshot,
         sessionId: liveRow?.sessionId ?? null,
       };
-      const newTask = {
+      const base = {
         id: generateTaskId(),
         title: parsed.data.title,
         description: parsed.data.description ?? "",
@@ -1627,6 +1694,9 @@ export function createApi(opts: {
         createdAt: now,
         updatedAt: now,
       };
+      // A card born with a session already on it: the `created` entry names that session, so a
+      // separate session_bound line for the same fact would be noise.
+      const newTask = stampSystem(base, "created", `created from session ${sessionRef(link)}`);
       return { board: { ...existing, tasks: [...existing.tasks, newTask] }, result: { ok: true as const, task: newTask } };
     });
 

@@ -19,6 +19,8 @@ export interface SpawnArgs {
   readonly model?: string | undefined;
   readonly remoteControl?: boolean | undefined;
   readonly repo?: string | undefined;
+  readonly boardId?: string | undefined;
+  readonly taskId?: string | undefined;
 }
 
 export interface CloseArgs {
@@ -44,6 +46,21 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
     if (args.brief.trim() === "") {
       return "a brief is required — write the handoff text the new session should start from";
     }
+    // Target card: the caller's own by default, or any card by {boardId, taskId} (validated against
+    // the board list, a bare id refused — a task id is unique only within its board). `own` gates the
+    // repo rule below: on ANOTHER card there is no "where I am" workspace to continue in, so repo is
+    // required in practice even though the signature leaves it optional.
+    let target = { boardId: card.boardId, taskId: card.taskId, own: true };
+    if (args.boardId !== undefined || args.taskId !== undefined) {
+      if (args.boardId === undefined || args.taskId === undefined) {
+        return "boardId and taskId must be given together to target another card — corral_board_read lists a board's cards, corral_task_bind (no arguments) lists boards";
+      }
+      const boards = await deps.client.boards();
+      if (!boards.find((x) => x.id === args.boardId)?.tasks.some((t) => t.id === args.taskId)) {
+        return `no card ${args.boardId}/${args.taskId} — corral_board_read lists a board's cards`;
+      }
+      target = { boardId: args.boardId, taskId: args.taskId, own: args.boardId === card.boardId && args.taskId === card.taskId };
+    }
     const me = await deps.identity.load();
     const env = args.env ?? me.session.env;
     // brief is mandatory in this tool's schema, and the server rejects ANY spawn that carries a
@@ -63,7 +80,9 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
     // use of the parameter (corral_spawn({repo: "other-project"}) from inside another project)
     // would land beside the caller with `repo` discarded.
     const repo = args.repo !== undefined && args.repo.trim() !== "" ? args.repo : null;
-    const sameEnv = env === me.session.env && me.session.workspaceId !== "";
+    // Joining the caller's own workspace only makes sense on the caller's OWN card: on another card
+    // there is no shared checkout to continue in, so a repo must name where the new session works.
+    const sameEnv = target.own && env === me.session.env && me.session.workspaceId !== "";
     // No workspace to continue in and no repo named: there is no target at all, and corral does not
     // infer one. Decided here rather than server-side because only this session knows whether it has
     // a workspace of its own — and because a value RETURNED is not truncated the way a thrown
@@ -74,8 +93,8 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
     let result: Awaited<ReturnType<CorralClient["spawn"]>>;
     try {
       result = await deps.client.spawn({
-        boardId: card.boardId,
-        taskId: card.taskId,
+        boardId: target.boardId,
+        taskId: target.taskId,
         env,
         brief: args.brief,
         ...(args.name === undefined ? {} : { name: args.name }),
@@ -92,7 +111,7 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
       throw err;
     }
     return formatSpawnReply({
-      name: result.name, boardId: card.boardId, taskId: card.taskId,
+      name: result.name, boardId: target.boardId, taskId: target.taskId,
       env: result.env, paneId: result.paneId,
       workspaceLabel: result.workspaceLabel, cwdSnapshot: result.cwdSnapshot,
       idempotent: result.idempotent,
@@ -171,14 +190,16 @@ export function registerSessionTools(server: McpServer, deps: SessionDeps): void
   server.registerTool(
     "corral_spawn",
     {
-      title: "Spawn a session on this card",
+      title: "Spawn a session on a card",
       description:
-        "Start a NEW Claude session attached to THIS session's card — for a context handoff or a parallel strand. The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment; omit `repo` and the new session joins THIS session's workspace, pass `repo` and it lands in that project's own workspace instead. LOCAL ENVIRONMENTS ONLY in this phase: `env` may only name a local environment (kind=local in corral_whoami's environment list) — a brief cannot be delivered to a remote environment, so a remote `env` is refused here rather than left to 400 on the server. Supply `name`, and supply the WHOLE name: corral uses your string verbatim as the Claude session name, the herdr tab label and the card's label — it no longer prefixes anything. Write it as `{slug}-{name}`, where `{slug}` is a very short label for the card (reuse the slug of your OWN session name when you have one, so the card's sessions cluster) and `{name}` is two to four words for what THIS session does. Destructive: this starts a real session that consumes tokens.",
+        "Start a NEW Claude session attached to a card — for a context handoff or a parallel strand. Defaults to THIS session's card; pass `boardId` AND `taskId` together to staff ANOTHER card (placing an executor is an ADD, which a session may do on any card — but it grants NO right to close that card's sessions). The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment; on your OWN card, omit `repo` and the new session joins THIS session's workspace. On ANOTHER card there is no shared workspace to join, so `repo` is REQUIRED — pass the project the new session should work in. Pass `repo` on your own card too to land in a DIFFERENT project's workspace instead. LOCAL ENVIRONMENTS ONLY in this phase: `env` may only name a local environment (kind=local in corral_whoami's environment list) — a brief cannot be delivered to a remote environment, so a remote `env` is refused here rather than left to 400 on the server. Supply `name`, and supply the WHOLE name: corral uses your string verbatim as the Claude session name, the herdr tab label and the card's label — it no longer prefixes anything. Write it as `{slug}-{name}`, where `{slug}` is a very short label for the card (reuse the slug of your OWN session name when you have one, so the card's sessions cluster) and `{name}` is two to four words for what THIS session does. Destructive: this starts a real session that consumes tokens.",
       inputSchema: {
         brief: z.string().describe("handoff text the new session starts from; required"),
         env: z.string().optional().describe("LOCAL environment id from corral_whoami; defaults to this session's. A remote environment is refused."),
+        boardId: z.string().optional().describe("with taskId, staff another card; omit both for this session's own card"),
+        taskId: z.string().optional().describe("with boardId, staff another card; a bare taskId is refused"),
         repo: z.string().optional().describe(
-          "omit to continue where you are — the new session lands beside this one, in this session's own workspace. Pass it to work in a DIFFERENT project: the session lands in that project's workspace, at its repository root. The value must be a repository name configured for the target environment; a name that is not configured is refused with the list of the ones that are."),
+          "on your OWN card, omit to continue where you are — the new session lands beside this one, in this session's own workspace; pass it to work in a DIFFERENT project. On ANOTHER card it is REQUIRED (no shared workspace to join). The value must be a repository name configured for the target environment; a name that is not configured is refused with the list of the ones that are."),
         name: z.string().max(128).optional().describe(
           'the COMPLETE session name as `{slug}-{name}`, e.g. "wm-stake-rc-toggle-ui" — corral uses it verbatim and adds no prefix. ASCII lowercase letters, digits and dashes ONLY, because this value becomes a command-line flag and a terminal tab label, not prose: anything outside [a-z0-9-] is stripped, and a name written in a non-Latin script reduces to nothing and is treated as if you had omitted it. Aim for 56 characters or fewer in total so it stays readable in a tab bar and the /resume picker. Omit only if you genuinely cannot say — corral then derives a name from the card, which is far less useful than yours.'),
         model: z.string().optional().describe(
