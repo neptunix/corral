@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CorralError, createClient } from "../mcp/client.ts";
+import { runTool } from "../mcp/tools/reply.ts";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -63,6 +64,23 @@ describe("corral client", () => {
     const client = createClient("http://127.0.0.1:8787", async () => jsonResponse({ resolved: "yes" }));
     await expect(client.whoami({ paneId: "w1:p1", cwd: "/repo", socket: null }))
       .rejects.toMatchObject({ code: "bad_response" });
+  });
+
+  // Through runTool, not just the client: the advice in a bad_response shares one 300-char budget
+  // with the Zod path, and the path is the only part that says WHICH field drifted. A longer message
+  // still throws the right code, so a `code` assertion alone would not notice it crowding the path out.
+  it("leaves room for the offending field name after truncation", async () => {
+    const session = {
+      env: "work-local", envLabel: "Work (local)", paneId: "w1:p1", tabId: "tab1", tabLabel: "t",
+      workspaceId: "ws1", workspaceLabel: "repo", sessionId: null, sessionName: null, cwd: "/repo",
+      status: "working", model: null, ctxPct: null, costUsd: null, fiveHourPct: null,
+      sevenDayPct: null, account: null,
+      // remoteControl omitted — exactly what a corral server predating the field sends.
+    };
+    const client = createClient("http://127.0.0.1:8787", async () => jsonResponse({ resolved: true, session, task: null, envs: [] }));
+    const out = await runTool(async () => { await client.whoami({ paneId: "w1:p1", cwd: "/repo", socket: null }); return "unreachable"; });
+    expect(out).toContain("Restart corral");
+    expect(out).toContain("remoteControl");
   });
 
   it("PATCHes only the fields it was given", async () => {

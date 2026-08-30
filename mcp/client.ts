@@ -64,12 +64,14 @@ async function request<T>(
     throw new CorralError(code, message);
   }
   const parsed = schema.safeParse(body);
+  // Kept short on purpose: runTool truncates a CorralError message to ERROR_MESSAGE_MAX, and the Zod
+  // path appended here is the only part that says WHICH field drifted. Advice that crowds it out
+  // costs more than it gives.
   if (!parsed.success) {
     throw new CorralError(
       "bad_response",
-      "corral's answer did not match the shape this MCP expects — the two are probably different " +
-        "versions. Restart the corral server; if it is already current, this session's MCP is the " +
-        `stale one and a fresh session picks up the new build. Details: ${parsed.error.message}`,
+      "shape mismatch — this MCP and the corral server are different versions. Restart corral, " +
+        `or start a fresh session if corral is already current. ${parsed.error.message}`,
     );
   }
   return parsed.data;
