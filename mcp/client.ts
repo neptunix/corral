@@ -64,9 +64,8 @@ async function request<T>(
     throw new CorralError(code, message);
   }
   const parsed = schema.safeParse(body);
-  // Kept short on purpose: runTool truncates a CorralError message to ERROR_MESSAGE_MAX, and the Zod
-  // path appended here is the only part that says WHICH field drifted. Advice that crowds it out
-  // costs more than it gives.
+  // Terse on purpose: the Zod path below names the field that drifted, and it shares
+  // ERROR_MESSAGE_MAX with this prose (mcp/tools/reply.ts).
   if (!parsed.success) {
     throw new CorralError(
       "bad_response",
