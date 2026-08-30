@@ -256,6 +256,7 @@ function sessionBlock(env: HerdrEnv, row: SessionRow): WhoamiSession {
     fiveHourPct: sl?.rate.five_hour?.used_percentage ?? null,
     sevenDayPct: sl?.rate.seven_day?.used_percentage ?? null,
     account: sl?.account?.email ?? sl?.account?.org ?? null,
+    remoteControl: row.remoteControl,
   };
 }
 

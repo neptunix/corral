@@ -5,6 +5,10 @@ import { oneLine, truncate } from "../digest.ts";
 // entirely: `err.message` can be Zod's multi-line pretty-printed validation output, or herdr/SSH exec
 // stderr from a spawn/close failure (arbitrary length, arbitrary newlines, and on a remote env that
 // is remote output) — the exact shape of untrusted, unbounded text that module was hardened to bound.
+//
+// It is also the budget every CorralError message shares, and `truncate` cuts from the end. So a
+// message has to leave room for whatever identifies the failure — a Zod path, a pane id, a repo
+// name — and prose long enough to fill the budget silently costs exactly that part.
 const ERROR_MESSAGE_MAX = 300;
 
 /**

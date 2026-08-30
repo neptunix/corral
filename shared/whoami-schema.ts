@@ -108,6 +108,8 @@ export const WhoamiSessionSchema = z.object({
   fiveHourPct: z.number().nullable(),
   sevenDayPct: z.number().nullable(),
   account: z.string().nullable(),
+  /** Remote Control, for corral_spawn to inherit. Null is no registry record — unknown, not off. */
+  remoteControl: z.boolean().nullable(),
 });
 
 export const WhoamiResolvedSchema = z.object({

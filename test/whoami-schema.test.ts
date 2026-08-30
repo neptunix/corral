@@ -8,7 +8,7 @@ const resolved = {
     tabId: "t1", tabLabel: "api-refactor-a", workspaceId: "ws1", workspaceLabel: "repo",
     sessionId: "11111111-2222-3333-4444-555555555555", sessionName: "api-refactor",
     cwd: "/repo/path", status: "working", model: "Opus",
-    ctxPct: 41, costUsd: 1.25, fiveHourPct: 30, sevenDayPct: null, account: "user@example.com",
+    ctxPct: 41, costUsd: 1.25, fiveHourPct: 30, sevenDayPct: null, account: "user@example.com", remoteControl: null,
   },
   task: {
     boardId: "board", boardLabel: "Board", taskId: "t_abcdefg",

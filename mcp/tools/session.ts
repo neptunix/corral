@@ -99,7 +99,8 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
         brief: args.brief,
         ...(args.name === undefined ? {} : { name: args.name }),
         ...(args.model === undefined ? {} : { model: args.model }),
-        ...(args.remoteControl === undefined ? {} : { remoteControl: args.remoteControl }),
+        // A successor spawned without it is unreachable from where the operator asked for it.
+        ...((args.remoteControl ?? (me.session.remoteControl === true)) ? { remoteControl: true } : {}),
         ...(repo !== null ? { repo } : { targetWorkspaceId: me.session.workspaceId }),
       });
     } catch (err) {
@@ -205,7 +206,7 @@ export function registerSessionTools(server: McpServer, deps: SessionDeps): void
         model: z.string().optional().describe(
           'model for the new session: an alias ("fable", "opus", "sonnet") or a full id. Omit to inherit the model this environment last used. corral does not validate the value beyond its shape — a wrong one starts a session that fails at the API.'),
         remoteControl: z.boolean().optional().describe(
-          'start the session with Remote Control already connected, so it is reachable from claude.ai. Default off. Use it when you are spawning on behalf of an operator working from a session that is itself remote — otherwise the new session cannot be reached from where it was asked for. Requires claude.ai subscription auth on that machine; without it the session still starts and asks for authorization inside.'),
+          'start the session with Remote Control connected, so it is reachable from claude.ai. OMIT IT — it is inherited from THIS session, which is what an operator working remotely needs: spawned from a reachable session the successor is reachable too. Pass true/false only to override. Requires claude.ai subscription auth on that machine; without it the session still starts and asks for authorization inside.'),
       },
       // Machine-readable counterpart to the "Destructive." in the descriptions below — a harness can
       // gate on this without parsing prose. It changes nothing on its own: the actual control is the

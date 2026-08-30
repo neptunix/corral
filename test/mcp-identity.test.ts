@@ -11,7 +11,7 @@ const resolvedBody: WhoamiResponse = {
     tabLabel: "alpha", workspaceId: "ws1", workspaceLabel: "repo",
     sessionId: "11111111-2222-3333-4444-555555555555", sessionName: "alpha", claudeName: null,
     cwd: "/repo", status: "working", model: "Opus",
-    ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null,
+    ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null, remoteControl: null,
   },
   task: {
     boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "T",

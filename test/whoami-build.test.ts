@@ -81,6 +81,24 @@ describe("buildWhoami", () => {
     expect(out.session.envLabel).toBe("Work (local)");
   });
 
+  // A regression to a hardcoded null here — the shape the starting-session branch legitimately uses —
+  // would type-check, pass every other test, and quietly stop every successor from being reachable.
+  it("projects the session's Remote Control state, off apart from unknown", () => {
+    const localEnv = ENVIRONMENTS.find((e) => e.id === "work-local");
+    if (localEnv === undefined) throw new Error("fixture missing work-local");
+    const rcOf = (remoteControl: boolean | null): boolean | null => {
+      const out = buildWhoami({
+        resolution: { ok: true, env: localEnv, row: row({ remoteControl }) },
+        envs: ENVIRONMENTS, snapshot, boards: [board],
+      });
+      if (!out.resolved) throw new Error("expected resolved");
+      return out.session.remoteControl;
+    };
+    expect(rcOf(true)).toBe(true);
+    expect(rcOf(false)).toBe(false);
+    expect(rcOf(null)).toBeNull();
+  });
+
   it("reports env reachability for every configured environment", () => {
     const localEnv = ENVIRONMENTS.find((e) => e.id === "work-local");
     if (localEnv === undefined) throw new Error("fixture missing work-local");

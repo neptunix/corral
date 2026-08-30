@@ -24,7 +24,7 @@ const resolved: WhoamiResponse = {
     tabLabel: "alpha", workspaceId: "ws1", workspaceLabel: "repo",
     sessionId: SID, sessionName: "alpha", claudeName: "alpha",
     cwd: "/repo", status: "working", model: "Opus",
-    ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null,
+    ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null, remoteControl: null,
   },
   task: card,
   envs: [{ id: "work-local", label: "Work (local)", kind: "local", reachable: true }],

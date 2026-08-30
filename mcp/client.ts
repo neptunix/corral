@@ -64,7 +64,15 @@ async function request<T>(
     throw new CorralError(code, message);
   }
   const parsed = schema.safeParse(body);
-  if (!parsed.success) throw new CorralError("bad_response", parsed.error.message);
+  // Terse on purpose: the Zod path below names the field that drifted, and it shares
+  // ERROR_MESSAGE_MAX with this prose (mcp/tools/reply.ts).
+  if (!parsed.success) {
+    throw new CorralError(
+      "bad_response",
+      "shape mismatch — this MCP and the corral server are different versions. Restart corral, " +
+        `or start a fresh session if corral is already current. ${parsed.error.message}`,
+    );
+  }
   return parsed.data;
 }
 

@@ -25,7 +25,7 @@ const bound: WhoamiResponse = {
     // see the "attaches ..." tests below, item 2 of the review-fix wave).
     tabLabel: "alpha-tab-label", workspaceId: "ws1", workspaceLabel: "repo",
     sessionId: SID, sessionName: "alpha", claudeName: null, cwd: "/repo", status: "working", model: "Opus",
-    ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null,
+    ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null, remoteControl: null,
   },
   task: boundTask,
   envs: [{ id: "work-local", label: "Work (local)", kind: "local", reachable: true }],
@@ -237,6 +237,21 @@ describe("spawnHandler", () => {
     await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
     await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local", repo: "corral" });
     expect(seen).toEqual(["ws1", undefined]);
+  });
+
+  it("inherits Remote Control from the caller, and lets an explicit argument override it", async () => {
+    const seen: (boolean | undefined)[] = [];
+    const c = (rc: boolean | null) => stub({
+      whoami: async () => ({ ...bound, session: { ...bound.session, remoteControl: rc } }),
+      spawn: async (a) => { seen.push(a.remoteControl); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
+    });
+    const on = c(true), off = c(false), unknown = c(null);
+    await spawnHandler({ client: on, identity: idOf(on) }, { brief: "b" });
+    await spawnHandler({ client: off, identity: idOf(off) }, { brief: "b" });
+    await spawnHandler({ client: unknown, identity: idOf(unknown) }, { brief: "b" });
+    await spawnHandler({ client: on, identity: idOf(on) }, { brief: "b", remoteControl: false });
+    await spawnHandler({ client: off, identity: idOf(off) }, { brief: "b", remoteControl: true });
+    expect(seen).toEqual([true, undefined, undefined, undefined, true]);
   });
 
   // Without this the single most likely use of the new parameter — corral_spawn({repo: "other"})
