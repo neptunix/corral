@@ -22,7 +22,7 @@ const bound: WhoamiResponse = {
     env: "work-local", envLabel: "Work (local)", paneId: "w1:p1", tabId: "tab1",
     tabLabel: "alpha", workspaceId: "ws1", workspaceLabel: "repo",
     sessionId: SID, sessionName: "alpha", claudeName: null, cwd: "/repo", status: "working", model: "Opus",
-    ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null,
+    ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null, remoteControl: null,
   },
   task: boundTask,
   envs: [{ id: "work-local", label: "Work (local)", kind: "local", reachable: true }],

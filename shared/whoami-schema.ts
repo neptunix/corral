@@ -108,6 +108,15 @@ export const WhoamiSessionSchema = z.object({
   fiveHourPct: z.number().nullable(),
   sevenDayPct: z.number().nullable(),
   account: z.string().nullable(),
+  /**
+   * Whether THIS session is connected to Remote Control — null when no registry record backs the
+   * pane, which is unknown, not off. corral_spawn inherits it: a session reached from claude.ai
+   * spawns a successor reachable the same way, and one that is not does not.
+   *
+   * Defaulted, not required, for the same reason as `claudeName`: an MCP client talks to whatever
+   * corral server is already running, and one predating this field would otherwise fail validation.
+   */
+  remoteControl: z.boolean().nullable().default(null),
 });
 
 export const WhoamiResolvedSchema = z.object({
