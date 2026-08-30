@@ -232,10 +232,11 @@ compose the text and let this procedure carry it. Once they agree:
 2. **Compose the brief** (below) and `corral_spawn` it. The new session lands on the same card and
    starts from that text. By default it lands in a tab beside this one — same workspace, so a
    worktree checkout stays visible. Visible is not attached: the new session starts at the repo root
-   on the default branch, and nothing flags the mismatch. When the work lives in a worktree, the
-   brief must give the path and tell it to call `EnterWorktree({path: "..."})` before touching
-   anything. Pass `repo` only to send it to a *different* project: it then lands in that
-   repository's workspace, at its root, and a name that is not configured for the target
+   on the default branch, and nothing flags the mismatch. So if THIS session is working in a
+   worktree, the brief must give the path and make attaching to it the successor's first action —
+   `EnterWorktree({path: "..."})` before it reads, edits or commits anything. A session that is not
+   in one needs none of this. Pass `repo` only to send it to a *different* project: it then lands
+   in that repository's workspace, at its root, and a name that is not configured for the target
    environment comes back refused with the list of ones that are.
    Pass `name`, and pass the WHOLE name — corral uses your string as the Claude session name, the tab
    label and the card's label, and adds no prefix of its own. The reply echoes your request; it is not
