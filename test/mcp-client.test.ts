@@ -66,9 +66,8 @@ describe("corral client", () => {
       .rejects.toMatchObject({ code: "bad_response" });
   });
 
-  // Through runTool, not just the client: the advice in a bad_response shares one 300-char budget
-  // with the Zod path, and the path is the only part that says WHICH field drifted. A longer message
-  // still throws the right code, so a `code` assertion alone would not notice it crowding the path out.
+  // A message too long to leave room for the Zod path still throws the right code, so the assertions
+  // above it would stay green through exactly the regression this pins. Hence runTool, not the client.
   it("leaves room for the offending field name after truncation", async () => {
     const session = {
       env: "work-local", envLabel: "Work (local)", paneId: "w1:p1", tabId: "tab1", tabLabel: "t",

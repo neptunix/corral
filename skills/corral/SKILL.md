@@ -209,7 +209,9 @@ continuing elsewhere. In this order, stopping for an answer at every step after 
    only if the task itself turned out to be something else. Everything after this can end the session.
 2. **List what the task left lying around** — worktree, branch, scratch files — and ask what to
    remove. Never remove on your own reading of "wrap up": a worktree can hold work that reached no
-   other carrier, and deleting it is not undoable.
+   other carrier, and deleting it is not undoable. A worktree has two answers, not one — step out and
+   leave it, or remove it — so offer both, and carry out the one they pick with `ExitWorktree` or
+   whatever tool you use for worktrees.
 3. **Offer a column, do not pick one** — the card's columns from `corral_whoami` (see "Keeping the
    card current").
 4. **Offer `corral_session_close`** — only once they say so. Anything not already on the card is gone
@@ -234,10 +236,10 @@ compose the text and let this procedure carry it. Once they agree:
    worktree checkout stays visible. Visible is not attached: the new session starts at the repo root
    on the default branch, and nothing flags the mismatch. So if THIS session is working in a
    worktree, the brief must give the path and make attaching to it the successor's first action —
-   `EnterWorktree({path: "..."})` before it reads, edits or commits anything. A session that is not
-   in one needs none of this. Pass `repo` only to send it to a *different* project: it then lands
-   in that repository's workspace, at its root, and a name that is not configured for the target
-   environment comes back refused with the list of ones that are.
+   `EnterWorktree({path: "..."})`, or whatever tool you use for worktrees, before it reads, edits or
+   commits anything. A session that is not in one needs none of this. Pass `repo` only to send it to
+   a *different* project: it then lands in that repository's workspace, at its root, and a name that
+   is not configured for the target environment comes back refused with the list of ones that are.
    Pass `name`, and pass the WHOLE name — corral uses your string as the Claude session name, the tab
    label and the card's label, and adds no prefix of its own. The reply echoes your request; it is not
    an address (see "Talking to another session"). Write it as

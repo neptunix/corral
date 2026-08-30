@@ -99,7 +99,7 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
         brief: args.brief,
         ...(args.name === undefined ? {} : { name: args.name }),
         ...(args.model === undefined ? {} : { model: args.model }),
-        // Inherited: a successor spawned without it is unreachable from where it was asked for.
+        // A successor spawned without it is unreachable from where the operator asked for it.
         ...((args.remoteControl ?? (me.session.remoteControl === true)) ? { remoteControl: true } : {}),
         ...(repo !== null ? { repo } : { targetWorkspaceId: me.session.workspaceId }),
       });

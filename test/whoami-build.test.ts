@@ -81,10 +81,8 @@ describe("buildWhoami", () => {
     expect(out.session.envLabel).toBe("Work (local)");
   });
 
-  // corral_spawn inherits this value, so a regression to a hardcoded null here — the shape the
-  // starting-session branch legitimately uses — would type-check, pass every other test, and quietly
-  // stop every successor from being reachable. `false` is asserted apart from `null`: off is a
-  // reading, no registry record is the absence of one.
+  // A regression to a hardcoded null here — the shape the starting-session branch legitimately uses —
+  // would type-check, pass every other test, and quietly stop every successor from being reachable.
   it("projects the session's Remote Control state, off apart from unknown", () => {
     const localEnv = ENVIRONMENTS.find((e) => e.id === "work-local");
     if (localEnv === undefined) throw new Error("fixture missing work-local");
