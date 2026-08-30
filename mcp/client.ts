@@ -64,7 +64,14 @@ async function request<T>(
     throw new CorralError(code, message);
   }
   const parsed = schema.safeParse(body);
-  if (!parsed.success) throw new CorralError("bad_response", parsed.error.message);
+  if (!parsed.success) {
+    throw new CorralError(
+      "bad_response",
+      "corral's answer did not match the shape this MCP expects — the two are probably different " +
+        "versions. Restart the corral server; if it is already current, this session's MCP is the " +
+        `stale one and a fresh session picks up the new build. Details: ${parsed.error.message}`,
+    );
+  }
   return parsed.data;
 }
 

@@ -248,7 +248,6 @@ describe("spawnHandler", () => {
     const on = c(true), off = c(false), unknown = c(null);
     await spawnHandler({ client: on, identity: idOf(on) }, { brief: "b" });
     await spawnHandler({ client: off, identity: idOf(off) }, { brief: "b" });
-    // Unknown is not "on": no registry record backs the pane, and corral does not guess a connection.
     await spawnHandler({ client: unknown, identity: idOf(unknown) }, { brief: "b" });
     await spawnHandler({ client: on, identity: idOf(on) }, { brief: "b", remoteControl: false });
     await spawnHandler({ client: off, identity: idOf(off) }, { brief: "b", remoteControl: true });

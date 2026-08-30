@@ -281,8 +281,9 @@ Point at files, commits, and card fields rather than pasting them. A brief that 
   stop; it is the operator's to fix.
 - **`[server_too_old]`** — the corral server predates these MCP routes. It needs restarting, which
   only the operator can do.
-- **`[bad_response]`** — corral answered with something these tools could not parse. Report it
-  verbatim; retrying will not help.
+- **`[bad_response]`** — corral answered with something these tools could not parse. Usually version
+  skew, and the message says which side to move: a server restart, or a fresh session for a stale
+  MCP. Report it verbatim; retrying without one of those will not help.
 - **`[unresolved]`** — corral checked the machine and found no such pane. Retry once in case the pane
   was created this instant, then report it.
 - **A write refused as unbound** — bind, then retry. Every write re-reads identity, so a bind from a

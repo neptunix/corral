@@ -99,9 +99,7 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
         brief: args.brief,
         ...(args.name === undefined ? {} : { name: args.name }),
         ...(args.model === undefined ? {} : { model: args.model }),
-        // Inherited, not defaulted off: an operator working from claude.ai reaches this session over
-        // Remote Control, and a successor spawned without it is invisible from where it was asked
-        // for. `null` (no registry record) is unknown, and unknown stays off.
+        // Inherited: a successor spawned without it is unreachable from where it was asked for.
         ...((args.remoteControl ?? (me.session.remoteControl === true)) ? { remoteControl: true } : {}),
         ...(repo !== null ? { repo } : { targetWorkspaceId: me.session.workspaceId }),
       });
@@ -208,7 +206,7 @@ export function registerSessionTools(server: McpServer, deps: SessionDeps): void
         model: z.string().optional().describe(
           'model for the new session: an alias ("fable", "opus", "sonnet") or a full id. Omit to inherit the model this environment last used. corral does not validate the value beyond its shape — a wrong one starts a session that fails at the API.'),
         remoteControl: z.boolean().optional().describe(
-          'start the session with Remote Control already connected, so it is reachable from claude.ai. OMIT IT: the default is inherited from THIS session — spawned from a session that is itself reachable from claude.ai, the successor is too, which is what an operator working remotely needs; spawned from one that is not, it is not either. Pass `true` or `false` only to override that. Requires claude.ai subscription auth on that machine; without it the session still starts and asks for authorization inside.'),
+          'start the session with Remote Control connected, so it is reachable from claude.ai. OMIT IT — it is inherited from THIS session, which is what an operator working remotely needs: spawned from a reachable session the successor is reachable too. Pass true/false only to override. Requires claude.ai subscription auth on that machine; without it the session still starts and asks for authorization inside.'),
       },
       // Machine-readable counterpart to the "Destructive." in the descriptions below — a harness can
       // gate on this without parsing prose. It changes nothing on its own: the actual control is the
