@@ -31,7 +31,12 @@ vi.mock("@xterm/xterm", () => {
 });
 
 vi.mock("@xterm/addon-fit", () => ({
-  FitAddon: class { fit(): void { /* no layout in jsdom */ } },
+  // jsdom gives the container no layout, so `proposeDimensions()` returns undefined here exactly as
+  // it would in a real browser before the panel has been measured.
+  FitAddon: class {
+    fit(): void { /* no layout in jsdom */ }
+    proposeDimensions(): undefined { return undefined; }
+  },
 }));
 
 interface CloseFrame { readonly code: number; readonly reason: string }

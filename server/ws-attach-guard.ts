@@ -1,4 +1,6 @@
+import { MIN_SIZED_COLS } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
+import { TERM_DIM_MAX } from "./pty-bridge.ts";
 
 // SEC-4: with buildAttachSpec's `--` guard dropped (herdr 0.7.1 rejects `attach -- <paneId>`), the
 // alnum-leading anchor is now the PRIMARY option-injection defense — a leading-`-` paneId must never
@@ -11,7 +13,12 @@ export const PANE_RE = /^[A-Za-z0-9][A-Za-z0-9:_-]*$/;
 const ATTACH_RE = /^\/api\/sessions\/([^/]+)\/([^/]+)\/attach$/;
 
 export type UpgradeCheck =
-  | { readonly ok: true; readonly env: HerdrEnv; readonly paneId: string }
+  | {
+      readonly ok: true;
+      readonly env: HerdrEnv;
+      readonly paneId: string;
+      readonly size?: { readonly cols: number; readonly rows: number };
+    }
   | { readonly ok: false; readonly status: number; readonly reason: string };
 
 function safeDecode(s: string): string | null {
@@ -23,10 +30,31 @@ function safeDecode(s: string): string | null {
 }
 
 /**
+ * The client's terminal grid, if it sent one. `URLSearchParams` is used rather than `decodeURIComponent`
+ * because it does not throw on a malformed %-escape: this runs inside the raw `server.on('upgrade')`
+ * handler, which has no try/catch and no process-level `uncaughtException` behind it, so a throw here
+ * would take the whole corral process down over a hostile URL. Anything not a plain integer inside the
+ * accepted band reads as "no size given" — never as an error, and never as a value.
+ */
+function parseSize(url: string): { readonly cols: number; readonly rows: number } | undefined {
+  const q = url.indexOf("?");
+  if (q === -1) return undefined;
+  const params = new URLSearchParams(url.slice(q + 1));
+  const cols = Number(params.get("cols"));
+  const rows = Number(params.get("rows"));
+  const usable = (n: number, min: number): boolean =>
+    Number.isInteger(n) && n >= min && n <= TERM_DIM_MAX;
+  if (!usable(cols, MIN_SIZED_COLS) || !usable(rows, 1)) return undefined;
+  return { cols, rows };
+}
+
+/**
  * Pure validation for a WS attach upgrade. Runs OUTSIDE Hono middleware (the raw `server.on('upgrade')`
  * sees none of the route guards), so every check is re-done here. Order (§3.4 step 3): attach-path
  * shape (404) → Origin allowlist (403, fail closed — SEC-1) → env allowlist (400) → PANE_RE (400).
- * Origin is checked before env/pane so a cross-origin probe learns nothing about which envs exist.
+ * Origin is checked before env/pane so a cross-origin probe learns nothing about which envs exist. The
+ * client's `?cols=&rows=` grid is parsed LAST, only once the upgrade is otherwise accepted, and is
+ * optional — its absence or malformity never fails the upgrade, it just means no size was given.
  */
 export function validateUpgrade(
   url: string,
@@ -51,7 +79,8 @@ export function validateUpgrade(
   if (env === undefined) return { ok: false, status: 400, reason: "unknown env" };
   if (!PANE_RE.test(paneId)) return { ok: false, status: 400, reason: "bad paneId" };
 
-  return { ok: true, env, paneId };
+  const size = parseSize(url);
+  return size === undefined ? { ok: true, env, paneId } : { ok: true, env, paneId, size };
 }
 
 /**

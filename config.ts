@@ -20,6 +20,11 @@ export const CHEAP_INTERVAL_MS = intFromEnv("HERDR_DASH_POLL_MS", 30000, { min: 
 export const ATTENTION_MIN_WORK_MS = intFromEnv("ATTENTION_MIN_WORK_MS", 600_000, { min: 0 }); // 10 min (§3.6)
 export const LIST_TIMEOUT = 15000;
 export const READ_TIMEOUT = 30000;
+// Narrowest reading corral will act on. Below this a reported grid is not plausibly the width a
+// session will be read at later — an xterm that measured itself before layout settled reports 80x24,
+// and a phone-sized panel would otherwise become the birth width of every session spawned afterwards,
+// outliving the phone. Under it corral acts on nothing and herdr's own size stands.
+export const MIN_SIZED_COLS = 100;
 // #4: coalesce sub-second bursts to GET /read (each shells out to herdr/SSH). 1s is well under the
 // Unassigned mini-terminal's 5s poll, so legit polling passes straight through; only bursts are damped.
 export const READ_CACHE_TTL_MS = intFromEnv("READ_CACHE_TTL_MS", 1000, { min: 0 });
