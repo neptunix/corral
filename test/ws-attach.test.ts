@@ -112,7 +112,7 @@ afterEach(async () => {
 
 // Placed first: viewport memory is module state with no reset export, and the empty-memory cases
 // below must run before anything else in this file writes a value into it.
-describe("attach pty size at spawn (Task 2)", () => {
+describe("attach pty size at spawn", () => {
   it("spawns the pty at the size the client sent", async () => {
     const h = await start();
     const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`, "?cols=188&rows=45");
@@ -410,7 +410,7 @@ describe("attachFailureReason", () => {
 
 // Placed last, deliberately: this block records into viewport memory, and the empty-memory
 // assertions earlier in the file depend on running before that happens.
-describe("viewport wiring (Task 1: the attach's resize frame reaches recordViewport)", () => {
+describe("viewport wiring: the attach's resize frame reaches recordViewport", () => {
   it("records the last resize frame's size in viewport memory", async () => {
     const h = await start();
     const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
