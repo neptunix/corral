@@ -515,12 +515,19 @@ describe("spawnSession — sizing the pane before launch (step 3.5)", () => {
   });
 
   it("still spawns when sizing throws", async () => {
-    const result = await spawnSession({
-      ...base,
-      paneSize: { cols: 188, rows: 45 },
-      paneSetSizeFn: async () => { throw new Error("unknown subcommand"); },
-    });
-    expect(result.paneId).toBe("w1:p1");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const result = await spawnSession({
+        ...base,
+        paneSize: { cols: 188, rows: 45 },
+        paneSetSizeFn: async () => { throw new Error("unknown subcommand"); },
+      });
+      expect(result.paneId).toBe("w1:p1");
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain("[spawn] pane size: unknown subcommand");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("does not size on the idempotent rejoin", async () => {
