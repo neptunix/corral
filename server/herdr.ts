@@ -14,7 +14,7 @@ import { parsePane } from "./parser.ts";
 export interface ExecSpec {
   readonly file: string;
   readonly args: readonly string[];
-  readonly options: { readonly env?: NodeJS.ProcessEnv; readonly timeout: number; readonly closeStdin?: boolean };
+  readonly options: { readonly env?: NodeJS.ProcessEnv; readonly timeout: number };
 }
 
 // Canonical pane-read signature. Single home for the type so downstream consumers (attention-store,
@@ -129,7 +129,7 @@ export async function runHerdr(
 ): Promise<string> {
   const exec = opts.exec ?? defaultExec;
   const spec = buildExec(env, herdrArgs, opts.timeout);
-  const options = opts.closeStdin === true ? { ...spec.options, closeStdin: true } : { ...spec.options };
+  const options = opts.closeStdin === true ? { ...spec.options, closeStdin: true } : spec.options;
   const { stdout } = await exec(spec.file, spec.args, options);
   // Remote stdout may carry SSH chatter; strip only those lines. Do NOT trim — pane read text
   // must keep its line structure (the JSON path tolerates surrounding whitespace).
