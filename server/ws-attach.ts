@@ -18,6 +18,7 @@ import type { HerdrEnv } from "../environments.ts";
 import { createFocusTranslator, type FocusTranslator } from "./focus-translate.ts";
 import { buildAttachSpec, focusedTabId, paneGet, tabFocus } from "./herdr.ts";
 import { bridgePtyToWs, type PtyLike, type WsLike } from "./pty-bridge.ts";
+import { recordViewport } from "./viewport.ts";
 import { createSpawnLimiter, validateUpgrade } from "./ws-attach-guard.ts";
 
 // node-pty is injectable so the assembly is testable without a real terminal (the manual smoke test,
@@ -266,7 +267,8 @@ function onConnection(ctx: ConnectionCtx): void {
     ctx.focus.onAttachClose(ctx.env, ctx.paneId);
   });
 
-  bridgePtyToWs(pty, ctx.ws, { graceMs: WS_KILL_GRACE_MS, heartbeatMs: WS_HEARTBEAT_MS });
+  // Recording lives here, not in the bridge, so the bridge keeps its "no server imports" property.
+  bridgePtyToWs(pty, ctx.ws, { graceMs: WS_KILL_GRACE_MS, heartbeatMs: WS_HEARTBEAT_MS, onResize: recordViewport });
 }
 
 /**

@@ -7,6 +7,7 @@ import { WebSocket } from "ws";
 
 import type { HerdrEnv } from "../environments.ts";
 import type { PtyLike } from "../server/pty-bridge.ts";
+import { lastViewport } from "../server/viewport.ts";
 import { createSpawnLimiter } from "../server/ws-attach-guard.ts";
 import { attachFailureReason, attachWebSocketServer, auditLine, type AttachServerOptions, type PtySpawnFn } from "../server/ws-attach.ts";
 
@@ -349,5 +350,21 @@ describe("attachFailureReason", () => {
       expect(Buffer.byteLength(reason, "utf8")).toBeLessThanOrEqual(123);
       expect(Array.from(reason).every((ch) => { const c = ch.codePointAt(0) ?? 0; return c < 0xd800 || c > 0xdfff; })).toBe(true);
     }
+  });
+});
+
+// Placed last in this file, deliberately: a later task adds cases asserting viewport memory is EMPTY
+// (no attach yet), and those must run before this one records a value into the same module state.
+describe("viewport wiring (Task 1: the attach's resize frame reaches recordViewport)", () => {
+  it("records the last resize frame's size in viewport memory", async () => {
+    const h = await start();
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
+    await once(client, "open");
+    await waitFor(() => h.ptys.length === 1);
+
+    client.send(JSON.stringify({ type: "resize", cols: 188, rows: 45 }));
+    await waitFor(() => (h.ptys[0]?.resizes.length ?? 0) > 0);
+
+    expect(lastViewport()).toEqual({ cols: 188, rows: 45 });
   });
 });

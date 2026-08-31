@@ -21,10 +21,17 @@ export interface WsLike {
   readonly bufferedAmount: number;
 }
 
+// Upper bound for a terminal dimension arriving from the browser, shared with ws-attach-guard's
+// query parsing so a resize frame cannot store a value the connect path would have rejected.
+// `int().positive()` alone left an unbounded number driving a pty grid allocation.
+// Lives here, next to the schema that first needed it, for the same reason PANE_RE lives in
+// ws-attach-guard: one home, imported by whoever else needs it. The bridge imports no server module.
+export const TERM_DIM_MAX = 1000;
+
 const ControlSchema = z.object({
   type: z.literal("resize"),
-  cols: z.number().int().positive(),
-  rows: z.number().int().positive(),
+  cols: z.number().int().positive().max(TERM_DIM_MAX),
+  rows: z.number().int().positive().max(TERM_DIM_MAX),
 });
 
 const DEFAULT_MAX_BUFFERED = 1_000_000;
@@ -42,11 +49,13 @@ const DEFAULT_MAX_BUFFERED = 1_000_000;
  *   terminate()d — a dead browser must not hold the herdr --takeover input lock or a limiter slot.
  * All inbound handling is hardened against untrusted input: JSON.parse is guarded, the control frame is
  * Zod-validated, and kill()/write()/resize() are wrapped (calls on an already-exited pty can throw).
+ * The resize frame is also the only source of the operator's viewport size, reported through
+ * `onResize` — the bridge itself stores nothing.
  */
 export function bridgePtyToWs(
   pty: PtyLike,
   ws: WsLike,
-  opts: { graceMs: number; heartbeatMs: number; maxBuffered?: number },
+  opts: { graceMs: number; heartbeatMs: number; maxBuffered?: number; onResize?: (cols: number, rows: number) => void },
 ): () => void {
   const maxBuffered = opts.maxBuffered ?? DEFAULT_MAX_BUFFERED;
   let closed = false;
@@ -85,7 +94,9 @@ export function bridgePtyToWs(
       return; // non-JSON text frame — ignore, never throw on untrusted input
     }
     const parsed = ControlSchema.safeParse(json);
-    if (parsed.success) safeResize(parsed.data.cols, parsed.data.rows);
+    if (!parsed.success) return;
+    safeResize(parsed.data.cols, parsed.data.rows);
+    opts.onResize?.(parsed.data.cols, parsed.data.rows);
   }
 
   pty.onData((data) => {
