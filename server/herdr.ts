@@ -5,7 +5,9 @@ import path from "node:path";
 import { quote } from "shell-quote";
 import { z } from "zod";
 
-import { FOCUS_TRANSLATION_ENABLED, LIST_TIMEOUT, PANE_SIZE_TIMEOUT_MS, READ_TIMEOUT } from "../config.ts";
+import {
+  FOCUS_TRANSLATION_ENABLED, LIST_TIMEOUT, PANE_SIZE_RETRY_AFTER_MS, PANE_SIZE_TIMEOUT_MS, READ_TIMEOUT,
+} from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { parsePane } from "./parser.ts";
 
@@ -313,10 +315,13 @@ export async function paneRun(env: HerdrEnv, paneId: string, text: string, exec?
     exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec });
 }
 
-// Environments whose herdr refused the sizing subcommand. The call is best-effort and undocumented in
-// `herdr --help` (verified present on 0.8.0 and 0.8.2), so a build without it must cost one warning
-// and one failed call — not one per spawn, which would train the operator to ignore the warning.
-const paneSizeUnsupported = new Set<string>();
+// Environments whose most recent sizing attempt failed, mapped to when. The call is best-effort and
+// undocumented in `herdr --help` (verified present on 0.8.0 and 0.8.2), so a failure must not cost one
+// warning per spawn — but the failure is never assumed permanent: a 2s local timeout, a dropped ssh
+// link, or a `protocol_mismatch` during a herdr upgrade all land in the same catch as a build that
+// truly lacks the subcommand, and only a decaying latch lets the former recover without a restart.
+// See PANE_SIZE_RETRY_AFTER_MS.
+const paneSizeFailedAt = new Map<string, number>();
 
 /**
  * Set a pane's terminal size out of band, before anything runs in it.
@@ -331,7 +336,8 @@ const paneSizeUnsupported = new Set<string>();
 export async function paneSetSize(
   env: HerdrEnv, paneId: string, cols: number, rows: number, exec?: ExecFn,
 ): Promise<void> {
-  if (paneSizeUnsupported.has(env.id)) return;
+  const failedAt = paneSizeFailedAt.get(env.id);
+  if (failedAt !== undefined && Date.now() - failedAt < PANE_SIZE_RETRY_AFTER_MS) return;
   const args = ["terminal", "session", "control", paneId, "--cols", String(cols), "--rows", String(rows)];
   const timeout = env.kind === "remote" ? LIST_TIMEOUT : PANE_SIZE_TIMEOUT_MS;
   try {
@@ -339,7 +345,7 @@ export async function paneSetSize(
       ? { timeout, closeStdin: true }
       : { timeout, closeStdin: true, exec });
   } catch (err) {
-    paneSizeUnsupported.add(env.id);
+    paneSizeFailedAt.set(env.id, Date.now());
     throw new Error(err instanceof Error ? err.message : String(err));
   }
 }

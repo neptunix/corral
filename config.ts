@@ -26,6 +26,11 @@ export const READ_TIMEOUT = 30000;
 // that EOF. Remote deliberately does NOT use it: the ssh leg alone is allowed 8s to connect, so a 2s
 // bound there would fail every remote spawn for transport reasons — the remote form takes LIST_TIMEOUT.
 export const PANE_SIZE_TIMEOUT_MS = 2000;
+// The latch in server/herdr.ts (paneSetSize) exists so a herdr build without the sizing subcommand
+// costs one warning, not one per spawn. This cooldown is what keeps that latch from also eating a
+// TRANSIENT failure — a timeout, a dropped link, a protocol mismatch during a herdr upgrade — for the
+// rest of the process's life: the next spawn after this window retries instead of staying silent.
+export const PANE_SIZE_RETRY_AFTER_MS = 600_000; // 10 min
 // Narrowest reading corral will act on. Below this a reported grid is not plausibly the width a
 // session will be read at later — an xterm that measured itself before layout settled reports 80x24,
 // and a phone-sized panel would otherwise become the birth width of every session spawned afterwards,

@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 
-import { FOCUS_TRANSLATION_ENABLED, LIST_TIMEOUT, PANE_SIZE_TIMEOUT_MS } from "../config.ts";
+import { FOCUS_TRANSLATION_ENABLED, LIST_TIMEOUT, PANE_SIZE_RETRY_AFTER_MS, PANE_SIZE_TIMEOUT_MS } from "../config.ts";
 import { ENVIRONMENTS, getEnv } from "../environments.ts";
 import type { HerdrEnv } from "../environments.ts";
 import type { ExecFn } from "../server/herdr.ts";
@@ -309,15 +309,53 @@ describe("paneSetSize", () => {
     expect(calls[0]!.options.timeout).toBe(LIST_TIMEOUT);
   });
 
-  it("skips an environment after its first failure", async () => {
-    const latchEnv: HerdrEnv = {
-      id: "pane-size-latch-only", label: "Latch", kind: "local",
-      claudeConfigDirs: [], spawnCommand: "claude", repos: {},
-    };
-    let n = 0;
-    const exec: ExecFn = async () => { n += 1; throw new Error("unknown subcommand"); };
-    await expect(paneSetSize(latchEnv, "w1:p1", 188, 45, exec)).rejects.toThrow();
-    await paneSetSize(latchEnv, "w1:p2", 188, 45, exec);
-    expect(n).toBe(1);
+  describe("failure latch (decays, keyed per environment)", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("skips an environment after its first failure, inside the cooldown", async () => {
+      const latchEnv: HerdrEnv = {
+        id: "pane-size-latch-cooldown", label: "Latch", kind: "local",
+        claudeConfigDirs: [], spawnCommand: "claude", repos: {},
+      };
+      let n = 0;
+      const exec: ExecFn = async () => { n += 1; throw new Error("unknown subcommand"); };
+      await expect(paneSetSize(latchEnv, "w1:p1", 188, 45, exec)).rejects.toThrow();
+      await paneSetSize(latchEnv, "w1:p2", 188, 45, exec);
+      expect(n).toBe(1);
+    });
+
+    it("retries once the cooldown has elapsed — a transient failure must not disable sizing forever", async () => {
+      const latchEnv: HerdrEnv = {
+        id: "pane-size-latch-retry", label: "Latch", kind: "local",
+        claudeConfigDirs: [], spawnCommand: "claude", repos: {},
+      };
+      let n = 0;
+      const exec: ExecFn = async () => { n += 1; throw new Error("protocol_mismatch"); };
+      await expect(paneSetSize(latchEnv, "w1:p1", 188, 45, exec)).rejects.toThrow();
+      vi.advanceTimersByTime(PANE_SIZE_RETRY_AFTER_MS);
+      await expect(paneSetSize(latchEnv, "w1:p2", 188, 45, exec)).rejects.toThrow();
+      expect(n).toBe(2);
+    });
+
+    it("latches per environment — a different environment's first attempt is unaffected", async () => {
+      const envA: HerdrEnv = {
+        id: "pane-size-latch-env-a", label: "A", kind: "local",
+        claudeConfigDirs: [], spawnCommand: "claude", repos: {},
+      };
+      const envB: HerdrEnv = {
+        id: "pane-size-latch-env-b", label: "B", kind: "local",
+        claudeConfigDirs: [], spawnCommand: "claude", repos: {},
+      };
+      let n = 0;
+      const exec: ExecFn = async () => { n += 1; throw new Error("unknown subcommand"); };
+      await expect(paneSetSize(envA, "w1:p1", 188, 45, exec)).rejects.toThrow();
+      await expect(paneSetSize(envB, "w1:p1", 188, 45, exec)).rejects.toThrow();
+      expect(n).toBe(2);
+    });
   });
 });
