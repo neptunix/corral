@@ -1,11 +1,13 @@
 import type { SessionRow } from "@shared/schema";
 import { quote } from "shell-quote";
 
+import { MIN_SIZED_COLS } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { BRIEF_FALLBACK } from "./brief.ts";
 import type { ExecFn } from "./herdr.ts";
 import {
-  listPanes, paneGet, paneRun, tabClose, tabCreate, tabRename, workspaceClose, workspaceCreate,
+  listPanes, paneGet, paneRun, paneSetSize, tabClose, tabCreate, tabRename, workspaceClose,
+  workspaceCreate,
 } from "./herdr.ts";
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -164,6 +166,10 @@ export interface SpawnOpts {
   readonly listFn?: (env: HerdrEnv, exec?: ExecFn) => Promise<SessionRow[]>;
   readonly paneGetFn?: (env: HerdrEnv, paneId: string, exec?: ExecFn) => Promise<{ paneId: string; tabId: string; workspaceId: string; cwd: string }>;
   readonly paneRunFn?: (env: HerdrEnv, paneId: string, text: string, exec?: ExecFn) => Promise<void>;
+  /** The operator's last known terminal-panel grid, resolved by the composition root (server/index.ts)
+   *  from viewport memory. Absent means corral has never seen a panel — then herdr's own size stands. */
+  readonly paneSize?: { readonly cols: number; readonly rows: number };
+  readonly paneSetSizeFn?: (env: HerdrEnv, paneId: string, cols: number, rows: number, exec?: ExecFn) => Promise<void>;
   readonly workspaceCreateFn?: (env: HerdrEnv, cwd: string, label: string, exec?: ExecFn) => Promise<{ workspaceId: string; rootTabId: string | undefined; rootPaneId: string | undefined }>;
   readonly tabCreateFn?: (env: HerdrEnv, workspaceId: string, cwd: string, label: string, exec?: ExecFn) => Promise<{ tabId: string; paneId: string }>;
   readonly tabRenameFn?: (env: HerdrEnv, tabId: string, label: string, exec?: ExecFn) => Promise<void>;
@@ -361,6 +367,24 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
     } catch (err) {
       if (createdWorkspaceId !== null) await doWorkspaceClose(env, createdWorkspaceId).catch(() => void 0);
       throw new Error(`spawn: tab create failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Step 3.5: give the pane the operator's width BEFORE the agent starts. A pane created through the
+  // socket API is born at herdr's headless layout size (80 columns minus the sidebar before herdr
+  // 0.8.2, and whatever `[server] headless_cols` says after), and everything Claude prints at that
+  // width — its banner, the injected brief — keeps that wrapping in the scrollback forever, because
+  // box-drawn output cannot reflow when the panel later widens the pane.
+  //
+  // Best-effort by design: a cosmetic width must never fail a spawn. Sizing narrower than the floor is
+  // skipped rather than applied — see MIN_SIZED_COLS.
+  const paneSize = opts.paneSize;
+  if (paneSize !== undefined && paneSize.cols >= MIN_SIZED_COLS) {
+    const doPaneSetSize = opts.paneSetSizeFn ?? paneSetSize;
+    try {
+      await doPaneSetSize(env, paneId, paneSize.cols, paneSize.rows);
+    } catch (err) {
+      console.warn(`[spawn] pane size: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

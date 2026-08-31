@@ -1,6 +1,7 @@
 import type { SessionRow } from "@shared/schema";
 import { describe, expect, it, vi } from "vitest";
 
+import { MIN_SIZED_COLS } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { spawnSession } from "../server/spawn.ts";
 
@@ -464,5 +465,68 @@ describe("spawnSession — an explicit null target still creates", () => {
     });
     expect(fns.workspaceCreateFn).toHaveBeenCalledWith(localEnv, "/repos/corral", "corral");
     expect(strict).not.toHaveBeenCalled(); // the resolve path is not even consulted
+  });
+});
+
+describe("spawnSession — sizing the pane before launch (step 3.5)", () => {
+  const base = {
+    env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/fallback", repo: "corral",
+    assignedPaneIds: new Set<string>(), targetWorkspaceId: null, repoPath: "/repos/corral",
+    ...baseFns(),
+    // The create-new-workspace path reuses the seeded root pane (w1:p1), not the join path's w1:p2.
+    paneGetFn: vi.fn().mockResolvedValue({ paneId: "w1:p1", tabId: "w1:t1", workspaceId: "w1", cwd: "/repos/corral" }),
+  };
+
+  // Joined-workspace idempotent rejoin: the existing `my-task-a` tab lives IN the joined workspace,
+  // so spawn returns early (step 2) — before step 3.5 could ever run.
+  const rejoinBase = {
+    env: localEnv, taskSlug: "my-task", sessionName: "my-task-a", cwd: "/x", repo: "corral",
+    assignedPaneIds: new Set<string>(), targetWorkspaceId: "w1", repoPath: null,
+    listFn: vi.fn().mockResolvedValue([makeRow("w1:p9", "my-task-a", "corral")]),
+    listPanesFn: vi.fn().mockResolvedValue([{ paneId: "w1:p9", cwd: "/proj" }]),
+    paneGetFn: vi.fn().mockResolvedValue({ paneId: "w1:p9", tabId: "w1:t9", workspaceId: "w1", cwd: "/proj" }),
+  };
+
+  it("sizes the pane before launching the agent", async () => {
+    const order: string[] = [];
+    await spawnSession({
+      ...base,
+      paneSize: { cols: 188, rows: 45 },
+      paneSetSizeFn: async (_e, paneId, cols, rows) => { order.push(`size:${paneId}:${String(cols)}x${String(rows)}`); },
+      paneRunFn: async (_e, paneId) => { order.push(`run:${paneId}`); },
+    });
+    expect(order).toEqual(["size:w1:p1:188x45", "run:w1:p1"]);
+  });
+
+  it("does not size when no viewport is known", async () => {
+    let called = 0;
+    await spawnSession({ ...base, paneSetSizeFn: async () => { called += 1; } });
+    expect(called).toBe(0);
+  });
+
+  it("does not size below the width floor", async () => {
+    let called = 0;
+    await spawnSession({
+      ...base,
+      paneSize: { cols: MIN_SIZED_COLS - 1, rows: 45 },
+      paneSetSizeFn: async () => { called += 1; },
+    });
+    expect(called).toBe(0);
+  });
+
+  it("still spawns when sizing throws", async () => {
+    const result = await spawnSession({
+      ...base,
+      paneSize: { cols: 188, rows: 45 },
+      paneSetSizeFn: async () => { throw new Error("unknown subcommand"); },
+    });
+    expect(result.paneId).toBe("w1:p1");
+  });
+
+  it("does not size on the idempotent rejoin", async () => {
+    let called = 0;
+    const result = await spawnSession({ ...rejoinBase, paneSize: { cols: 188, rows: 45 }, paneSetSizeFn: async () => { called += 1; } });
+    expect(result.idempotent).toBe(true);
+    expect(called).toBe(0);
   });
 });

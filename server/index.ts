@@ -30,6 +30,7 @@ import { spawnSession, type SpawnOpts, type SpawnResult } from "./spawn.ts";
 import { createStorage } from "./storage.ts";
 import { readLastActivity } from "./transcript.ts";
 import { sweepUploadRoot } from "./uploads.ts";
+import { lastViewport } from "./viewport.ts";
 import { attachWebSocketServer } from "./ws-attach.ts";
 import { startZombieReaper } from "./zombie-reaper.ts";
 
@@ -102,12 +103,18 @@ void (async () => {
     startZombieReaper({ poller, storage, envs: ENVS, listPanes: listAllPanes, closePane, graceMs: reapGrace.ms });
   }
 
-  const spawn = (opts: SpawnOpts): Promise<SpawnResult> => spawnSession({
-    ...opts,
-    workspaceListFn: listWorkspaces,
-    workspaceListStrictFn: listWorkspacesStrict,
-    workspaceCloseFn: workspaceClose,
-  });
+  const spawn = (opts: SpawnOpts): Promise<SpawnResult> => {
+    const viewport = lastViewport();
+    return spawnSession({
+      ...opts,
+      workspaceListFn: listWorkspaces,
+      workspaceListStrictFn: listWorkspacesStrict,
+      workspaceCloseFn: workspaceClose,
+      // Read here, not inside spawn.ts: that module takes every herdr dependency by injection so it
+      // stays pure and unit-testable, and viewport memory is process state.
+      ...(viewport === null ? {} : { paneSize: viewport }),
+    });
+  };
   const fleetRestore = createFleetRestore({
     envs: ENVS,
     mirrorFilePath: mirrorPath(BOARD_DATA_DIR),
