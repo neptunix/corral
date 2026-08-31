@@ -35,7 +35,9 @@ you work on, and lets you respond in place.
 ## Quick start
 
 Prerequisites: Node ≥ 20.11, [herdr ≥ 0.7.1](https://github.com/ogulcancelik/herdr) on this
-machine (and on any remote box you add), Claude Code on every machine you spawn sessions on,
+machine (and on any remote box you add) — two features want more: corral sizing a spawned pane to
+your terminal panel needs herdr ≥ 0.8.0, and `headless_cols`/`headless_rows` need ≥ 0.8.2 (see
+[Upgrading herdr](#upgrading-herdr)) — Claude Code on every machine you spawn sessions on,
 and `jq` — **required** if you want the live Claude metrics (model / context % / cost /
 rate-limit windows). The metrics *capture* is optional; `jq` is not optional *for* it. Both
 helper scripts hard-depend on `jq` and are deliberately best-effort, so without it they write
@@ -103,7 +105,7 @@ proxy: its WebSocket Origin allowlist is loopback-only by design.
 ## Running herdr
 
 corral is a client: it talks to a herdr *server* over a unix socket and never starts one for you, so
-that server's lifetime is yours to manage. Verified against herdr 0.7.1 on macOS and 0.7.5 on Linux.
+that server's lifetime is yours to manage. Verified against herdr 0.8.2 on macOS and 0.7.5 on Linux.
 
 ### Start it headless
 
@@ -254,6 +256,35 @@ comes back with it — but **the processes inside those panes do not**. A restar
 same panes running fresh shells. For agent panes, herdr's `[session] resume_agents_on_restore` is what
 relaunches the agent into its conversation session.
 
+### Upgrading herdr
+
+A herdr upgrade does not stay contained to itself. herdr's CLI is one binary per machine, but its
+servers are one per session, and corral shells out to that CLI for every call — so a single upgrade
+mismatches the whole fleet at once, and the board goes dark with:
+
+```
+protocol_mismatch: client protocol N is newer than server protocol M
+```
+
+until every server has restarted. Protocol bumps are not reliably announced — 0.8.2 bumped the
+protocol (19 → 20) with no changelog entry — so treat any herdr upgrade as requiring a fleet
+restart, and check the new CLI against a live server before relying on it: `herdr pane layout`
+returns the mismatch immediately.
+
+Restart each server with the [Keep it running](#keep-it-running) stop-then-start sequence, one
+session at a time. Homebrew installs have herdr's live handoff disabled, so restarting is the only
+path, and it kills the processes running in that session's panes — the sessions themselves stay
+resumable from the board, but work in flight does not survive. Restart the session that holds your
+own corral agent last, so you keep a working terminal for the rest of the fleet.
+
+Once every server is back, `[server] headless_cols` / `headless_rows` in
+`~/.config/herdr/config.toml` (herdr ≥ 0.8.2) sets the width a pane is born at when no client is
+attached — raise it if spawned sessions come up narrow. A pane created through the socket API is
+born at `headless_cols` minus the sidebar width, so 220 yields a 188-column pane. corral separately
+sizes each pane it spawns to the last width your terminal panel reported (herdr ≥ 0.8.0, where the
+command corral uses for that exists); the two are complements — the config covers panes corral did
+not create, and panes created before corral has ever seen a terminal panel.
+
 ### The TUI and the live terminal
 
 Do not keep herdr's TUI and corral's in-browser terminal attached to the same pane at once. The pane's
@@ -339,6 +370,9 @@ running; the cards simply stop changing.
 environment's `spawnCommand` (e.g. a profile-specific `claude-work`).
 
 ## Upgrading
+
+This section covers upgrading corral itself. Upgrading herdr is a separate operation — see
+[Upgrading herdr](#upgrading-herdr).
 
 ```bash
 # If package-lock.json is the only dirty file and the diff is `libc` / `hasInstallScript` churn,
