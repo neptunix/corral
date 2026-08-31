@@ -1,11 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 
-import { FOCUS_TRANSLATION_ENABLED } from "../config.ts";
+import { FOCUS_TRANSLATION_ENABLED, LIST_TIMEOUT, PANE_SIZE_TIMEOUT_MS } from "../config.ts";
 import { ENVIRONMENTS, getEnv } from "../environments.ts";
+import type { HerdrEnv } from "../environments.ts";
 import type { ExecFn } from "../server/herdr.ts";
-import { paneRun, paneGet, tabCreate, tabFocus, focusedTabId, workspaceCreate, tabClose, tabRename, listPanes, listAllPanes } from "../server/herdr.ts";
+import { paneRun, paneGet, tabCreate, tabFocus, focusedTabId, workspaceCreate, tabClose, tabRename, listPanes, listAllPanes, paneSetSize } from "../server/herdr.ts";
 
 const env = ENVIRONMENTS[0]!;
+const remoteEnv = getEnv("work-remote");
 
 function makeExec(stdout: string): ExecFn {
   return async (_file, args) => {
@@ -282,5 +284,40 @@ describe("listAllPanes — unparseable pane list warning", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe("paneSetSize", () => {
+  it("sends the control subcommand with the size, closing stdin, on a short timeout", async () => {
+    const calls: { args: readonly string[]; options: { timeout: number; closeStdin?: boolean } }[] = [];
+    const exec: ExecFn = async (_file, args, options) => {
+      calls.push({ args, options });
+      return { stdout: "", stderr: "" };
+    };
+    await paneSetSize(env, "w1:p1", 188, 45, exec);
+    expect(calls[0]!.args).toEqual([
+      "terminal", "session", "control", "w1:p1", "--cols", "188", "--rows", "45",
+    ]);
+    expect(calls[0]!.options.closeStdin).toBe(true);
+    expect(calls[0]!.options.timeout).toBe(PANE_SIZE_TIMEOUT_MS);
+  });
+
+  it("gives the remote form the house timeout, above ssh's own connect budget", async () => {
+    const calls: { options: { timeout: number } }[] = [];
+    const exec: ExecFn = async (_f, _a, options) => { calls.push({ options }); return { stdout: "", stderr: "" }; };
+    await paneSetSize(remoteEnv, "w1:p1", 188, 45, exec);
+    expect(calls[0]!.options.timeout).toBe(LIST_TIMEOUT);
+  });
+
+  it("skips an environment after its first failure", async () => {
+    const latchEnv: HerdrEnv = {
+      id: "pane-size-latch-only", label: "Latch", kind: "local",
+      claudeConfigDirs: [], spawnCommand: "claude", repos: {},
+    };
+    let n = 0;
+    const exec: ExecFn = async () => { n += 1; throw new Error("unknown subcommand"); };
+    await expect(paneSetSize(latchEnv, "w1:p1", 188, 45, exec)).rejects.toThrow();
+    await paneSetSize(latchEnv, "w1:p2", 188, 45, exec);
+    expect(n).toBe(1);
   });
 });

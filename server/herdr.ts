@@ -5,14 +5,14 @@ import path from "node:path";
 import { quote } from "shell-quote";
 import { z } from "zod";
 
-import { FOCUS_TRANSLATION_ENABLED, LIST_TIMEOUT, READ_TIMEOUT } from "../config.ts";
+import { FOCUS_TRANSLATION_ENABLED, LIST_TIMEOUT, PANE_SIZE_TIMEOUT_MS, READ_TIMEOUT } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { parsePane } from "./parser.ts";
 
 export interface ExecSpec {
   readonly file: string;
   readonly args: readonly string[];
-  readonly options: { readonly env?: NodeJS.ProcessEnv; readonly timeout: number };
+  readonly options: { readonly env?: NodeJS.ProcessEnv; readonly timeout: number; readonly closeStdin?: boolean };
 }
 
 // Canonical pane-read signature. Single home for the type so downstream consumers (attention-store,
@@ -88,7 +88,7 @@ export function buildAttachSpec(
 export type ExecFn = (
   file: string,
   args: readonly string[],
-  options: { env?: NodeJS.ProcessEnv; timeout: number },
+  options: { env?: NodeJS.ProcessEnv; timeout: number; closeStdin?: boolean },
 ) => Promise<{ stdout: string; stderr: string }>;
 
 // Callback form, NOT promisify(execFile). With `encoding: "utf8" as const` the execFile string
@@ -98,15 +98,22 @@ export type ExecFn = (
 // allowed by the no-`as` rule — it narrows a literal, not an `as SomeType` assertion.)
 export const defaultExec: ExecFn = (file, args, options) =>
   new Promise((resolve, reject) => {
-    execFile(
+    const { closeStdin, ...spawnOptions } = options;
+    const child = execFile(
       file,
       [...args],
-      { ...options, encoding: "utf8" as const, maxBuffer: 10 * 1024 * 1024 },
+      { ...spawnOptions, encoding: "utf8" as const, maxBuffer: 10 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) reject(new Error(err.message, { cause: err }));
         else resolve({ stdout, stderr });
       },
     );
+    // `execFile` always gives the child a pipe on stdin and never closes it, so a command that streams
+    // until EOF never returns — `terminal session control` is one, and with the pipe left open it emits
+    // pane frames until the timeout kills it (measured: 6s vs 188ms). Opt-in per call: every other
+    // herdr call reads no stdin, and changing the shared default for the remote ssh leg too is not
+    // this change's business.
+    if (closeStdin === true) child.stdin?.end();
   });
 
 // Exported for server/session-registry.ts's remote read: the ONE definition of "lines the ssh client
@@ -116,11 +123,12 @@ export const SSH_NOISE = /^(bind|channel_setup|Could not|Warning: remote port).*
 export async function runHerdr(
   env: HerdrEnv,
   herdrArgs: readonly string[],
-  opts: { timeout: number; exec?: ExecFn },
+  opts: { timeout: number; exec?: ExecFn; closeStdin?: boolean },
 ): Promise<string> {
   const exec = opts.exec ?? defaultExec;
   const spec = buildExec(env, herdrArgs, opts.timeout);
-  const { stdout } = await exec(spec.file, spec.args, { ...spec.options });
+  const options = opts.closeStdin === true ? { ...spec.options, closeStdin: true } : { ...spec.options };
+  const { stdout } = await exec(spec.file, spec.args, options);
   // Remote stdout may carry SSH chatter; strip only those lines. Do NOT trim — pane read text
   // must keep its line structure (the JSON path tolerates surrounding whitespace).
   return env.kind === "remote" ? stdout.replace(SSH_NOISE, "") : stdout;
@@ -303,6 +311,37 @@ const PaneListAllSchema = z.object({
 export async function paneRun(env: HerdrEnv, paneId: string, text: string, exec?: ExecFn): Promise<void> {
   await runHerdr(env, ["pane", "run", paneId, text],
     exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec });
+}
+
+// Environments whose herdr refused the sizing subcommand. The call is best-effort and undocumented in
+// `herdr --help` (verified present on 0.8.0 and 0.8.2), so a build without it must cost one warning
+// and one failed call — not one per spawn, which would train the operator to ignore the warning.
+const paneSizeUnsupported = new Set<string>();
+
+/**
+ * Set a pane's terminal size out of band, before anything runs in it.
+ *
+ * `herdr terminal session control` is a bridge client: it declares a size on connect, which herdr
+ * applies to that pane's pty and keeps after the client exits. Probed on 0.8.2/macOS: no agent needs
+ * to be registered, `--takeover` is not needed, the size survives focus changes, tab creation and the
+ * agent starting, and one pane's size does not move another's.
+ *
+ * stdout is deliberately discarded, never logged: it is pane screen content (SEC-6).
+ */
+export async function paneSetSize(
+  env: HerdrEnv, paneId: string, cols: number, rows: number, exec?: ExecFn,
+): Promise<void> {
+  if (paneSizeUnsupported.has(env.id)) return;
+  const args = ["terminal", "session", "control", paneId, "--cols", String(cols), "--rows", String(rows)];
+  const timeout = env.kind === "remote" ? LIST_TIMEOUT : PANE_SIZE_TIMEOUT_MS;
+  try {
+    await runHerdr(env, args, exec === undefined
+      ? { timeout, closeStdin: true }
+      : { timeout, closeStdin: true, exec });
+  } catch (err) {
+    paneSizeUnsupported.add(env.id);
+    throw new Error(err instanceof Error ? err.message : String(err));
+  }
 }
 
 export async function paneGet(

@@ -20,6 +20,12 @@ export const CHEAP_INTERVAL_MS = intFromEnv("HERDR_DASH_POLL_MS", 30000, { min: 
 export const ATTENTION_MIN_WORK_MS = intFromEnv("ATTENTION_MIN_WORK_MS", 600_000, { min: 0 }); // 10 min (§3.6)
 export const LIST_TIMEOUT = 15000;
 export const READ_TIMEOUT = 30000;
+// Pane sizing is one round-trip to a local herdr socket — measured at 188ms — and the command it uses
+// is a streaming bridge that exits on stdin EOF. This bound is what keeps a cosmetic resize from
+// stalling a spawn, and its stdout out of `defaultExec`'s buffer, if a herdr build ever stops honouring
+// that EOF. Remote deliberately does NOT use it: the ssh leg alone is allowed 8s to connect, so a 2s
+// bound there would fail every remote spawn for transport reasons — the remote form takes LIST_TIMEOUT.
+export const PANE_SIZE_TIMEOUT_MS = 2000;
 // Narrowest reading corral will act on. Below this a reported grid is not plausibly the width a
 // session will be read at later — an xterm that measured itself before layout settled reports 80x24,
 // and a phone-sized panel would otherwise become the birth width of every session spawned afterwards,
