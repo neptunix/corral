@@ -110,9 +110,8 @@ afterEach(async () => {
   for (const s of servers.splice(0)) { await new Promise<void>((res) => { s.close(() => { res(); }); }); }
 });
 
-// Placed first in this file: viewport memory is module state with no reset export, and the two
-// empty-memory cases below must run before ANY test — here or later in the file — records a value
-// into it (including the existing integration test that sends a resize frame).
+// Placed first: viewport memory is module state with no reset export, and the empty-memory cases
+// below must run before anything else in this file writes a value into it.
 describe("attach pty size at spawn (Task 2)", () => {
   it("spawns the pty at the size the client sent", async () => {
     const h = await start();
@@ -409,8 +408,8 @@ describe("attachFailureReason", () => {
   });
 });
 
-// Placed last in this file, deliberately: a later task adds cases asserting viewport memory is EMPTY
-// (no attach yet), and those must run before this one records a value into the same module state.
+// Placed last, deliberately: this block records into viewport memory, and the empty-memory
+// assertions earlier in the file depend on running before that happens.
 describe("viewport wiring (Task 1: the attach's resize frame reaches recordViewport)", () => {
   it("records the last resize frame's size in viewport memory", async () => {
     const h = await start();

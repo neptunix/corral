@@ -166,8 +166,7 @@ export interface SpawnOpts {
   readonly listFn?: (env: HerdrEnv, exec?: ExecFn) => Promise<SessionRow[]>;
   readonly paneGetFn?: (env: HerdrEnv, paneId: string, exec?: ExecFn) => Promise<{ paneId: string; tabId: string; workspaceId: string; cwd: string }>;
   readonly paneRunFn?: (env: HerdrEnv, paneId: string, text: string, exec?: ExecFn) => Promise<void>;
-  /** The operator's last known terminal-panel grid, resolved by the composition root (server/index.ts)
-   *  from viewport memory. Absent means corral has never seen a panel — then herdr's own size stands. */
+  /** Absent means corral has never seen a panel — then herdr's own size stands. */
   readonly paneSize?: { readonly cols: number; readonly rows: number };
   readonly paneSetSizeFn?: (env: HerdrEnv, paneId: string, cols: number, rows: number, exec?: ExecFn) => Promise<void>;
   readonly workspaceCreateFn?: (env: HerdrEnv, cwd: string, label: string, exec?: ExecFn) => Promise<{ workspaceId: string; rootTabId: string | undefined; rootPaneId: string | undefined }>;
@@ -370,14 +369,9 @@ export async function spawnSession(opts: SpawnOpts): Promise<SpawnResult> {
     }
   }
 
-  // Step 3.5: give the pane the operator's width BEFORE the agent starts. A pane created through the
-  // socket API is born at herdr's headless layout size (80 columns minus the sidebar before herdr
-  // 0.8.2, and whatever `[server] headless_cols` says after), and everything Claude prints at that
-  // width — its banner, the injected brief — keeps that wrapping in the scrollback forever, because
-  // box-drawn output cannot reflow when the panel later widens the pane.
-  //
-  // Best-effort by design: a cosmetic width must never fail a spawn. Sizing narrower than the floor is
-  // skipped rather than applied — see MIN_SIZED_COLS.
+  // Step 3.5: set the pane's width here, before Step 4 sends anything for the agent to print at it —
+  // box-drawn output can't reflow once the panel later widens the pane. Best-effort: a cosmetic width
+  // must never fail a spawn. Floor is MIN_SIZED_COLS.
   const paneSize = opts.paneSize;
   if (paneSize !== undefined && paneSize.cols >= MIN_SIZED_COLS) {
     const doPaneSetSize = opts.paneSetSizeFn ?? paneSetSize;

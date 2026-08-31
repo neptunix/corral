@@ -31,15 +31,11 @@ function safeDecode(s: string): string | null {
 /**
  * The client's terminal grid, if it sent one. `URLSearchParams` is used rather than `decodeURIComponent`
  * because it does not throw on a malformed %-escape: this runs inside the raw `server.on('upgrade')`
- * handler, which has no try/catch and no process-level `uncaughtException` behind it, so a throw here
- * would take the whole corral process down over a hostile URL. Anything not a plain integer inside the
- * accepted band reads as "no size given" — never as an error, and never as a value.
+ * handler with no try/catch and nothing at process level behind it, so a throw here would take corral
+ * down over a hostile URL. Anything outside the accepted band reads as "no size given", never an error.
  *
- * No floor beyond 1: a narrow reading here only sizes THIS client's own pty, and a client can already
- * reach any size in this band with a resize frame — rejecting it here would only leave a genuinely
- * narrow panel's attach born at a stale wide size, replaying a screenful of mis-wrapped output before
- * the first resize frame lands. MIN_SIZED_COLS instead guards the two places a narrow value would do
- * real damage: the spawn gate (server/spawn.ts) and viewport memory (server/viewport.ts).
+ * No floor beyond 1: a narrow reading here only sizes THIS client's own pty and can already reach any
+ * size in the band via a resize frame; MIN_SIZED_COLS guards the spawn gate and viewport memory instead.
  */
 function parseSize(url: string): { readonly cols: number; readonly rows: number } | undefined {
   const q = url.indexOf("?");
@@ -58,8 +54,7 @@ function parseSize(url: string): { readonly cols: number; readonly rows: number 
  * sees none of the route guards), so every check is re-done here. Order (§3.4 step 3): attach-path
  * shape (404) → Origin allowlist (403, fail closed — SEC-1) → env allowlist (400) → PANE_RE (400).
  * Origin is checked before env/pane so a cross-origin probe learns nothing about which envs exist. The
- * client's `?cols=&rows=` grid is parsed LAST, only once the upgrade is otherwise accepted, and is
- * optional — its absence or malformity never fails the upgrade, it just means no size was given.
+ * client's `?cols=&rows=` grid is optional — its absence or malformity never fails the upgrade.
  */
 export function validateUpgrade(
   url: string,

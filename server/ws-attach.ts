@@ -192,10 +192,7 @@ function onConnection(ctx: ConnectionCtx): void {
   const resolvedCommand = `${spec.file} ${spec.args.join(" ")}`;
 
   // Size, best first: what the client told us on connect, then the last panel size corral saw, then
-  // 80x24. The first rung is what removes the squeeze — the pty used to be born 80x24 and only
-  // widened when the browser's first resize frame landed, and herdr registers that placeholder as a
-  // real client. The middle rung serves a tab still running a pre-upgrade bundle, which reconnects
-  // without the query. The last is a floor, not a choice.
+  // 80x24 — the middle rung serves a tab on a pre-upgrade bundle, which reconnects without the query.
   const size = ctx.size ?? lastViewport() ?? { cols: 80, rows: 24 };
 
   let pty: PtyLike;

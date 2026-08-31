@@ -21,20 +21,13 @@ export const ATTENTION_MIN_WORK_MS = intFromEnv("ATTENTION_MIN_WORK_MS", 600_000
 export const LIST_TIMEOUT = 15000;
 export const READ_TIMEOUT = 30000;
 // Pane sizing is one round-trip to a local herdr socket — measured at 188ms — and the command it uses
-// is a streaming bridge that exits on stdin EOF. This bound is what keeps a cosmetic resize from
-// stalling a spawn, and its stdout out of `defaultExec`'s buffer, if a herdr build ever stops honouring
-// that EOF. Remote deliberately does NOT use it: the ssh leg alone is allowed 8s to connect, so a 2s
-// bound there would fail every remote spawn for transport reasons — the remote form takes LIST_TIMEOUT.
+// is a streaming bridge that exits on stdin EOF. Remote does NOT use it: the ssh leg alone is allowed
+// 8s to connect, so this bound would fail every remote spawn — remote takes LIST_TIMEOUT instead.
 export const PANE_SIZE_TIMEOUT_MS = 2000;
-// The latch in server/herdr.ts (paneSetSize) exists so a herdr build without the sizing subcommand
-// costs one warning, not one per spawn. This cooldown is what keeps that latch from also eating a
-// TRANSIENT failure — a timeout, a dropped link, a protocol mismatch during a herdr upgrade — for the
-// rest of the process's life: the next spawn after this window retries instead of staying silent.
+// Retry window for the paneSetSize latch (server/herdr.ts) — see there for why it decays.
 export const PANE_SIZE_RETRY_AFTER_MS = 600_000; // 10 min
-// Narrowest reading corral will act on. Below this a reported grid is not plausibly the width a
-// session will be read at later — an xterm that measured itself before layout settled reports 80x24,
-// and a phone-sized panel would otherwise become the birth width of every session spawned afterwards,
-// outliving the phone. Under it corral acts on nothing and herdr's own size stands.
+// Narrowest reading corral will act on: an unsettled xterm reports 80x24, and a narrow panel would
+// otherwise become the birth width of every session spawned afterward.
 export const MIN_SIZED_COLS = 100;
 // #4: coalesce sub-second bursts to GET /read (each shells out to herdr/SSH). 1s is well under the
 // Unassigned mini-terminal's 5s poll, so legit polling passes straight through; only bursts are damped.

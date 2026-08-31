@@ -32,8 +32,7 @@ vi.mock("@xterm/xterm", () => {
 
 // `vi.hoisted` because `vi.mock` factories run before the rest of this file — a plain module-scope
 // `let` referenced inside the factory below would be a temporal-dead-zone error at import time.
-// Defaults to undefined: jsdom gives the container no layout, so this is what a real browser also
-// returns before the panel has been measured. Tests that need a measured grid set it directly.
+// Defaults to undefined — a real browser returns the same before the panel is measured.
 const fitState = vi.hoisted(() => ({
   proposal: undefined as { cols: number; rows: number } | undefined,
 }));

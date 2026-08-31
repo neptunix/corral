@@ -38,9 +38,8 @@ describe("runHerdr", () => {
 });
 
 describe("defaultExec", () => {
-  // Real child process, no mock: this is the one test proving `closeStdin` reaches the actual pipe
-  // rather than just the type. `cat` echoes stdin back and exits on EOF, so it resolves iff stdin is
-  // ended, and hangs (until the timeout kills it) iff the pipe is left open.
+  // Real child process, no mock: the only test proving `closeStdin` reaches the actual pipe. `cat`
+  // exits on EOF and hangs while stdin stays open, so it exercises both.
   it("ends stdin when closeStdin is set — cat exits on EOF", async () => {
     await expect(defaultExec("cat", [], { timeout: 2000, closeStdin: true })).resolves.toEqual({ stdout: "", stderr: "" });
   });

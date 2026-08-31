@@ -112,9 +112,7 @@ export const defaultExec: ExecFn = (file, args, options) =>
     );
     // `execFile` always gives the child a pipe on stdin and never closes it, so a command that streams
     // until EOF never returns — `terminal session control` is one, and with the pipe left open it emits
-    // pane frames until the timeout kills it (measured: 6s vs 188ms). Opt-in per call: every other
-    // herdr call reads no stdin, and changing the shared default for the remote ssh leg too is not
-    // this change's business.
+    // pane frames until the timeout kills it (measured: 6s vs 188ms). Opt-in per call.
     if (closeStdin === true) child.stdin?.end();
   });
 
@@ -315,12 +313,10 @@ export async function paneRun(env: HerdrEnv, paneId: string, text: string, exec?
     exec === undefined ? { timeout: LIST_TIMEOUT } : { timeout: LIST_TIMEOUT, exec });
 }
 
-// Environments whose most recent sizing attempt failed, mapped to when. The call is best-effort and
-// undocumented in `herdr --help` (verified present on 0.8.0 and 0.8.2), so a failure must not cost one
-// warning per spawn — but the failure is never assumed permanent: a 2s local timeout, a dropped ssh
-// link, or a `protocol_mismatch` during a herdr upgrade all land in the same catch as a build that
-// truly lacks the subcommand, and only a decaying latch lets the former recover without a restart.
-// See PANE_SIZE_RETRY_AFTER_MS.
+// Environments whose most recent sizing attempt failed, mapped to when. A failure must not cost one
+// warning per spawn, but isn't proof the subcommand is missing: a local timeout, a dropped ssh link,
+// or a `protocol_mismatch` during a herdr upgrade land in the same catch — only decay lets those
+// recover without restarting corral. See PANE_SIZE_RETRY_AFTER_MS.
 const paneSizeFailedAt = new Map<string, number>();
 
 /**
@@ -328,8 +324,8 @@ const paneSizeFailedAt = new Map<string, number>();
  *
  * `herdr terminal session control` is a bridge client: it declares a size on connect, which herdr
  * applies to that pane's pty and keeps after the client exits. Probed on 0.8.2/macOS: no agent needs
- * to be registered, `--takeover` is not needed, the size survives focus changes, tab creation and the
- * agent starting, and one pane's size does not move another's.
+ * to be registered, `--takeover` is not needed, and the size survives focus changes, tab creation and
+ * the agent starting.
  *
  * stdout is deliberately discarded, never logged: it is pane screen content (SEC-6).
  */

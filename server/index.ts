@@ -110,8 +110,8 @@ void (async () => {
       workspaceListFn: listWorkspaces,
       workspaceListStrictFn: listWorkspacesStrict,
       workspaceCloseFn: workspaceClose,
-      // Read here, not inside spawn.ts: that module takes every herdr dependency by injection so it
-      // stays pure and unit-testable, and viewport memory is process state.
+      // Read here, not inside spawn.ts: that module takes its herdr dependencies by injection, so
+      // process state is resolved here.
       ...(viewport === null ? {} : { paneSize: viewport }),
     });
   };
