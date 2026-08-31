@@ -66,12 +66,16 @@ describe("validateUpgrade", () => {
     ["negative", "?cols=-80&rows=45"],
     ["fractional", "?cols=188.5&rows=45"],
     ["above max", `?cols=${String(TERM_DIM_MAX + 1)}&rows=45`],
-    ["below the floor", "?cols=80&rows=24"],
     ["malformed escape", "?cols=%E0%A4%A&rows=45"],
   ])("reads %s as no size given", (_label, query) => {
     const r = validateUpgrade(`${okUrl}${query}`, { origin: allowed }, envs, ORIGINS);
     expect(r.ok).toBe(true);
     expect(r.ok && r.size).toBeUndefined();
+  });
+
+  it("honors a query narrower than the old floor — MIN_SIZED_COLS now guards the spawn gate and viewport memory, not the live attach", () => {
+    const r = validateUpgrade(`${okUrl}?cols=80&rows=24`, { origin: allowed }, envs, ORIGINS);
+    expect(r.ok && r.size).toEqual({ cols: 80, rows: 24 });
   });
 
   it("does not parse the query when the origin is rejected", () => {

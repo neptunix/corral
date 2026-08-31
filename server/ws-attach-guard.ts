@@ -1,4 +1,3 @@
-import { MIN_SIZED_COLS } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { TERM_DIM_MAX } from "./pty-bridge.ts";
 
@@ -35,6 +34,12 @@ function safeDecode(s: string): string | null {
  * handler, which has no try/catch and no process-level `uncaughtException` behind it, so a throw here
  * would take the whole corral process down over a hostile URL. Anything not a plain integer inside the
  * accepted band reads as "no size given" — never as an error, and never as a value.
+ *
+ * No floor beyond 1: a narrow reading here only sizes THIS client's own pty, and a client can already
+ * reach any size in this band with a resize frame — rejecting it here would only leave a genuinely
+ * narrow panel's attach born at a stale wide size, replaying a screenful of mis-wrapped output before
+ * the first resize frame lands. MIN_SIZED_COLS instead guards the two places a narrow value would do
+ * real damage: the spawn gate (server/spawn.ts) and viewport memory (server/viewport.ts).
  */
 function parseSize(url: string): { readonly cols: number; readonly rows: number } | undefined {
   const q = url.indexOf("?");
@@ -44,7 +49,7 @@ function parseSize(url: string): { readonly cols: number; readonly rows: number 
   const rows = Number(params.get("rows"));
   const usable = (n: number, min: number): boolean =>
     Number.isInteger(n) && n >= min && n <= TERM_DIM_MAX;
-  if (!usable(cols, MIN_SIZED_COLS) || !usable(rows, 1)) return undefined;
+  if (!usable(cols, 1) || !usable(rows, 1)) return undefined;
   return { cols, rows };
 }
 
