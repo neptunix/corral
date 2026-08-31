@@ -148,6 +148,15 @@ describe("attach pty size at spawn (Task 2)", () => {
     await waitFor(() => h.ptys.length === 1);
     expect(h.spawnOptions[0]).toMatchObject({ cols: 150, rows: 40 });
   });
+
+  it("prefers the size the client just sent over a remembered viewport, when both are in play", async () => {
+    recordViewport(150, 40);
+    const h = await start();
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`, "?cols=188&rows=45");
+    await once(client, "open");
+    await waitFor(() => h.ptys.length === 1);
+    expect(h.spawnOptions[0]).toMatchObject({ cols: 188, rows: 45 });
+  });
 });
 
 describe("auditLine (SEC-6: open/close + source, never keystrokes)", () => {

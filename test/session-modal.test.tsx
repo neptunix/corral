@@ -30,12 +30,18 @@ vi.mock("@xterm/xterm", () => {
   return { Terminal };
 });
 
+// `vi.hoisted` because `vi.mock` factories run before the rest of this file — a plain module-scope
+// `let` referenced inside the factory below would be a temporal-dead-zone error at import time.
+// Defaults to undefined: jsdom gives the container no layout, so this is what a real browser also
+// returns before the panel has been measured. Tests that need a measured grid set it directly.
+const fitState = vi.hoisted(() => ({
+  proposal: undefined as { cols: number; rows: number } | undefined,
+}));
+
 vi.mock("@xterm/addon-fit", () => ({
-  // jsdom gives the container no layout, so `proposeDimensions()` returns undefined here exactly as
-  // it would in a real browser before the panel has been measured.
   FitAddon: class {
     fit(): void { /* no layout in jsdom */ }
-    proposeDimensions(): undefined { return undefined; }
+    proposeDimensions(): { cols: number; rows: number } | undefined { return fitState.proposal; }
   },
 }));
 
@@ -127,6 +133,7 @@ function passTheAttemptFloor(): void {
 beforeEach(() => {
   FakeWebSocket.sockets = [];
   visibility = "visible";
+  fitState.proposal = undefined;
   vi.useFakeTimers();
   vi.stubGlobal("WebSocket", FakeWebSocket);
   vi.stubGlobal("ResizeObserver", class {
@@ -325,5 +332,22 @@ describe("SessionModal reconnect", () => {
     }
 
     expect(FakeWebSocket.sockets.length).toBeLessThanOrEqual(7); // 1 initial + RECONNECT_COLD_ATTEMPTS
+  });
+});
+
+describe("SessionModal attach query", () => {
+  it("sends the measured grid on the attach URL when the panel has been measured", () => {
+    fitState.proposal = { cols: 188, rows: 45 };
+    renderModal();
+    const ws = FakeWebSocket.sockets[0];
+    if (ws === undefined) throw new Error("no socket was created");
+    expect(ws.url.endsWith("/attach?cols=188&rows=45")).toBe(true);
+  });
+
+  it("sends no query when the panel has not been measured yet", () => {
+    renderModal();
+    const ws = FakeWebSocket.sockets[0];
+    if (ws === undefined) throw new Error("no socket was created");
+    expect(ws.url.endsWith("/attach")).toBe(true);
   });
 });
