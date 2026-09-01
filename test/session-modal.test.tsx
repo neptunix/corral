@@ -30,8 +30,18 @@ vi.mock("@xterm/xterm", () => {
   return { Terminal };
 });
 
+// `vi.hoisted` because `vi.mock` factories run before the rest of this file — a plain module-scope
+// `let` referenced inside the factory below would be a temporal-dead-zone error at import time.
+// Defaults to undefined — a real browser returns the same before the panel is measured.
+const fitState = vi.hoisted(() => ({
+  proposal: undefined as { cols: number; rows: number } | undefined,
+}));
+
 vi.mock("@xterm/addon-fit", () => ({
-  FitAddon: class { fit(): void { /* no layout in jsdom */ } },
+  FitAddon: class {
+    fit(): void { /* no layout in jsdom */ }
+    proposeDimensions(): { cols: number; rows: number } | undefined { return fitState.proposal; }
+  },
 }));
 
 interface CloseFrame { readonly code: number; readonly reason: string }
@@ -122,6 +132,7 @@ function passTheAttemptFloor(): void {
 beforeEach(() => {
   FakeWebSocket.sockets = [];
   visibility = "visible";
+  fitState.proposal = undefined;
   vi.useFakeTimers();
   vi.stubGlobal("WebSocket", FakeWebSocket);
   vi.stubGlobal("ResizeObserver", class {
@@ -320,5 +331,22 @@ describe("SessionModal reconnect", () => {
     }
 
     expect(FakeWebSocket.sockets.length).toBeLessThanOrEqual(7); // 1 initial + RECONNECT_COLD_ATTEMPTS
+  });
+});
+
+describe("SessionModal attach query", () => {
+  it("sends the measured grid on the attach URL when the panel has been measured", () => {
+    fitState.proposal = { cols: 188, rows: 45 };
+    renderModal();
+    const ws = FakeWebSocket.sockets[0];
+    if (ws === undefined) throw new Error("no socket was created");
+    expect(ws.url.endsWith("/attach?cols=188&rows=45")).toBe(true);
+  });
+
+  it("sends no query when the panel has not been measured yet", () => {
+    renderModal();
+    const ws = FakeWebSocket.sockets[0];
+    if (ws === undefined) throw new Error("no socket was created");
+    expect(ws.url.endsWith("/attach")).toBe(true);
   });
 });
