@@ -105,7 +105,9 @@ describe("addressing — a bare taskId is refused, a valid pair is honoured, a w
   it("log: appends to another card with the CALLER's own env/paneId, not the target's", async () => {
     const appendLog = appendLogSpy();
     const out = await logHandler(deps(stub({ appendLog })), { text: "note", boardId: "other", taskId: "t_other11" });
-    expect(out).toContain("logged to other/t_other11");
+    // The title comes from the TARGET card, not the caller's: an id alone names nothing, and naming
+    // the wrong card would be worse than naming none.
+    expect(out).toContain('logged to other/t_other11 ("Their card")');
     expect(appendLog).toHaveBeenCalledWith(expect.objectContaining({ boardId: "other", taskId: "t_other11", env: "work-local", paneId: "w1:p1", text: "note" }));
   });
 

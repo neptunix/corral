@@ -1151,7 +1151,20 @@ describe("formatRepoRefusal", () => {
 });
 
 describe("formatSpawnReply", () => {
-  const base = { name: "card-a", boardId: "b", taskId: "t_1", env: "work-local", paneId: "w1:p2" };
+  const base = { name: "card-a", boardId: "b", taskId: "t_1", cardTitle: "Ship the RC toggle", env: "work-local", paneId: "w1:p2" };
+
+  // The card id is a nanoid: a reply carrying it alone tells the operator which card was staffed only
+  // if they happen to remember the id.
+  it("names the target card by title as well as id", () => {
+    const out = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/x", idempotent: false });
+    expect(out).toContain('b/t_1 ("Ship the RC toggle")');
+  });
+
+  it.each(NEWLINE_VARIANTS)("a card title containing %s cannot add lines", (_label, ch) => {
+    const clean = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/x", idempotent: false });
+    const dirty = formatSpawnReply({ ...base, cardTitle: `ship${ch}it`, workspaceLabel: "corral", cwdSnapshot: "/x", idempotent: false });
+    expect(dirty.split("\n")).toHaveLength(clean.split("\n").length);
+  });
 
   it("reports the target key and where the session landed", () => {
     const out = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/repos/corral", idempotent: false });

@@ -55,4 +55,17 @@ describe("ORIENTATION (MCP instructions)", () => {
   it("requires operator intent before a spawn or a close", () => {
     expect(ORIENTATION).toMatch(/Never spawn or close without the operator/);
   });
+
+  // Observed failure: "start a new session" was read as "create a card and staff it", which leaves
+  // the operator with a card they never asked for and the work on the wrong one. The correction has
+  // to sit HERE and not only in the skill, because the session that made it may have neither.
+  it("separates a request for a session from a request for a card", () => {
+    expect(ORIENTATION).toMatch(/new SESSION never asks for a new CARD/);
+  });
+
+  // A card id is a nanoid. The tool replies print the title themselves; this line governs the text
+  // the SESSION writes, which no reply can reach.
+  it("requires a card's title beside its id in anything shown to the operator", () => {
+    expect(ORIENTATION).toMatch(/print the card's title/);
+  });
 });

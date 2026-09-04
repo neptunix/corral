@@ -50,16 +50,19 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
     // the board list, a bare id refused — a task id is unique only within its board). `own` gates the
     // repo rule below: on ANOTHER card there is no "where I am" workspace to continue in, so repo is
     // required in practice even though the signature leaves it optional.
-    let target = { boardId: card.boardId, taskId: card.taskId, own: true };
+    // `title` rides along so the reply can name the card the operator will recognise rather than a
+    // bare nanoid; it costs nothing here because both paths already hold it.
+    let target = { boardId: card.boardId, taskId: card.taskId, title: card.title, own: true };
     if (args.boardId !== undefined || args.taskId !== undefined) {
       if (args.boardId === undefined || args.taskId === undefined) {
         return "boardId and taskId must be given together to target another card — corral_board_read lists a board's cards, corral_task_bind (no arguments) lists boards";
       }
       const boards = await deps.client.boards();
-      if (!boards.find((x) => x.id === args.boardId)?.tasks.some((t) => t.id === args.taskId)) {
+      const hit = boards.find((x) => x.id === args.boardId)?.tasks.find((t) => t.id === args.taskId);
+      if (hit === undefined) {
         return `no card ${args.boardId}/${args.taskId} — corral_board_read lists a board's cards`;
       }
-      target = { boardId: args.boardId, taskId: args.taskId, own: args.boardId === card.boardId && args.taskId === card.taskId };
+      target = { boardId: args.boardId, taskId: args.taskId, title: hit.title, own: args.boardId === card.boardId && args.taskId === card.taskId };
     }
     const me = await deps.identity.load();
     const env = args.env ?? me.session.env;
@@ -112,7 +115,7 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
       throw err;
     }
     return formatSpawnReply({
-      name: result.name, boardId: target.boardId, taskId: target.taskId,
+      name: result.name, boardId: target.boardId, taskId: target.taskId, cardTitle: target.title,
       env: result.env, paneId: result.paneId,
       workspaceLabel: result.workspaceLabel, cwdSnapshot: result.cwdSnapshot,
       idempotent: result.idempotent,
@@ -193,7 +196,7 @@ export function registerSessionTools(server: McpServer, deps: SessionDeps): void
     {
       title: "Spawn a session on a card",
       description:
-        "Start a NEW Claude session attached to a card — for a context handoff or a parallel strand. Defaults to THIS session's card; pass `boardId` AND `taskId` together to staff ANOTHER card (placing an executor is an ADD, which a session may do on any card — but it grants NO right to close that card's sessions). The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment; on your OWN card, omit `repo` and the new session joins THIS session's workspace. On ANOTHER card there is no shared workspace to join, so `repo` is REQUIRED — pass the project the new session should work in. Pass `repo` on your own card too to land in a DIFFERENT project's workspace instead. LOCAL ENVIRONMENTS ONLY in this phase: `env` may only name a local environment (kind=local in corral_whoami's environment list) — a brief cannot be delivered to a remote environment, so a remote `env` is refused here rather than left to 400 on the server. Supply `name`, and supply the WHOLE name: corral uses your string verbatim as the Claude session name, the herdr tab label and the card's label — it no longer prefixes anything. Write it as `{slug}-{name}`, where `{slug}` is a very short label for the card (reuse the slug of your OWN session name when you have one, so the card's sessions cluster) and `{name}` is two to four words for what THIS session does. Destructive: this starts a real session that consumes tokens.",
+        "Start a NEW Claude session attached to a card — for a context handoff or a parallel strand. An operator asking for \"a new session\" is asking for THIS: a session, on the card already open, started from a brief — not a new card, and not corral_task_create first. Defaults to THIS session's card; pass `boardId` AND `taskId` together to staff ANOTHER card (placing an executor is an ADD, which a session may do on any card — but it grants NO right to close that card's sessions). The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment; on your OWN card, omit `repo` and the new session joins THIS session's workspace. On ANOTHER card there is no shared workspace to join, so `repo` is REQUIRED — pass the project the new session should work in. Pass `repo` on your own card too to land in a DIFFERENT project's workspace instead. LOCAL ENVIRONMENTS ONLY in this phase: `env` may only name a local environment (kind=local in corral_whoami's environment list) — a brief cannot be delivered to a remote environment, so a remote `env` is refused here rather than left to 400 on the server. Supply `name`, and supply the WHOLE name: corral uses your string verbatim as the Claude session name, the herdr tab label and the card's label — it no longer prefixes anything. Write it as `{slug}-{name}`, where `{slug}` is a very short label for the card (reuse the slug of your OWN session name when you have one, so the card's sessions cluster) and `{name}` is two to four words for what THIS session does. Destructive: this starts a real session that consumes tokens.",
       inputSchema: {
         brief: z.string().describe("handoff text the new session starts from; required"),
         env: z.string().optional().describe("LOCAL environment id from corral_whoami; defaults to this session's. A remote environment is refused."),
