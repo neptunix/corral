@@ -66,6 +66,6 @@ describe("ORIENTATION (MCP instructions)", () => {
   // A card id is a nanoid. The tool replies print the title themselves; this line governs the text
   // the SESSION writes, which no reply can reach.
   it("requires a card's title beside its id in anything shown to the operator", () => {
-    expect(ORIENTATION).toMatch(/print the card's title/);
+    expect(ORIENTATION).toMatch(/show a card's title/);
   });
 });
