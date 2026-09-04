@@ -174,6 +174,19 @@ describe("corral_spawn — targeting another card requires a repo", () => {
     expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ boardId: "other", taskId: "t_other11", repo: "corral" }));
   });
 
+  // Both titles are in scope where the reply is built — the caller's own card and the target's — and
+  // they are both plain strings, so swapping them compiles and says the wrong card was staffed.
+  it("spawn: the reply names the TARGET card, never the caller's own", async () => {
+    const out = await spawnHandler(deps(stub({ spawn: spawnSpy() })), { brief: "go", boardId: "other", taskId: "t_other11", repo: "corral" });
+    expect(out).toContain('other/t_other11 ("Their card")');
+    expect(out).not.toContain("Own card");
+  });
+
+  it("spawn: with no target, the reply names this session's own card", async () => {
+    const out = await spawnHandler(deps(stub({ spawn: spawnSpy() })), { brief: "go" });
+    expect(out).toContain('board/t_abcdefg ("Own card")');
+  });
+
   it("refuses a bare taskId without a boardId, and never spawns", async () => {
     const spawn = spawnSpy();
     const out = await spawnHandler(deps(stub({ spawn })), { brief: "go", taskId: "t_other11" });

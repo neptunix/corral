@@ -1160,10 +1160,13 @@ describe("formatSpawnReply", () => {
     expect(out).toContain('b/t_1 ("Ship the RC toggle")');
   });
 
-  it.each(NEWLINE_VARIANTS)("a card title containing %s cannot add lines", (_label, ch) => {
-    const clean = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/x", idempotent: false });
-    const dirty = formatSpawnReply({ ...base, cardTitle: `ship${ch}it`, workspaceLabel: "corral", cwdSnapshot: "/x", idempotent: false });
-    expect(dirty.split("\n")).toHaveLength(clean.split("\n").length);
+  // Absence of the separator, not a line count: splitting on "\n" cannot observe a surviving "\r",
+  // U+2028 or U+2029, so a count-based assertion passes for three of the five variants either way.
+  it.each(NEWLINE_VARIANTS)("sweeps a %s out of a card title entirely", (_label, ch) => {
+    const out = formatSpawnReply({ ...base, cardTitle: `ship${ch}it`, workspaceLabel: "corral", cwdSnapshot: "/x", idempotent: false });
+    const line = out.split("\n").find((l) => l.includes("ship"));
+    expect(line).toBeDefined();
+    expect(line).not.toMatch(/[\r\n\u2028\u2029]/);
   });
 
   it("reports the target key and where the session landed", () => {

@@ -118,7 +118,7 @@ export function bindHandler(deps: TaskDeps, args: BindArgs): Promise<string> {
       // Never empty: corral renders a detached card as "⚠ {name}", and a blank name reads as a bug.
       name: nonEmpty(me.session.sessionName) ?? me.session.tabLabel,
     });
-    return `bound this session to ${args.boardId}/${args.taskId}`;
+    return `bound this session to ${args.boardId}/${args.taskId} ("${safeText(task.title)}")`;
   });
 }
 
