@@ -1,6 +1,6 @@
 {
   "name": "corral",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "private": true,
   "description": "Kanban dashboard and control surface for Claude Code sessions running in herdr",
   "license": "MIT",
