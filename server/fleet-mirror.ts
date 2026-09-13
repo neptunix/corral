@@ -1,4 +1,4 @@
-import type { Snapshot } from "@shared/schema";
+import type { EnvState, Snapshot } from "@shared/schema";
 import { existsSync, readFileSync, renameSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -93,10 +93,12 @@ function idsEqual(a: readonly string[], b: readonly string[]): boolean {
 export function createFleetMirror(opts: { readonly dataDir: string; readonly nowFn?: () => number }): FleetMirror {
   const filePath = mirrorPath(opts.dataDir);
   const now = opts.nowFn ?? Date.now;
-  // Per-env reachability as of the previous OBSERVATION in this process. Reachability only changes in
-  // pollEnv, so observing emissions is equivalent to observing polls. Absent = never observed →
+  // Per-env reachability as of the previous POLL of that env in this process. Absent = never observed →
   // corral may have restarted during a herdr outage, so the transition is unobservable → merge-only.
   const lastReachable = new Map<string, boolean>();
+  // The EnvState object each env last arrived with. The poller creates a new one only when it polls
+  // that env; every other emission (another env's poll, a registry tick, a sweep) reuses it.
+  const lastEnvState = new Map<string, EnvState>();
   // Per-env ids of non-pending records absent from the previous reachable observation (ADR 0008:
   // a record drops on its second consecutive miss). In-memory only — a corral restart enters the
   // merge branch first, which pins anything missing instead.
@@ -135,6 +137,9 @@ export function createFleetMirror(opts: { readonly dataDir: string; readonly now
     // distinct error so a permanent ENOSPC is not a log flood.
     try {
       for (const [envId, envState] of Object.entries(s.envs)) {
+        // Not re-polled since the last emission: the same stale listing, so not a second miss.
+        if (lastEnvState.get(envId) === envState) continue;
+        lastEnvState.set(envId, envState);
         const prevReachable = lastReachable.get(envId);
         lastReachable.set(envId, envState.reachable);
         if (!envState.reachable) continue; // outage: the mirror holds

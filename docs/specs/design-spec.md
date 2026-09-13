@@ -571,9 +571,12 @@ therefore keeps a continuous mirror of the live fleet and can bulk-resume it.
   until it is observed live again, through any number of polls, corral restarts, and partial
   restores. Every other record is replaced normally, so a session that returned and was later
   closed drops even while another record is still pending. A replaced record leaves only after
-  being absent from two consecutive reachable observations, so one anomalous poll — a restart
-  between ticks, a partial listing — cannot empty the mirror; the cost is that a closed session
-  lingers one poll longer, which restore ignores because it skips live sessions.
+  being absent from two consecutive polls of its own environment — a snapshot emitted by another
+  environment's poll, a registry tick or a sweep does not count — so one anomalous listing (a
+  partial listing, a transport hiccup) cannot empty the mirror. It does not protect against a
+  state-loss restart between ticks: those sessions are still absent on the next poll (see
+  Unobserved restart). The cost is that a closed session stays mirrored for one more poll, and a
+  restore run inside that window resumes it.
   The persisted file is additive: an older build's `pendingRestore` boolean is still written,
   derived as "some record is pinned", so neither an upgrade nor a rollback can fail to parse it.
 - **Restore** (`server/fleet-restore.ts`, `POST /api/fleet/restore`): re-lists each environment
@@ -598,6 +601,10 @@ therefore keeps a continuous mirror of the live fleet and can bulk-resume it.
     a `claude --resume` that fails inside the pane is still invisible to corral, but the record is
     no longer lost — the mirror still pins it and it stays mirrored for a retry, and a follow-up
     dry run shows it.
+  - **Closed around a gap:** a session closed while its environment is unreachable, within one poll
+    before it becomes unreachable, or before corral's first poll is pinned when the environment
+    returns — corral cannot tell that close from a crash — and a restore resurrects it. Failing
+    toward keeping is deliberate (ADR 0008); deleting the mirror (below) clears it.
   - **Dormant panes read as live (state-intact restart only).** After a restart that leaves herdr's
     own persisted state intact, its panes come back as metadata only — dormant until something
     opens them — and corral reads a dormant pane as a running session. The board shows it idle

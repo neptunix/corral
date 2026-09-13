@@ -109,6 +109,22 @@ describe("createPoller", () => {
     await p.pollOnce();
     expect(cb).toHaveBeenCalled();
   });
+
+  // server/fleet-mirror.ts counts a miss only when an env's EnvState object is new, so this identity
+  // rule is what keeps one bad listing from counting twice.
+  it("a snapshot carries a new EnvState object only for the env that was just polled", async () => {
+    const list: ListFn = (e) => Promise.resolve([row(e.id, `${e.id}-1`)]);
+    const p = createPoller({ envs: [A, B], list });
+    const snaps: Snapshot[] = [];
+    p.onSnapshot((s) => { snaps.push(s); });
+    await p.refreshEnv("a");
+    await p.refreshEnv("b");
+    await p.refreshEnv("a");
+    const [first, second, third] = snaps;
+    expect(second?.envs.a).toBe(first?.envs.a);
+    expect(third?.envs.a).not.toBe(second?.envs.a);
+    expect(third?.envs.b).toBe(second?.envs.b);
+  });
 });
 
 describe("createPoller tab rename", () => {
