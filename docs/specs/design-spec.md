@@ -377,11 +377,17 @@ Drag a pooled session onto a task (or API) → stored by `(env,paneId)`. Detach 
 `POST /api/sessions/:env/:paneId/run` → `herdr pane run` (Enter included). `pane run` only.
 
 ### pane_id churn (named operational hazard)
-A herdr **restart changes all pane_ids in that env at once** → every task on that env flips to
-**detached** simultaneously. v1 mitigations: (a) cards show detached sessions (not vanished) with
-their stored `name`; (b) a **bulk "re-link by name"** action matches detached `name`s against
-current pool sessions in that env and re-attaches. Stable pane identifiers don't exist in herdr —
-this limitation is explicit, not hidden.
+This section describes a **state-loss** herdr restart — one where herdr's own persisted
+workspace/tab/pane state is gone, not merely a process restart. Measured directly: a restart that
+keeps herdr's state intact preserves every workspace, tab, and pane identifier unchanged (§18), so
+none of the churn below happens in that case. The state-loss case itself is unmeasured — this
+section states intent, not an observed outcome.
+
+A state-loss herdr restart **changes all pane_ids in that env at once** → every task on that env
+flips to **detached** simultaneously. v1 mitigations: (a) cards show detached sessions (not
+vanished) with their stored `name`; (b) a **bulk "re-link by name"** action matches detached
+`name`s against current pool sessions in that env and re-attaches. Stable pane identifiers don't
+exist in herdr across a state-loss restart — this limitation is explicit, not hidden.
 
 ---
 
@@ -558,37 +564,53 @@ therefore keeps a continuous mirror of the live fleet and can bulk-resume it.
 - **Mirror** (`server/fleet-mirror.ts`): a poller subscriber writes every live session that has a
   herdr-registered Claude sessionId to `<dataDir>/fleet-mirror.json` (uuid-pinned, atomic writes,
   gitignored in the board store). The write policy is transition-aware: an unreachable environment
-  freezes its entries; an environment coming back after a gap is merged, never replaced — and if
-  mirrored sessions are missing, a persisted `pendingRestore` flag keeps the frozen state through
-  any number of polls, corral restarts, and partial restores. Only a steady reachable→reachable
-  poll replaces the set (dropping operator-closed sessions).
+  freezes its entries; an environment coming back after a gap is merged, never replaced, and every
+  previously mirrored record still missing at that point is pinned. Only a steady
+  reachable→reachable poll replaces the set (dropping operator-closed sessions) — **per record**
+  (ADR 0008): a record pinned as awaiting restore is exempted from that replace, everything else is
+  not, so a session that returned and was later closed drops normally even while another record is
+  still pending. A pinned record is dropped after being absent from two consecutive reachable
+  observations, not held forever — one anomalous poll can no longer empty the mirror, which is the
+  protection an earlier, permanent per-environment freeze provided by accident (ADR 0008 rationale).
+  The persisted file is additive: an older build's `pendingRestore` boolean is still written,
+  derived as "some record is pinned", so neither an upgrade nor a rollback can fail to parse it.
 - **Restore** (`server/fleet-restore.ts`, `POST /api/fleet/restore`): re-lists each environment
   fresh, skips sessions already alive (or resumed by this process within the last ~2 minutes),
   probes each transcript for the true cwd, and resumes the rest sequentially via
   `<spawnCommand> --resume <uuid>`, re-grouping sessions into workspaces by mirrored label.
-  Board data is untouched — card links re-attach by sessionId. `pendingRestore` clears itself,
-  purely inside the mirror, once every mirrored record for the env is observed live again; a
-  session that never re-registers keeps the flag set and stays mirrored for a retry. Concurrent
-  runs 409.
+  Board data is untouched — card links re-attach by sessionId. Concurrent runs 409.
 - **CLI**: `npm run fleet:restore [-- --dry-run] [-- --env <id>]`. Exit 1 on any env error or
   failed session; exit 3 on a dry run with a nonzero `unmirrored` count — the hard pre-upgrade
   interlock: do not kill herdr yet. The report also flags `pendingRestore` per env.
 - **Residual risks:**
-  - **Unobserved restart:** a herdr kill+restart that completes entirely between two poll ticks
-    (default ~30s) is invisible to the transition detector — the next steady poll replaces the
-    env's mirror entry with the (possibly empty) live set. Stop corral during the upgrade, or make
-    sure corral observes the outage before the new herdr starts.
+  - **Unobserved restart.** This risk is specific to a **state-loss** restart (herdr's own
+    persisted workspace/tab/pane state gone, not merely the process). A herdr kill+restart that
+    completes entirely between two poll ticks (default ~30s) is invisible to the transition
+    detector — the next steady poll replaces the env's mirror entry with the (possibly empty) live
+    set. Stop corral during the upgrade, or make sure corral observes the outage before the new
+    herdr starts. **This does not apply to a restart that keeps herdr's state intact** — measured:
+    workspace, tab and pane identifiers all survive it unchanged, so it is not the kind of gap this
+    risk describes. What a state-intact restart does instead is the dormant-pane behavior below;
+    the state-loss case above remains unmeasured.
   - **Invisible in-pane resume failure:** `resumed` means the resume command was sent to the pane;
     a `claude --resume` that fails inside the pane is still invisible to corral, but the record is
-    no longer lost — `pendingRestore` stays set and the session stays mirrored for a retry, and a
-    follow-up dry run shows the flag.
-  - **Pending-window resurrection:** while `pendingRestore` is set the mirror is merge-only, so
-    sessions the operator deliberately closes during that window stay mirrored and a restore
-    re-run resurrects them; there is no force-clear switch yet — hand-edit the mirror file if
-    needed. The flag is now visible in every report, so this window is no longer silent.
+    no longer lost — the mirror still pins it and it stays mirrored for a retry, and a follow-up
+    dry run shows it.
+  - **Dormant panes read as live (state-intact restart only).** After a restart that leaves herdr's
+    own persisted state intact, its panes come back as metadata only — dormant until something
+    opens them — and corral reads a dormant pane as a running session. The board shows it idle
+    rather than detached, and `fleet:restore` answers `skipped_alive` for it instead of resuming
+    it. Opening the pane (attaching to it) is what materializes the agent. This is a separate,
+    unresolved question from the mirror's pending-record freeze above; ADR 0008 does not address
+    it.
 
 Upgrade workflow:
 
     npm run fleet:restore -- --dry-run   # optional: unmirrored must be 0 (exit 3 = mirror lagging, do not kill herdr)
     kill herdr → upgrade → start herdr server
-    npm run fleet:restore                # any time — pendingRestore holds the frozen state
+    npm run fleet:restore                # any time — pinned records hold the frozen state
+
+**Recovering a mirror you don't trust:** stop corral, delete `fleet-mirror.json`, start corral. This
+discards every record that is not currently live, so it is a recovery for a healthy, fully-up
+fleet — not a remedy for a fleet that is itself mid-outage, which is exactly when it would discard
+the records restore needs.

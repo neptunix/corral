@@ -254,6 +254,11 @@ comes back with it — but **the processes inside those panes do not**. A restar
 same panes running fresh shells. For agent panes, herdr's `[session] resume_agents_on_restore` is what
 relaunches the agent into its conversation session.
 
+**Keep `resume_agents_on_restore` off.** corral's own fleet mirror (below) is what recovers panes
+after a restart, at a time of its choosing and skipping whatever is already alive; herdr relaunching
+agents on its own races that recovery and double-resumes sessions. Leave the setting off and let
+`fleet:restore` do it.
+
 ### The TUI and the live terminal
 
 Do not keep herdr's TUI and corral's in-browser terminal attached to the same pane at once. The pane's
@@ -296,6 +301,26 @@ for that state, and a remote environment has no local fallback to read it from i
 environment with the integration missing or outdated still renders a board, still spawns
 sessions, and still shows a live terminal; its cards simply never transition, which looks exactly
 like a quiet fleet until you notice nothing has moved in hours.
+
+### Fleet mirror & restore
+
+Killing the herdr server kills every pane; sessions survive only as transcripts. corral keeps a
+running mirror of the live fleet (`fleet-mirror.json` in the board store, gitignored) so it can
+bulk-resume it afterwards: `npm run fleet:restore [-- --dry-run] [-- --env <id>]` re-lists each
+environment, skips whatever is already alive, and resumes the rest via `claude --resume <uuid>`.
+Run `--dry-run` before killing herdr as a pre-upgrade check — a nonzero `unmirrored` count means
+the mirror is lagging and it is not yet safe to kill the server. See design-spec.md §18 for the
+write policy and its residual risks, and above for why `resume_agents_on_restore` must stay off.
+
+**Recovering a mirror you don't trust:** stop corral, delete `fleet-mirror.json`, start corral.
+This discards every record that is not currently live, so only do it with a healthy, fully-up
+fleet — it is not a fix for a fleet that is itself mid-outage.
+
+**After a restart with herdr's own state intact** (not a state-loss restart — see design-spec.md
+§18), herdr's panes come back as metadata only: dormant until something opens them. corral reads a
+dormant pane as a live session, so the board shows it idle rather than detached, and
+`fleet:restore` answers `skipped_alive` for it instead of resuming it. Opening the pane (attaching
+to it) is what actually materializes the agent.
 
 ## Launching corral
 

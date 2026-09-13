@@ -25,7 +25,14 @@ const MirrorSessionSchema = z.object({
 const MirrorEnvSchema = z.object({
   // last STRUCTURAL write, not last poll — compare-before-write skips no-op ticks
   updatedAt: z.number(),
+  // Derived from `pendingIds.length > 0`, kept so an older build reading this file still sees the
+  // env-level signal it expects (server/restore-format.ts, shared/schema.ts FleetRestoreEnvReport).
   pendingRestore: z.boolean(),
+  // Additive (ADR 0008): the records actually awaiting restore, not a whole-env flag. Optional with
+  // a default so a pre-existing file with no id list still validates — a failed validation here
+  // sends readMirrorFile's caller down the "move aside, start empty" path, which is exactly what an
+  // operator upgrading (or rolling back) mid-recovery must not hit.
+  pendingIds: z.array(z.string().regex(UUID_RE)).default([]),
   sessions: z.array(MirrorSessionSchema),
 });
 
@@ -77,6 +84,12 @@ function sessionsEqual(a: readonly MirrorSession[], b: readonly MirrorSession[])
   });
 }
 
+// Both sides sorted by the same rule as sessionsEqual's inputs.
+function idsEqual(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((v, i) => v === b[i]);
+}
+
 export function createFleetMirror(opts: { readonly dataDir: string; readonly nowFn?: () => number }): FleetMirror {
   const filePath = mirrorPath(opts.dataDir);
   const now = opts.nowFn ?? Date.now;
@@ -84,6 +97,19 @@ export function createFleetMirror(opts: { readonly dataDir: string; readonly now
   // pollEnv, so observing emissions is equivalent to observing polls. Absent = never observed →
   // corral may have restarted during a herdr outage, so the transition is unobservable → merge-only.
   const lastReachable = new Map<string, boolean>();
+  // Per-env, per-session consecutive-miss count while that session is in the env's pending set
+  // (ADR 0008). In-memory only: a corral restart re-enters the merge branch below on its first
+  // observation of each env regardless, which re-pins and re-seeds this from scratch — the loss of
+  // an in-progress count costs at most one extra poll of protection, never a wrongful drop.
+  const missCounts = new Map<string, Map<string, number>>();
+  function missMapFor(envId: string): Map<string, number> {
+    let m = missCounts.get(envId);
+    if (m === undefined) {
+      m = new Map();
+      missCounts.set(envId, m);
+    }
+    return m;
+  }
   const warned = new Set<string>();
   let state: FleetMirrorFile;
 
@@ -141,33 +167,66 @@ export function createFleetMirror(opts: { readonly dataDir: string; readonly now
 
         const entry = state.envs[envId];
         const prevSessions = entry?.sessions ?? [];
-        const pending = entry?.pendingRestore ?? false;
+        const prevPending = new Set(entry?.pendingIds ?? []);
+        const misses = missMapFor(envId);
         let nextSessions: MirrorSession[];
-        let nextPending: boolean;
-        if (prevReachable === true && !pending) {
-          // Steady state → replace: this is what drops operator-closed sessions so restore never
-          // resurrects them.
-          nextSessions = live;
-          nextPending = false;
+        let nextPendingIds: string[];
+        if (prevReachable === true) {
+          // Steady state: ordinary records follow the replacing policy (drops operator-closed
+          // sessions), but a pending record survives until it is absent from TWO CONSECUTIVE
+          // reachable observations (ADR 0008) — one anomalous poll can no longer empty the mirror.
+          const kept: MirrorSession[] = [];
+          const pendingIds: string[] = [];
+          for (const r of prevSessions) {
+            if (liveIds.has(r.sessionId)) {
+              misses.delete(r.sessionId); // back — added via `live` below, ordinary policy resumes
+              continue;
+            }
+            if (!prevPending.has(r.sessionId)) continue; // not protected: replaced away, as before
+            const count = (misses.get(r.sessionId) ?? 1) + 1;
+            if (count >= 2) {
+              misses.delete(r.sessionId); // second consecutive miss: drop
+              continue;
+            }
+            misses.set(r.sessionId, count);
+            kept.push(r);
+            pendingIds.push(r.sessionId);
+          }
+          nextSessions = [...kept, ...live];
+          nextPendingIds = pendingIds;
         } else {
-          // Reachable after a gap, first observation of this process, or pendingRestore → merge-only:
-          // add/update by sessionId, drop nothing. pendingRestore = "some previously mirrored record
-          // is still not back"; it survives any number of polls, corral restarts and partial restores.
+          // Reachable after a gap, or first observation of this process: merge-only, add/update by
+          // sessionId, drop nothing, and pin every previously mirrored record still missing as the
+          // start of its miss count. corral may restart while herdr is down; this is what stops the
+          // mirror being wiped when it does.
           const merged = new Map(prevSessions.map((r) => [r.sessionId, r]));
           for (const r of live) merged.set(r.sessionId, r);
           nextSessions = [...merged.values()];
-          nextPending = prevSessions.some((r) => !liveIds.has(r.sessionId));
+          nextPendingIds = prevSessions.filter((r) => !liveIds.has(r.sessionId)).map((r) => r.sessionId);
+          for (const id of nextPendingIds) misses.set(id, 1);
+          for (const id of liveIds) misses.delete(id);
         }
         // Deterministic order → structural compare cannot be fooled by snapshot ordering churn.
         nextSessions.sort((x, y) => (x.sessionId < y.sessionId ? -1 : x.sessionId > y.sessionId ? 1 : 0));
+        nextPendingIds.sort();
+        const nextPending = nextPendingIds.length > 0;
 
         // No entry and nothing live: record nothing, so a fresh install answers 404 no_mirror
         // instead of producing a file full of empty envs.
         if (entry === undefined && nextSessions.length === 0) continue;
 
         // Structural comparison decides only whether updatedAt moves — NOT whether persist() runs.
-        if (entry?.pendingRestore !== nextPending || !sessionsEqual(entry.sessions, nextSessions)) {
-          state.envs[envId] = { updatedAt: Math.floor(now() / 1000), pendingRestore: nextPending, sessions: nextSessions };
+        if (
+          entry?.pendingRestore !== nextPending
+          || !idsEqual(entry.pendingIds, nextPendingIds)
+          || !sessionsEqual(entry.sessions, nextSessions)
+        ) {
+          state.envs[envId] = {
+            updatedAt: Math.floor(now() / 1000),
+            pendingRestore: nextPending,
+            pendingIds: nextPendingIds,
+            sessions: nextSessions,
+          };
         }
       }
       // Unconditional: persist() self-no-ops via the lastWritten compare, so a healthy identical

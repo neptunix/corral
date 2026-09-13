@@ -19,7 +19,7 @@ function mirrorSession(sessionId: string, over?: { name?: string; cwd?: string; 
 }
 
 function mirrorOf(envId: string, sessions: ReturnType<typeof mirrorSession>[], pendingRestore = true): FleetMirrorFile {
-  return { version: 1, envs: { [envId]: { updatedAt: 1700000000, pendingRestore, sessions } } };
+  return { version: 1, envs: { [envId]: { updatedAt: 1700000000, pendingRestore, pendingIds: [], sessions } } };
 }
 
 function liveRow(envId: string, sessionId: string | null): SessionRow {
@@ -112,8 +112,8 @@ describe("createFleetRestore statuses", () => {
     const mirror: FleetMirrorFile = {
       version: 1,
       envs: {
-        e1: { updatedAt: 1, pendingRestore: false, sessions: [mirrorSession(UUID_A)] },
-        ghost: { updatedAt: 1, pendingRestore: false, sessions: [mirrorSession(UUID_B)] }, // removed env: ignored
+        e1: { updatedAt: 1, pendingRestore: false, pendingIds: [], sessions: [mirrorSession(UUID_A)] },
+        ghost: { updatedAt: 1, pendingRestore: false, pendingIds: [], sessions: [mirrorSession(UUID_B)] }, // removed env: ignored
       },
     };
     const { engine } = makeEngine({ envs: [env("e1"), env("e2")], mirror });
@@ -126,8 +126,8 @@ describe("createFleetRestore statuses", () => {
     const mirror: FleetMirrorFile = {
       version: 1,
       envs: {
-        e1: { updatedAt: 1, pendingRestore: true, sessions: [mirrorSession(UUID_A)] },
-        e2: { updatedAt: 2, pendingRestore: false, sessions: [mirrorSession(UUID_B)] },
+        e1: { updatedAt: 1, pendingRestore: true, pendingIds: [UUID_A], sessions: [mirrorSession(UUID_A)] },
+        e2: { updatedAt: 2, pendingRestore: false, pendingIds: [], sessions: [mirrorSession(UUID_B)] },
       },
     };
     const listFn = vi.fn(async (e: HerdrEnv): Promise<SessionRow[]> => {
@@ -270,7 +270,7 @@ describe("createFleetRestore live resume", () => {
   it("a record with an invalid uuid is failed, never spawned", async () => {
     const mirror: FleetMirrorFile = {
       version: 1,
-      envs: { e1: { updatedAt: 1, pendingRestore: false, sessions: [mirrorSession("evil; rm -rf /")] } },
+      envs: { e1: { updatedAt: 1, pendingRestore: false, pendingIds: [], sessions: [mirrorSession("evil; rm -rf /")] } },
     };
     const { engine, spawn } = makeEngine({ mirror });
     const run = await engine.run({});

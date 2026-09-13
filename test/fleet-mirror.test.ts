@@ -156,7 +156,7 @@ describe("createFleetMirror write policy", () => {
     expect(m2.getState().envs.e1?.pendingRestore).toBe(false);
   });
 
-  it("while pending, polls never drop records; pending clears once every record is live again", () => {
+  it("pending clears once the missing record is live again, before a second miss", () => {
     const fp = fakePoller();
     const m = createFleetMirror({ dataDir: tmpDir });
     m.start(fp.poller);
@@ -164,18 +164,77 @@ describe("createFleetMirror write policy", () => {
     fp.emit();
     fp.set({ e1: DOWN }, []);
     fp.emit();
-    fp.set({ e1: UP }, [row("e1", UUID_A)]); // mid-restore: only A back
+    fp.set({ e1: UP }, [row("e1", UUID_A)]); // mid-restore: only A back, B pending (1st miss)
     fp.emit();
     expect(m.getState().envs.e1?.sessions).toHaveLength(2); // B kept for the re-run
     expect(m.getState().envs.e1?.pendingRestore).toBe(true);
-    fp.emit(); // more pending polls change nothing
-    expect(m.getState().envs.e1?.sessions).toHaveLength(2);
-    fp.set({ e1: UP }, [row("e1", UUID_A), row("e1", UUID_B)]); // fleet fully back
+    fp.set({ e1: UP }, [row("e1", UUID_A), row("e1", UUID_B)]); // fleet fully back before a 2nd miss
     fp.emit();
     expect(m.getState().envs.e1?.pendingRestore).toBe(false);
-    fp.set({ e1: UP }, [row("e1", UUID_A)]); // next steady poll may replace again
+    fp.set({ e1: UP }, [row("e1", UUID_A)]); // B no longer pending: next steady poll may replace it
     fp.emit();
     expect(m.getState().envs.e1?.sessions).toHaveLength(1);
+  });
+
+  it("a pending record is dropped after two consecutive misses of a reachable environment (ADR 0008)", () => {
+    const fp = fakePoller();
+    const m = createFleetMirror({ dataDir: tmpDir });
+    m.start(fp.poller);
+    fp.set({ e1: UP }, [row("e1", UUID_A), row("e1", UUID_B)]);
+    fp.emit();
+    fp.set({ e1: DOWN }, []);
+    fp.emit();
+    fp.set({ e1: UP }, [row("e1", UUID_A)]); // B missing: 1st consecutive miss, still pending
+    fp.emit();
+    expect(m.getState().envs.e1?.sessions.map((s) => s.sessionId)).toEqual([UUID_A, UUID_B]);
+    expect(m.getState().envs.e1?.pendingRestore).toBe(true);
+    fp.emit(); // same snapshot again: B's 2nd consecutive miss
+    expect(m.getState().envs.e1?.sessions.map((s) => s.sessionId)).toEqual([UUID_A]);
+    expect(m.getState().envs.e1?.pendingRestore).toBe(false);
+  });
+
+  it("a record that is not itself pending follows the replacing policy even while another record is pending (ADR 0008)", () => {
+    const fp = fakePoller();
+    const m = createFleetMirror({ dataDir: tmpDir });
+    m.start(fp.poller);
+    fp.set({ e1: UP }, [row("e1", UUID_A), row("e1", UUID_B)]);
+    fp.emit(); // first observation: both mirrored, nothing pending
+    fp.set({ e1: DOWN }, [row("e1", UUID_A), row("e1", UUID_B)]);
+    fp.emit(); // outage: holds
+    fp.set({ e1: UP }, [row("e1", UUID_A)]); // back, but B is still missing
+    fp.emit();
+    expect(m.getState().envs.e1?.pendingRestore).toBe(true); // B pending — today's code freezes the whole env here
+    fp.set({ e1: UP }, []); // B never returns; operator now closes A too, which WAS live
+    fp.emit();
+    const ids = m.getState().envs.e1?.sessions.map((s) => s.sessionId) ?? [];
+    expect(ids).not.toContain(UUID_A); // A was never pending — closing it must drop it immediately
+  });
+
+  it("loads a legacy mirror file with no pendingIds field and behaves under the new rule", () => {
+    const p = mirrorPath(tmpDir);
+    writeFileSync(p, JSON.stringify({
+      version: 1,
+      envs: {
+        e1: {
+          updatedAt: 1700000000, pendingRestore: true,
+          sessions: [
+            { sessionId: UUID_A, name: "a", cwd: "/repo", workspaceLabel: "acme:web" },
+            { sessionId: UUID_B, name: "b", cwd: "/repo", workspaceLabel: "acme:web" },
+          ],
+        },
+      },
+    }));
+    expect(() => readMirrorFile(p)).not.toThrow();
+    expect(readMirrorFile(p)?.envs.e1?.pendingIds).toEqual([]);
+
+    const fp = fakePoller();
+    const m = createFleetMirror({ dataDir: tmpDir });
+    expect(m.getState().envs.e1?.sessions).toHaveLength(2); // loaded intact, not moved aside
+    m.start(fp.poller);
+    fp.set({ e1: UP }, [row("e1", UUID_A)]); // first observation of THIS process: merge, pin B missing
+    fp.emit();
+    expect(m.getState().envs.e1?.sessions.map((s) => s.sessionId)).toEqual([UUID_A, UUID_B]);
+    expect(m.getState().envs.e1?.pendingRestore).toBe(true);
   });
 
   it("rows without a valid uuid never enter the mirror", () => {
