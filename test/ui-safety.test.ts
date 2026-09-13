@@ -104,8 +104,15 @@ describe("UI wiring — every surface renders session state through sessionState
 
   it("colours UnassignedView's dot from the tone, not from the raw herdr status", () => {
     const src = read("components/UnassignedView.tsx");
-    expect(src).toContain("className={TONE_COLOR[sessionStateTone(session)]}");
+    expect(src).toContain("className={TONE_TEXT[sessionStateTone(session)]}");
     expect(src).not.toContain("STATUS_COLOR[session.status]");
+  });
+
+  // Both text surfaces — the Unassigned bullet and the column marker's number — read ONE map. A
+  // file-local copy in UnassignedView is what let its `idle` drift a shade away from the other
+  // palettes; the shared module exists to make that unrepresentable, not merely asserted.
+  it("keeps no second text palette inside a component", () => {
+    expect(read("components/UnassignedView.tsx")).not.toContain("Record<SessionStateTone, string>");
   });
 
   // Both palettes must be TOTAL over the tone union, or a tone added later silently renders no colour
@@ -113,7 +120,6 @@ describe("UI wiring — every surface renders session state through sessionState
   it("keys every tone palette on the tone union so typecheck keeps them total", () => {
     expect(read("lib/session-state.ts")).toContain("const TONE_DOT: Record<SessionStateTone, string>");
     expect(read("lib/session-state.ts")).toContain("const TONE_TEXT: Record<SessionStateTone, string>");
-    expect(read("components/UnassignedView.tsx")).toContain("const TONE_COLOR: Record<SessionStateTone, string>");
   });
 
   // The assertions above pin the palettes' SHAPE. Nothing pinned a VALUE, so repainting `attention` to
@@ -123,7 +129,6 @@ describe("UI wiring — every surface renders session state through sessionState
   const PALETTES = [
     ["lib/session-state.ts", "TONE_DOT", "bg-slate-500"],
     ["lib/session-state.ts", "TONE_TEXT", "text-slate-400 light:text-slate-500"],
-    ["components/UnassignedView.tsx", "TONE_COLOR", "text-slate-400 light:text-slate-500"],
   ] as const;
 
   const paletteOf = (src: string, name: string): Record<string, string> => {

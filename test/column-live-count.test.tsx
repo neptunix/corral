@@ -102,6 +102,20 @@ describe("column live-session marker", () => {
     ]);
     expect(marker("closed")?.className).toContain("red");
     expect(marker("doing")?.className).toContain("emerald");
+    // The dot is a child of the marker and carries its own class, so the assertions above say nothing
+    // about it — without this it could vanish, or paint one tone while the number paints another.
+    expect(marker("closed")?.firstElementChild?.className).toContain("bg-red");
+    expect(marker("doing")?.firstElementChild?.className).toContain("bg-emerald");
+  });
+
+  // The colour and the words must describe the SAME session. Picking the count's tone from the worst
+  // session and the title's wording from the first one is a silent mismatch: the column reads red
+  // while its tooltip says "idle", which strands anyone the colour alone does not reach.
+  it("words the title for the session the colour came from, and pluralises the count", () => {
+    renderBoard([
+      makeTask("t1", "closed", [makeLink("a", { claudeStatus: "idle" }), makeLink("b", { claudeStatus: "waiting" })]),
+    ]);
+    expect(marker("closed")?.getAttribute("title")).toBe("2 live sessions · waiting");
   });
 
   // The strip's own count stays what it was — the marker is added beside it, not in its place, or a

@@ -20,7 +20,7 @@ import type { Tab } from "./TaskEditModal";
 import { TaskEditModal } from "./TaskEditModal";
 import { ApiError, api } from "../lib/api";
 import { overrideKey, type OptimisticState } from "../lib/optimistic";
-import { TONE_DOT, TONE_TEXT, sessionStateLabel, sessionStateTone, worstTone } from "../lib/session-state";
+import { TONE_DOT, TONE_TEXT, isLiveLink, sessionStateLabel, sessionStateTone, worstTone } from "../lib/session-state";
 
 // Zod schemas for drag data (data.current is Record<string, any>). Only task/column drags remain —
 // session drag-to-attach (the old MiniPool) was removed; sessions attach via "Create task" now.
@@ -34,13 +34,9 @@ const ColumnDropDataSchema = z.object({
   columnId: z.string(),
 });
 
-/**
- * The live sessions a column is holding. Same predicate as TaskCard's own live/detached split — a
- * detached link points at a session that has ENDED, so counting it would report work where there is
- * none, which is the marker's purpose inverted.
- */
+/** The live sessions a column is holding — a detached link has ended and is not one of them. */
 function liveSessionsIn(tasks: readonly EnrichedTask[]): LiveSessionData[] {
-  return tasks.flatMap((t) => t.sessions).flatMap((s) => (s.live !== null && !s.live.detached ? [s.live] : []));
+  return tasks.flatMap((t) => t.sessions).filter(isLiveLink).map((s) => s.live);
 }
 
 /**
@@ -259,7 +255,7 @@ export function Board({
     if (task === undefined) return null;
     // Detached links are sessions that already ended. Without this filter every card drifting into a
     // closed column — a tracking strip, an archive — would ask a question with nothing behind it.
-    const live = task.sessions.filter((s) => s.live !== null && !s.live.detached);
+    const live = task.sessions.filter(isLiveLink);
     if (live.length === 0) return null;
     return {
       taskId,

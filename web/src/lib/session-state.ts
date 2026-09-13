@@ -96,14 +96,15 @@ export function sessionStateTone(s: SessionStateFields | null): SessionStateTone
 }
 
 /**
- * Text colours for the same tones — a SIBLING of TONE_DOT, which paints backgrounds. The column
- * marker prints a number, and a number needs a text class. Keyed on the tone union so typecheck keeps
- * it total, exactly as TONE_DOT is.
+ * Text colours for the same tones — a SIBLING of TONE_DOT, which paints backgrounds. Every surface
+ * that puts a tone into TEXT rather than a dot reads this one map: the Unassigned list's bullet and
+ * the column marker's number. It lives here for the same reason TONE_DOT does — a second copy in a
+ * component is how the two drifted apart before.
  */
 export const TONE_TEXT: Record<SessionStateTone, string> = {
   working: "text-emerald-400 light:text-emerald-600",
   attention: "text-red-400 light:text-red-600",
-  idle: "text-slate-400 light:text-slate-500",
+  idle: "text-slate-500",
   done: "text-sky-400 light:text-sky-600",
   unavailable: "text-amber-400 light:text-amber-600",
   unknown: "text-slate-400 light:text-slate-500",
@@ -125,4 +126,22 @@ export function worstTone(tones: readonly SessionStateTone[]): SessionStateTone 
   let worst: SessionStateTone = "unknown";
   for (const t of tones) if (TONE_SEVERITY[t] > TONE_SEVERITY[worst]) worst = t;
   return worst;
+}
+
+/** Structural, like SessionStateFields — a card's session link, seen only through the field below. */
+export interface MaybeLiveLink {
+  readonly live: { readonly detached: boolean } | null;
+}
+
+/**
+ * Is this link a session that is actually RUNNING? A detached link points at a session that has
+ * ended: the card still renders it, and it is still resumable, but nothing is behind it.
+ *
+ * ONE predicate decides this everywhere (the card's primary session, the closed-column confirmation,
+ * the column marker), because the three surfaces disagreeing about which sessions are alive is a bug
+ * with no symptom until someone acts on the wrong one. The `closing` synthetic already sets
+ * `detached`, so this rule does move.
+ */
+export function isLiveLink<T extends MaybeLiveLink>(s: T): s is T & { live: NonNullable<T["live"]> } {
+  return s.live !== null && !s.live.detached;
 }
