@@ -567,11 +567,13 @@ therefore keeps a continuous mirror of the live fleet and can bulk-resume it.
   freezes its entries; an environment coming back after a gap is merged, never replaced, and every
   previously mirrored record still missing at that point is pinned. Only a steady
   reachable→reachable poll replaces the set (dropping operator-closed sessions) — **per record**
-  (ADR 0008): a record pinned as awaiting restore is exempted from that replace, everything else is
-  not, so a session that returned and was later closed drops normally even while another record is
-  still pending. A pinned record is dropped after being absent from two consecutive reachable
-  observations, not held forever — one anomalous poll can no longer empty the mirror, which is the
-  protection an earlier, permanent per-environment freeze provided by accident (ADR 0008 rationale).
+  (ADR 0008): a record pinned as awaiting restore is exempt from that replace and stays mirrored
+  until it is observed live again, through any number of polls, corral restarts, and partial
+  restores. Every other record is replaced normally, so a session that returned and was later
+  closed drops even while another record is still pending. A replaced record leaves only after
+  being absent from two consecutive reachable observations, so one anomalous poll — a restart
+  between ticks, a partial listing — cannot empty the mirror; the cost is that a closed session
+  lingers one poll longer, which restore ignores because it skips live sessions.
   The persisted file is additive: an older build's `pendingRestore` boolean is still written,
   derived as "some record is pinned", so neither an upgrade nor a rollback can fail to parse it.
 - **Restore** (`server/fleet-restore.ts`, `POST /api/fleet/restore`): re-lists each environment

@@ -97,19 +97,10 @@ export function createFleetMirror(opts: { readonly dataDir: string; readonly now
   // pollEnv, so observing emissions is equivalent to observing polls. Absent = never observed →
   // corral may have restarted during a herdr outage, so the transition is unobservable → merge-only.
   const lastReachable = new Map<string, boolean>();
-  // Per-env, per-session consecutive-miss count while that session is in the env's pending set
-  // (ADR 0008). In-memory only: a corral restart re-enters the merge branch below on its first
-  // observation of each env regardless, which re-pins and re-seeds this from scratch — the loss of
-  // an in-progress count costs at most one extra poll of protection, never a wrongful drop.
-  const missCounts = new Map<string, Map<string, number>>();
-  function missMapFor(envId: string): Map<string, number> {
-    let m = missCounts.get(envId);
-    if (m === undefined) {
-      m = new Map();
-      missCounts.set(envId, m);
-    }
-    return m;
-  }
+  // Per-env ids of non-pending records absent from the previous reachable observation (ADR 0008:
+  // a record drops on its second consecutive miss). In-memory only — a corral restart enters the
+  // merge branch first, which pins anything missing instead.
+  const missedOnce = new Map<string, ReadonlySet<string>>();
   const warned = new Set<string>();
   let state: FleetMirrorFile;
 
@@ -167,44 +158,38 @@ export function createFleetMirror(opts: { readonly dataDir: string; readonly now
 
         const entry = state.envs[envId];
         const prevSessions = entry?.sessions ?? [];
-        const prevPending = new Set(entry?.pendingIds ?? []);
-        const misses = missMapFor(envId);
         let nextSessions: MirrorSession[];
         let nextPendingIds: string[];
         if (prevReachable === true) {
-          // Steady state: ordinary records follow the replacing policy (drops operator-closed
-          // sessions), but a pending record survives until it is absent from TWO CONSECUTIVE
-          // reachable observations (ADR 0008) — one anomalous poll can no longer empty the mirror.
-          const kept: MirrorSession[] = [];
-          const pendingIds: string[] = [];
+          // Steady state (ADR 0008). A pending record is kept until it is live again — restore may
+          // run long after herdr returns. Any other record follows the replacing policy, which drops
+          // operator-closed sessions, but only on its second consecutive miss, so one anomalous poll
+          // cannot empty the mirror.
+          const prevPending = new Set(entry?.pendingIds ?? []);
+          const prevMissed = missedOnce.get(envId);
+          const missed = new Set<string>();
+          nextSessions = [...live];
+          nextPendingIds = [];
           for (const r of prevSessions) {
-            if (liveIds.has(r.sessionId)) {
-              misses.delete(r.sessionId); // back — added via `live` below, ordinary policy resumes
-              continue;
+            if (liveIds.has(r.sessionId)) continue;
+            if (prevPending.has(r.sessionId)) {
+              nextSessions.push(r);
+              nextPendingIds.push(r.sessionId);
+            } else if (prevMissed?.has(r.sessionId) !== true) {
+              nextSessions.push(r);
+              missed.add(r.sessionId);
             }
-            if (!prevPending.has(r.sessionId)) continue; // not protected: replaced away, as before
-            const count = (misses.get(r.sessionId) ?? 1) + 1;
-            if (count >= 2) {
-              misses.delete(r.sessionId); // second consecutive miss: drop
-              continue;
-            }
-            misses.set(r.sessionId, count);
-            kept.push(r);
-            pendingIds.push(r.sessionId);
           }
-          nextSessions = [...kept, ...live];
-          nextPendingIds = pendingIds;
+          missedOnce.set(envId, missed);
         } else {
-          // Reachable after a gap, or first observation of this process: merge-only, add/update by
-          // sessionId, drop nothing, and pin every previously mirrored record still missing as the
-          // start of its miss count. corral may restart while herdr is down; this is what stops the
-          // mirror being wiped when it does.
+          // Reachable after a gap, or first observation of this process: merge-only — add/update by
+          // sessionId, drop nothing, pin every previously mirrored record still missing. corral may
+          // restart while herdr is down; this is what stops the mirror being wiped when it does.
           const merged = new Map(prevSessions.map((r) => [r.sessionId, r]));
           for (const r of live) merged.set(r.sessionId, r);
           nextSessions = [...merged.values()];
           nextPendingIds = prevSessions.filter((r) => !liveIds.has(r.sessionId)).map((r) => r.sessionId);
-          for (const id of nextPendingIds) misses.set(id, 1);
-          for (const id of liveIds) misses.delete(id);
+          missedOnce.delete(envId);
         }
         // Deterministic order → structural compare cannot be fooled by snapshot ordering churn.
         nextSessions.sort((x, y) => (x.sessionId < y.sessionId ? -1 : x.sessionId > y.sessionId ? 1 : 0));
