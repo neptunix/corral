@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { BoardFrame as BoardType, BoardState, EnrichedSessionLink, EnrichedTask } from "@shared/board-schema";
 import { EMPTY_DIAGNOSTICS } from "@shared/diagnostics-schema";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Board } from "../web/src/components/Board";
@@ -17,16 +17,18 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 interface LiveOpts {
   readonly claudeStatus?: string | null;
-  readonly status?: string;
   readonly detached?: boolean;
+  /** Defaults to the link's own name — set it to make two links resolve to ONE session. */
+  readonly pane?: string;
 }
 
 function makeLink(name: string, live: LiveOpts | null): EnrichedSessionLink {
+  const pane = live?.pane ?? name;
   return {
-    env: "e1", paneId: `p-${name}`, tabId: "t", tabLabel: name, workspaceId: "w",
-    workspaceLabel: "ws", name, cwdSnapshot: "/repo", sessionId: `s-${name}`,
+    env: "e1", paneId: `p-${pane}`, tabId: "t", tabLabel: name, workspaceId: "w",
+    workspaceLabel: "ws", name, cwdSnapshot: "/repo", sessionId: `s-${pane}`,
     live: live === null ? null : {
-      status: live.status ?? "working",
+      status: "working",
       model: null, ctxPct: null,
       detached: live.detached ?? false,
       recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null,
@@ -93,6 +95,14 @@ describe("column live-session marker", () => {
     expect(marker("closed")?.textContent).toBe("1");
   });
 
+  // A spawn/attach race can persist two links for one session. The card collapses them before
+  // rendering, so a marker that counted both would claim two sessions above a card showing one — and
+  // a collapsed column shows only the marker, leaving nothing to reconcile it against.
+  it("counts two links resolving to one session once, as the card renders them", () => {
+    renderBoard([makeTask("t1", "closed", [makeLink("a", { pane: "x" }), makeLink("b", { pane: "x" })])]);
+    expect(marker("closed")?.textContent).toBe("1");
+  });
+
   // The marker answers "is anyone held up behind this column", so its colour must come from the most
   // urgent session inside, never from whichever card happens to sort first.
   it("takes its colour from the most urgent session, not the first one", () => {
@@ -135,17 +145,49 @@ describe("column live-session marker", () => {
 });
 
 describe("worstTone", () => {
-  it("ranks a session needing a human above every other state", () => {
-    expect(worstTone(["idle", "attention", "working", "done"])).toBe("attention");
-  });
-
-  // `unavailable` means corral could not read the session's state. Ranking it below a calm tone would
-  // hide it behind one, which is the exact failure the tone exists to prevent.
-  it("ranks an unreadable session above a working one", () => {
-    expect(worstTone(["working", "unavailable", "idle"])).toBe("unavailable");
+  // The WHOLE order, pair by pair. Pinning only the top of it left the rest free to be reordered
+  // silently — and ranking `unknown` up is enough to bury every waiting session under a quiet colour,
+  // which is the one thing the marker exists to prevent.
+  it.each([
+    [["attention", "unavailable"], "attention"],
+    [["unavailable", "working"], "unavailable"],
+    [["working", "done"], "working"],
+    [["done", "idle"], "done"],
+    [["idle", "unknown"], "idle"],
+    [["unknown", "attention"], "attention"],
+    [["idle", "attention", "working", "done"], "attention"],
+  ] as const)("ranks %j → %s", (tones, expected) => {
+    expect(worstTone(tones)).toBe(expected);
+    // Order of the group must not decide the answer.
+    expect(worstTone([...tones].reverse())).toBe(expected);
   });
 
   it("falls back to the quiet tone on an empty list", () => {
     expect(worstTone([])).toBe("unknown");
+  });
+});
+
+// The predicate this PR shares between the marker and the card also decides which session the card
+// OPENS. Nothing else in the suite covers that call site: dropping the detached check there sends a
+// click to a pane that no longer exists, and every other test stays green.
+describe("the card's primary session — the same predicate", () => {
+  const openOn = (sessions: readonly EnrichedSessionLink[]): ReturnType<typeof vi.fn> => {
+    const onOpenSession = vi.fn();
+    const boardState = makeBoardState([makeTask("t1", "doing", sessions)]);
+    render(<Board boardState={boardState} boards={[boardState.board]}
+      onOpenSession={onOpenSession} onMarkOptimistic={vi.fn()} onClearOptimistic={vi.fn()}
+      onBoardStateChange={vi.fn()} pendingFixIssues={null} onFixIssuesConsumed={vi.fn()} />);
+    fireEvent.click(screen.getByText("Task t1"));
+    return onOpenSession;
+  };
+
+  it("opens the running session, not an ended one listed before it", () => {
+    const onOpenSession = openOn([makeLink("dead", { detached: true }), makeLink("alive", {})]);
+    expect(onOpenSession).toHaveBeenCalledTimes(1);
+    expect(onOpenSession.mock.calls[0]?.[1]).toBe("p-alive");
+  });
+
+  it("opens nothing when the card has no session at all", () => {
+    expect(openOn([])).not.toHaveBeenCalled();
   });
 });

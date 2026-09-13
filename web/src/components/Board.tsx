@@ -20,7 +20,7 @@ import type { Tab } from "./TaskEditModal";
 import { TaskEditModal } from "./TaskEditModal";
 import { ApiError, api } from "../lib/api";
 import { overrideKey, type OptimisticState } from "../lib/optimistic";
-import { TONE_DOT, TONE_TEXT, isLiveLink, sessionStateLabel, sessionStateTone, worstTone } from "../lib/session-state";
+import { TONE_DOT, TONE_TEXT, isLiveLink, sessionLinkKey, sessionStateLabel, sessionStateTone, worstTone } from "../lib/session-state";
 
 // Zod schemas for drag data (data.current is Record<string, any>). Only task/column drags remain —
 // session drag-to-attach (the old MiniPool) was removed; sessions attach via "Create task" now.
@@ -34,9 +34,18 @@ const ColumnDropDataSchema = z.object({
   columnId: z.string(),
 });
 
-/** The live sessions a column is holding — a detached link has ended and is not one of them. */
+/**
+ * The live sessions a column is holding — a detached link has ended and is not one of them, and two
+ * links resolving to one session count once, as the card itself renders them.
+ */
 function liveSessionsIn(tasks: readonly EnrichedTask[]): LiveSessionData[] {
-  return tasks.flatMap((t) => t.sessions).filter(isLiveLink).map((s) => s.live);
+  const seen = new Set<string>();
+  return tasks.flatMap((t) => t.sessions).filter(isLiveLink).flatMap((s) => {
+    const key = sessionLinkKey(s);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [s.live];
+  });
 }
 
 /**

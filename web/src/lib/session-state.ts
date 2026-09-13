@@ -129,7 +129,7 @@ export function worstTone(tones: readonly SessionStateTone[]): SessionStateTone 
 }
 
 /** Structural, like SessionStateFields — a card's session link, seen only through the field below. */
-export interface MaybeLiveLink {
+interface MaybeLiveLink {
   readonly live: { readonly detached: boolean } | null;
 }
 
@@ -144,4 +144,18 @@ export interface MaybeLiveLink {
  */
 export function isLiveLink<T extends MaybeLiveLink>(s: T): s is T & { live: NonNullable<T["live"]> } {
   return s.live !== null && !s.live.detached;
+}
+
+/**
+ * Which SESSION a link points at. A spawn/attach race can persist two links resolving to one live
+ * session, so every surface that counts or lists links collapses them on this key first — and they
+ * must all collapse the same way, or the card shows one session while the column marker above it
+ * says two, with a collapsed column offering nothing to reconcile that against.
+ *
+ * `sessionId` is part of the key, not the whole of it: after a herdr restart two links can share a
+ * paneId (one live at the reused pane, one detached still aimed at it) and only their sessionIds
+ * differ.
+ */
+export function sessionLinkKey(s: { readonly env: string; readonly paneId: string; readonly sessionId: string | null }): string {
+  return `${s.env}:${s.paneId}:${s.sessionId ?? ""}`;
 }
