@@ -56,6 +56,8 @@ decision and its measurements are not in.
 
 ## Rationale
 
+Both write policies already exist and neither is being added here. What this decision changes is only what selects between them: a flag describing a whole environment, or the identities of the records themselves.
+
 A boolean cannot express what the mirror needs to know. "Something here is unfinished" and "this
 particular session is unfinished" are different facts, and only the second one can be retired: it
 retires when that session comes back. Collapsing them into one flag made the retirement condition
@@ -98,6 +100,17 @@ the counters from it, so a restart with that state intact preserves every identi
 directly — workspace, tab and pane identifiers were unchanged across a restart — after the code
 comment that suggested otherwise was found to mean only that a stored identifier no longer names a
 usable target.
+
+**Taking liveness from Claude's own session registry rather than from herdr's listing.** Claude writes
+a record per process carrying its own process identity, which would be a direct check where everything
+else here is inference — and it invites the conclusion that reliable liveness removes the need for any
+freeze at all. It does not. The mirror's question is not whether a session is running but whether it was
+meant to stop, and the two cases it exists to separate — the operator closed it, the server was killed —
+leave a dead process either way. A liveness signal cannot name the cause of an absence, so it improves
+the input to this decision without replacing it. It is the strongest candidate for the dormant-pane
+question named above, and whoever builds it there should know that a resumed session routinely leaves a
+stale record beside its live one: liveness has to be resolved across every record for a session, never
+the most recent.
 
 **Prompting the operator in the UI when an environment's herdr returns.** A restore that must be
 typed into a terminal is a real gap, but the prompt needs a reliable "herdr restarted" signal, and
