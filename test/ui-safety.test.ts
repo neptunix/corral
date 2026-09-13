@@ -110,8 +110,9 @@ describe("UI wiring — every surface renders session state through sessionState
 
   // Both palettes must be TOTAL over the tone union, or a tone added later silently renders no colour
   // class at all. `Record<SessionStateTone, string>` is what makes typecheck enforce that.
-  it("keys both dot palettes on the tone union so typecheck keeps them total", () => {
+  it("keys every tone palette on the tone union so typecheck keeps them total", () => {
     expect(read("lib/session-state.ts")).toContain("const TONE_DOT: Record<SessionStateTone, string>");
+    expect(read("lib/session-state.ts")).toContain("const TONE_TEXT: Record<SessionStateTone, string>");
     expect(read("components/UnassignedView.tsx")).toContain("const TONE_COLOR: Record<SessionStateTone, string>");
   });
 
@@ -121,6 +122,7 @@ describe("UI wiring — every surface renders session state through sessionState
   // tell apart are actually different colours.
   const PALETTES = [
     ["lib/session-state.ts", "TONE_DOT", "bg-slate-500"],
+    ["lib/session-state.ts", "TONE_TEXT", "text-slate-400 light:text-slate-500"],
     ["components/UnassignedView.tsx", "TONE_COLOR", "text-slate-400 light:text-slate-500"],
   ] as const;
 

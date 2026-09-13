@@ -8,7 +8,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { useDroppable } from "@dnd-kit/core";
-import type { BoardFrame as BoardType, BoardState, EnrichedTask, SpawnPreset } from "@shared/board-schema";
+import type { BoardFrame as BoardType, BoardState, EnrichedTask, LiveSessionData, SpawnPreset } from "@shared/board-schema";
 import { closedColumnIds, defaultColumnId } from "@shared/board-schema";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
@@ -20,7 +20,7 @@ import type { Tab } from "./TaskEditModal";
 import { TaskEditModal } from "./TaskEditModal";
 import { ApiError, api } from "../lib/api";
 import { overrideKey, type OptimisticState } from "../lib/optimistic";
-import { sessionStateLabel, sessionStateTone } from "../lib/session-state";
+import { TONE_DOT, TONE_TEXT, sessionStateLabel, sessionStateTone, worstTone } from "../lib/session-state";
 
 // Zod schemas for drag data (data.current is Record<string, any>). Only task/column drags remain —
 // session drag-to-attach (the old MiniPool) was removed; sessions attach via "Create task" now.
@@ -33,6 +33,44 @@ const ColumnDropDataSchema = z.object({
   type: z.literal("column"),
   columnId: z.string(),
 });
+
+/**
+ * The live sessions a column is holding. Same predicate as TaskCard's own live/detached split — a
+ * detached link points at a session that has ENDED, so counting it would report work where there is
+ * none, which is the marker's purpose inverted.
+ */
+function liveSessionsIn(tasks: readonly EnrichedTask[]): LiveSessionData[] {
+  return tasks.flatMap((t) => t.sessions).flatMap((s) => (s.live !== null && !s.live.detached ? [s.live] : []));
+}
+
+/**
+ * How many sessions are alive inside a column, and how urgent the most urgent of them is.
+ *
+ * A `closed` column starts collapsed on every load, so without this a live session on a card in it
+ * disappears from the board entirely while it goes on burning tokens. Renders NOTHING at zero: every
+ * board has columns that hold no session, and a row of "0"s is noise that makes the counts that do
+ * matter harder to find.
+ */
+function LiveSessionCount({ columnId, tasks }: { readonly columnId: string; readonly tasks: readonly EnrichedTask[] }): JSX.Element | null {
+  const live = liveSessionsIn(tasks);
+  if (live.length === 0) return null;
+  const tones = live.map(sessionStateTone);
+  const tone = worstTone(tones);
+  // The label of the session the tone speaks for, so the colour is never the only carrier of "someone
+  // is waiting behind this column" — colour alone excludes anyone who cannot separate the two hues.
+  const worst = live[tones.indexOf(tone)];
+  const state = worst === undefined ? "" : ` · ${sessionStateLabel(worst)}`;
+  return (
+    <span
+      data-testid={`live-count-${columnId}`}
+      title={`${String(live.length)} live session${live.length === 1 ? "" : "s"}${state}`}
+      className={`flex items-center gap-1 text-xs tabular-nums ${TONE_TEXT[tone]}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${TONE_DOT[tone]}`} />
+      {live.length}
+    </span>
+  );
+}
 
 interface DroppableColumnProps {
   readonly columnId: string;
@@ -65,7 +103,8 @@ function DroppableColumn({ columnId, label, collapsible, tasks, boardId, onTaskE
         className={`flex flex-col items-center gap-2 shrink-0 w-10 py-3 rounded-lg transition-colors ${isOver ? "bg-muted ring-2 ring-primary" : "bg-muted/40 hover:bg-muted"}`}
         title={`Show ${label} — or drop a card here to move it in`}
       >
-        <span className="text-muted-foreground text-xs">{tasks.length}</span>
+        <LiveSessionCount columnId={columnId} tasks={tasks} />
+        <span data-testid={`task-count-${columnId}`} className="text-muted-foreground text-xs">{tasks.length}</span>
         {/* Vertical label — market best-practice for a collapsed kanban column. */}
         <span
           className="text-muted-foreground text-sm font-medium whitespace-nowrap"
@@ -77,8 +116,11 @@ function DroppableColumn({ columnId, label, collapsible, tasks, boardId, onTaskE
 
   return (
     <div className="flex flex-col min-w-[240px] flex-1">
-      <h3 className="text-muted-foreground text-sm font-medium px-2 pb-2 flex items-center justify-between">
-        <span>{label}</span>
+      <h3 className="text-muted-foreground text-sm font-medium px-2 pb-2 flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 min-w-0">
+          <span className="truncate">{label}</span>
+          <LiveSessionCount columnId={columnId} tasks={tasks} />
+        </span>
         {collapsible && (
           <button
             type="button"
