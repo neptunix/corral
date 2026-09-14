@@ -7,6 +7,7 @@ import { WebSocket } from "ws";
 
 import type { HerdrEnv } from "../environments.ts";
 import type { PtyLike } from "../server/pty-bridge.ts";
+import { lastViewport, recordViewport } from "../server/viewport.ts";
 import { createSpawnLimiter } from "../server/ws-attach-guard.ts";
 import { attachFailureReason, attachWebSocketServer, auditLine, type AttachServerOptions, type PtySpawnFn } from "../server/ws-attach.ts";
 
@@ -41,6 +42,7 @@ function makeFakePty(): FakePty {
 interface Harness {
   readonly port: number;
   readonly ptys: FakePty[];
+  readonly spawnOptions: { cols: number; rows: number }[];
   readonly auditPath: string;
   readonly focusCalls: string[];
   close(): Promise<void>;
@@ -51,7 +53,13 @@ const clients: WebSocket[] = [];
 
 async function start(overrides: Partial<AttachServerOptions> = {}): Promise<Harness> {
   const ptys: FakePty[] = [];
-  const spawn: PtySpawnFn = () => { const p = makeFakePty(); ptys.push(p); return p; };
+  const spawnOptions: { cols: number; rows: number }[] = [];
+  const spawn: PtySpawnFn = (_file, _args, options) => {
+    spawnOptions.push({ cols: options.cols, rows: options.rows });
+    const p = makeFakePty();
+    ptys.push(p);
+    return p;
+  };
   const dir = mkdtempSync(path.join(tmpdir(), "wsatt-"));
   const auditPath = path.join(dir, "attach-audit.log");
   const server = createServer();
@@ -74,13 +82,13 @@ async function start(overrides: Partial<AttachServerOptions> = {}): Promise<Harn
     ...overrides,
   });
   return {
-    port, ptys, auditPath, focusCalls,
+    port, ptys, spawnOptions, auditPath, focusCalls,
     close: () => new Promise<void>((res) => { server.close(() => { res(); }); }),
   };
 }
 
-function connect(port: number, pane: string, origin: string): WebSocket {
-  const ws = new WebSocket(`ws://127.0.0.1:${String(port)}/api/sessions/work-local/${pane}/attach`, { origin });
+function connect(port: number, pane: string, origin: string, query = ""): WebSocket {
+  const ws = new WebSocket(`ws://127.0.0.1:${String(port)}/api/sessions/work-local/${pane}/attach${query}`, { origin });
   clients.push(ws);
   return ws;
 }
@@ -100,6 +108,54 @@ async function waitFor(pred: () => boolean, timeoutMs = 3000): Promise<void> {
 afterEach(async () => {
   for (const c of clients.splice(0)) { try { c.terminate(); } catch { /* noop */ } }
   for (const s of servers.splice(0)) { await new Promise<void>((res) => { s.close(() => { res(); }); }); }
+});
+
+// Placed first: viewport memory is module state with no reset export, and the empty-memory cases
+// below must run before anything else in this file writes a value into it.
+describe("attach pty size at spawn", () => {
+  it("spawns the pty at the size the client sent", async () => {
+    const h = await start();
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`, "?cols=188&rows=45");
+    await once(client, "open");
+    await waitFor(() => h.ptys.length === 1);
+    expect(h.spawnOptions[0]).toMatchObject({ cols: 188, rows: 45 });
+  });
+
+  it("falls back to 80x24 when nothing is known", async () => {
+    expect(lastViewport()).toBeNull();
+    const h = await start();
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
+    await once(client, "open");
+    await waitFor(() => h.ptys.length === 1);
+    expect(h.spawnOptions[0]).toMatchObject({ cols: 80, rows: 24 });
+  });
+
+  it("an attach with no query does not mutate viewport memory", async () => {
+    expect(lastViewport()).toBeNull();
+    const h = await start();
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
+    await once(client, "open");
+    await waitFor(() => h.ptys.length === 1);
+    expect(lastViewport()).toBeNull();
+  });
+
+  it("falls back to the remembered viewport when the client sends no size", async () => {
+    recordViewport(150, 40);
+    const h = await start();
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
+    await once(client, "open");
+    await waitFor(() => h.ptys.length === 1);
+    expect(h.spawnOptions[0]).toMatchObject({ cols: 150, rows: 40 });
+  });
+
+  it("prefers the size the client just sent over a remembered viewport, when both are in play", async () => {
+    recordViewport(150, 40);
+    const h = await start();
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`, "?cols=188&rows=45");
+    await once(client, "open");
+    await waitFor(() => h.ptys.length === 1);
+    expect(h.spawnOptions[0]).toMatchObject({ cols: 188, rows: 45 });
+  });
 });
 
 describe("auditLine (SEC-6: open/close + source, never keystrokes)", () => {
@@ -349,5 +405,21 @@ describe("attachFailureReason", () => {
       expect(Buffer.byteLength(reason, "utf8")).toBeLessThanOrEqual(123);
       expect(Array.from(reason).every((ch) => { const c = ch.codePointAt(0) ?? 0; return c < 0xd800 || c > 0xdfff; })).toBe(true);
     }
+  });
+});
+
+// Placed last, deliberately: this block records into viewport memory, and the empty-memory
+// assertions earlier in the file depend on running before that happens.
+describe("viewport wiring: the attach's resize frame reaches recordViewport", () => {
+  it("records the last resize frame's size in viewport memory", async () => {
+    const h = await start();
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
+    await once(client, "open");
+    await waitFor(() => h.ptys.length === 1);
+
+    client.send(JSON.stringify({ type: "resize", cols: 188, rows: 45 }));
+    await waitFor(() => (h.ptys[0]?.resizes.length ?? 0) > 0);
+
+    expect(lastViewport()).toEqual({ cols: 188, rows: 45 });
   });
 });

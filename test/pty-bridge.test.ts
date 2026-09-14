@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { bridgePtyToWs } from "../server/pty-bridge.ts";
+import { bridgePtyToWs, TERM_DIM_MAX } from "../server/pty-bridge.ts";
 
 function mocks() {
   const handlers: Record<string, (...args: unknown[]) => void> = {};
+  const resized: [number, number][] = [];
   const pty = {
     onData: vi.fn((cb: (...args: unknown[]) => void) => { handlers.data = cb; }),
     onExit: vi.fn((cb: (...args: unknown[]) => void) => { handlers.exit = cb; }),
-    write: vi.fn(), resize: vi.fn(), kill: vi.fn(),
+    write: vi.fn(),
+    resize: vi.fn((c: number, r: number) => { resized.push([c, r]); }),
+    kill: vi.fn(),
+    resized,
   };
   const ws = {
     on: vi.fn((ev: string, cb: (...args: unknown[]) => void) => { handlers["ws:" + ev] = cb; }),
@@ -152,5 +156,38 @@ describe("bridgePtyToWs", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("resize frames", () => {
+  it("invokes onResize after a valid frame and resizes the pty", () => {
+    const seen: [number, number][] = [];
+    const { pty, ws, handlers } = mocks();
+    bridgePtyToWs(pty, ws, {
+      graceMs: 10, heartbeatMs: 1000,
+      onResize: (cols, rows) => { seen.push([cols, rows]); },
+    });
+    handlers["ws:message"]?.(JSON.stringify({ type: "resize", cols: 188, rows: 45 }), false);
+    expect(seen).toEqual([[188, 45]]);
+    expect(pty.resized).toEqual([[188, 45]]);
+  });
+
+  it("ignores a frame above TERM_DIM_MAX — no resize, no onResize", () => {
+    const seen: [number, number][] = [];
+    const { pty, ws, handlers } = mocks();
+    bridgePtyToWs(pty, ws, {
+      graceMs: 10, heartbeatMs: 1000,
+      onResize: (cols, rows) => { seen.push([cols, rows]); },
+    });
+    handlers["ws:message"]?.(JSON.stringify({ type: "resize", cols: TERM_DIM_MAX + 1, rows: 45 }), false);
+    expect(seen).toEqual([]);
+    expect(pty.resized).toEqual([]);
+  });
+
+  it("works with no onResize passed", () => {
+    const { pty, ws, handlers } = mocks();
+    bridgePtyToWs(pty, ws, { graceMs: 10, heartbeatMs: 1000 });
+    handlers["ws:message"]?.(JSON.stringify({ type: "resize", cols: 100, rows: 30 }), false);
+    expect(pty.resized).toEqual([[100, 30]]);
   });
 });

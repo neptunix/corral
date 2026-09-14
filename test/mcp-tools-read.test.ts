@@ -97,6 +97,15 @@ describe("task tool descriptions", () => {
     expect(TASK_TOOL_DESCRIPTIONS.read).toContain("corral_whoami");
     expect(TASK_TOOL_DESCRIPTIONS.read.toLowerCase()).toContain("preview");
   });
+
+  // The description is read at the exact moment the mistake is made: a session asked for "a new
+  // session" reached for THIS tool, created a card nobody wanted, and staffed that instead of the
+  // card it was already on. The refusal has to be in this string, not only in the skill.
+  it("refuses to read a request for a session as a request for a card", () => {
+    expect(TASK_TOOL_DESCRIPTIONS.create).toContain("corral_spawn");
+    expect(TASK_TOOL_DESCRIPTIONS.create).toContain("start a new session");
+    expect(TASK_TOOL_DESCRIPTIONS.create).toContain("the operator's call");
+  });
 });
 
 describe("readHandler", () => {

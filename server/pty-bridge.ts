@@ -21,10 +21,14 @@ export interface WsLike {
   readonly bufferedAmount: number;
 }
 
+// Upper bound for a terminal dimension arriving from the browser, shared with ws-attach-guard's
+// query parsing so a resize frame cannot store a value the connect path would reject.
+export const TERM_DIM_MAX = 1000;
+
 const ControlSchema = z.object({
   type: z.literal("resize"),
-  cols: z.number().int().positive(),
-  rows: z.number().int().positive(),
+  cols: z.number().int().positive().max(TERM_DIM_MAX),
+  rows: z.number().int().positive().max(TERM_DIM_MAX),
 });
 
 const DEFAULT_MAX_BUFFERED = 1_000_000;
@@ -46,7 +50,7 @@ const DEFAULT_MAX_BUFFERED = 1_000_000;
 export function bridgePtyToWs(
   pty: PtyLike,
   ws: WsLike,
-  opts: { graceMs: number; heartbeatMs: number; maxBuffered?: number },
+  opts: { graceMs: number; heartbeatMs: number; maxBuffered?: number; onResize?: (cols: number, rows: number) => void },
 ): () => void {
   const maxBuffered = opts.maxBuffered ?? DEFAULT_MAX_BUFFERED;
   let closed = false;
@@ -85,7 +89,9 @@ export function bridgePtyToWs(
       return; // non-JSON text frame — ignore, never throw on untrusted input
     }
     const parsed = ControlSchema.safeParse(json);
-    if (parsed.success) safeResize(parsed.data.cols, parsed.data.rows);
+    if (!parsed.success) return;
+    safeResize(parsed.data.cols, parsed.data.rows);
+    opts.onResize?.(parsed.data.cols, parsed.data.rows);
   }
 
   pty.onData((data) => {

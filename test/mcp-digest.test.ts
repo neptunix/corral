@@ -1151,7 +1151,23 @@ describe("formatRepoRefusal", () => {
 });
 
 describe("formatSpawnReply", () => {
-  const base = { name: "card-a", boardId: "b", taskId: "t_1", env: "work-local", paneId: "w1:p2" };
+  const base = { name: "card-a", boardId: "b", taskId: "t_1", cardTitle: "Ship the RC toggle", env: "work-local", paneId: "w1:p2" };
+
+  // The card id is a nanoid: a reply carrying it alone tells the operator which card was staffed only
+  // if they happen to remember the id.
+  it("names the target card by title as well as id", () => {
+    const out = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/x", idempotent: false });
+    expect(out).toContain('b/t_1 ("Ship the RC toggle")');
+  });
+
+  // Absence of the separator, not a line count: splitting on "\n" cannot observe a surviving "\r",
+  // U+2028 or U+2029, so a count-based assertion passes for three of the five variants either way.
+  it.each(NEWLINE_VARIANTS)("sweeps a %s out of a card title entirely", (_label, ch) => {
+    const out = formatSpawnReply({ ...base, cardTitle: `ship${ch}it`, workspaceLabel: "corral", cwdSnapshot: "/x", idempotent: false });
+    const line = out.split("\n").find((l) => l.includes("ship"));
+    expect(line).toBeDefined();
+    expect(line).not.toMatch(/[\r\n\u2028\u2029]/);
+  });
 
   it("reports the target key and where the session landed", () => {
     const out = formatSpawnReply({ ...base, workspaceLabel: "corral", cwdSnapshot: "/repos/corral", idempotent: false });

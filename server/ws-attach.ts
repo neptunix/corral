@@ -18,6 +18,7 @@ import type { HerdrEnv } from "../environments.ts";
 import { createFocusTranslator, type FocusTranslator } from "./focus-translate.ts";
 import { buildAttachSpec, focusedTabId, paneGet, tabFocus } from "./herdr.ts";
 import { bridgePtyToWs, type PtyLike, type WsLike } from "./pty-bridge.ts";
+import { lastViewport, recordViewport } from "./viewport.ts";
 import { createSpawnLimiter, validateUpgrade } from "./ws-attach-guard.ts";
 
 // node-pty is injectable so the assembly is testable without a real terminal (the manual smoke test,
@@ -183,18 +184,23 @@ interface ConnectionCtx {
   readonly auditLogPath: string;
   readonly now: () => number;
   readonly focus: FocusTranslator;
+  readonly size?: { readonly cols: number; readonly rows: number };
 }
 
 function onConnection(ctx: ConnectionCtx): void {
   const spec = buildAttachSpec(ctx.env, ctx.paneId, true); // takeover always — herdr releases it on detach
   const resolvedCommand = `${spec.file} ${spec.args.join(" ")}`;
 
+  // Size, best first: what the client told us on connect, then the last panel size corral saw, then
+  // 80x24 — the middle rung serves a tab on a pre-upgrade bundle, which reconnects without the query.
+  const size = ctx.size ?? lastViewport() ?? { cols: 80, rows: 24 };
+
   let pty: PtyLike;
   try {
     pty = ctx.spawnPty(spec.file, spec.args, {
       name: "xterm-256color",
-      cols: 80, // placeholder until the client's first resize control frame lands
-      rows: 24,
+      cols: size.cols,
+      rows: size.rows,
       cwd: process.cwd(),
       env: { ...(spec.env ?? process.env), TERM: "xterm-256color" },
     });
@@ -266,7 +272,8 @@ function onConnection(ctx: ConnectionCtx): void {
     ctx.focus.onAttachClose(ctx.env, ctx.paneId);
   });
 
-  bridgePtyToWs(pty, ctx.ws, { graceMs: WS_KILL_GRACE_MS, heartbeatMs: WS_HEARTBEAT_MS });
+  // Recording lives here, not in the bridge, so the bridge keeps its "no server imports" property.
+  bridgePtyToWs(pty, ctx.ws, { graceMs: WS_KILL_GRACE_MS, heartbeatMs: WS_HEARTBEAT_MS, onResize: recordViewport });
 }
 
 /**
@@ -317,7 +324,10 @@ export function attachWebSocketServer(server: UpgradableServer, opts: AttachServ
 
     const origin = req.headers.origin ?? "";
     wss.handleUpgrade(req, socket, head, (ws) => {
-      onConnection({ ws, env: check.env, paneId: check.paneId, origin, spawnPty, auditLogPath, now, focus });
+      onConnection({
+        ws, env: check.env, paneId: check.paneId, origin, spawnPty, auditLogPath, now, focus,
+        ...(check.size === undefined ? {} : { size: check.size }),
+      });
     });
   });
 }

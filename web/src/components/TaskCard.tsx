@@ -8,7 +8,7 @@ import { RestoreSessionModal } from "./RestoreSessionModal";
 import { api } from "../lib/api";
 import { newSince, readLogSeen, seenKey } from "../lib/log-seen";
 import { CLOSING_STATUS, RESUMING_STATUS } from "../lib/optimistic";
-import { TONE_DOT, sessionStateLabel, sessionStateTone } from "../lib/session-state";
+import { TONE_DOT, isLiveLink, sessionLinkKey, sessionStateLabel, sessionStateTone } from "../lib/session-state";
 import { relativeTime } from "../lib/time";
 
 const PRIORITY_STYLE: Record<string, string> = {
@@ -36,13 +36,14 @@ export function TaskCard({ task, boardId, onEdit, onOpenLog, onOpenSession, onDe
   // and a manual open of a DEAD one should fail fast with a clear message — not spin "starting…" for
   // 25s against a pane that's gone. The card body opens the PRIMARY session (live-first); each session
   // row opens that specific one; the ⚙ always edits. With no session, the body falls to edit.
-  const liveSession = task.sessions.find((s) => s.live !== null && !s.live.detached);
+  const liveSession = task.sessions.find(isLiveLink);
   const primary = liveSession ?? task.sessions[0];
   // Safety net against a server-side link bug (a spawn/attach race can persist two links resolving to
-  // the same live session): collapse exact (env, paneId, sessionId) duplicates before rendering.
+  // the same live session): collapse duplicates before rendering. Same key as the column marker's
+  // count, so the two can never disagree about how many sessions a card holds.
   const seenSessionKeys = new Set<string>();
   const dedupedSessions = task.sessions.filter((s) => {
-    const key = `${s.env}:${s.paneId}:${s.sessionId ?? ""}`;
+    const key = sessionLinkKey(s);
     if (seenSessionKeys.has(key)) return false;
     seenSessionKeys.add(key);
     return true;
@@ -88,7 +89,7 @@ export function TaskCard({ task, boardId, onEdit, onOpenLog, onOpenSession, onDe
             // Key includes sessionId: after churn-heal two links can share an enriched paneId (one
             // live at the reused pane, one detached still pointing at it), but their sessionIds differ.
             <SessionRow
-              key={`${s.env}:${s.paneId}:${s.sessionId ?? ""}`}
+              key={sessionLinkKey(s)}
               s={s}
               title={task.title}
               onOpenSession={onOpenSession}

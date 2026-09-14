@@ -217,6 +217,18 @@ continuing elsewhere. In this order, stopping for an answer at every step after 
 4. **Offer `corral_session_close`** — only once they say so. Anything not already on the card is gone
    the moment it runs.
 
+## Starting a session, creating a card
+
+Two different actions, and an operator's request names one of them.
+
+- **A SESSION** — "start a new session", "let a fresh session check the bot" — is `corral_spawn`:
+  with no `boardId`/`taskId` it starts one on THIS card, beside you. Nothing is created and nothing
+  is closed — a spawn is not a handoff, and this session keeps working.
+- **A CARD** is `corral_task_create`, and creating one claims this work is a DIFFERENT task from the
+  card you are on — which no phrasing of "new session" makes. When the work does look separate, say
+  so in one line and let the operator answer; only then create, and `corral_spawn` onto what it
+  returns.
+
 ## Handing off before context runs out
 
 Available, not obligatory — and never silent. `corral_whoami` reports this session's own context

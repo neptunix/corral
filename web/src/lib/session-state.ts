@@ -94,3 +94,68 @@ export function sessionStateTone(s: SessionStateFields | null): SessionStateTone
   // cannot vouch for it, rather than painting a possibly-active session at rest.
   return "unavailable";
 }
+
+/**
+ * Text colours for the same tones — a SIBLING of TONE_DOT, which paints backgrounds. Every surface
+ * that puts a tone into TEXT rather than a dot reads this one map: the Unassigned list's bullet and
+ * the column marker's number. It lives here for the same reason TONE_DOT does — a second copy in a
+ * component is how the two drifted apart before.
+ */
+export const TONE_TEXT: Record<SessionStateTone, string> = {
+  working: "text-emerald-400 light:text-emerald-600",
+  attention: "text-red-400 light:text-red-600",
+  idle: "text-slate-500",
+  done: "text-sky-400 light:text-sky-600",
+  unavailable: "text-amber-400 light:text-amber-600",
+  unknown: "text-slate-400 light:text-slate-500",
+};
+
+// Severity, NOT the union's declaration order — a surface that summarises several sessions in one
+// mark has to pick which of them it speaks for. `unavailable` outranks `working` deliberately: it
+// means corral could not read that session, and ranking it under a calm tone hides it behind one,
+// which is the failure this tone was introduced to prevent.
+const TONE_SEVERITY: Record<SessionStateTone, number> = {
+  attention: 5, unavailable: 4, working: 3, done: 2, idle: 1, unknown: 0,
+};
+
+/**
+ * The tone that speaks for a GROUP of sessions — the most urgent one present. An empty group has
+ * nothing to speak for and gets the tone that claims nothing.
+ */
+export function worstTone(tones: readonly SessionStateTone[]): SessionStateTone {
+  let worst: SessionStateTone = "unknown";
+  for (const t of tones) if (TONE_SEVERITY[t] > TONE_SEVERITY[worst]) worst = t;
+  return worst;
+}
+
+/** Structural, like SessionStateFields — a card's session link, seen only through the field below. */
+interface MaybeLiveLink {
+  readonly live: { readonly detached: boolean } | null;
+}
+
+/**
+ * Is this link a session that is actually RUNNING? A detached link points at a session that has
+ * ended: the card still renders it, and it is still resumable, but nothing is behind it.
+ *
+ * ONE predicate decides this everywhere (the card's primary session, the closed-column confirmation,
+ * the column marker), because the three surfaces disagreeing about which sessions are alive is a bug
+ * with no symptom until someone acts on the wrong one. The `closing` synthetic already sets
+ * `detached`, so this rule does move.
+ */
+export function isLiveLink<T extends MaybeLiveLink>(s: T): s is T & { live: NonNullable<T["live"]> } {
+  return s.live !== null && !s.live.detached;
+}
+
+/**
+ * Which SESSION a link points at. A spawn/attach race can persist two links resolving to one live
+ * session, so every surface that counts or lists links collapses them on this key first — and they
+ * must all collapse the same way, or the card shows one session while the column marker above it
+ * says two, with a collapsed column offering nothing to reconcile that against.
+ *
+ * `sessionId` is part of the key, not the whole of it: after a herdr restart two links can share a
+ * paneId (one live at the reused pane, one detached still aimed at it) and only their sessionIds
+ * differ.
+ */
+export function sessionLinkKey(s: { readonly env: string; readonly paneId: string; readonly sessionId: string | null }): string {
+  return `${s.env}:${s.paneId}:${s.sessionId ?? ""}`;
+}

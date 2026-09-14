@@ -82,7 +82,9 @@ describe("bindHandler", () => {
     const c = stub({ whoami: async () => unbound, attach: async (a) => { calls.push(a); } });
     const out = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "board", taskId: "t_aaaaaaa" });
     expect(calls).toEqual([{ boardId: "board", taskId: "t_aaaaaaa", env: "work-local", paneId: "w1:p1", name: "alpha" }]);
-    expect(out.toLowerCase()).toContain("bound");
+    // The title, not just "bound": a bind is where an operator learns which card this session took,
+    // and the id alone is a nanoid that names nothing.
+    expect(out).toContain('board/t_aaaaaaa ("Open one")');
   });
 
   it("falls back to tabLabel when sessionName is blank (empty string, not null) — never attaches a blank name", async () => {

@@ -290,7 +290,7 @@ describe("corral_task_log", () => {
     const out = await logHandler({ client, identity: createIdentity(client, ctx) }, { text: "decided X" });
 
     expect(seen[0]).toEqual({ boardId: "board", taskId: "t_abcdefg", env: "work-local", paneId: "w1:p1", text: "decided X" });
-    expect(out).toContain("logged to board/t_abcdefg");
+    expect(out).toContain('logged to board/t_abcdefg ("Refactor the API")');
     expect(out).toContain("3 entries");
   });
 

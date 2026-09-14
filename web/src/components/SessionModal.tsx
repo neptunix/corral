@@ -171,7 +171,13 @@ export function SessionModal({
     term.focus();
 
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${window.location.host}/api/sessions/${env}/${paneId}/attach`);
+    // Only a measured grid is worth sending. `proposeDimensions()` returns undefined while the
+    // container has no laid-out size, and `term.cols/rows` then still hold xterm's untouched 80x24 —
+    // exactly the narrow value that used to squeeze the pane. No measurement, no query: the server
+    // then uses the last panel size it saw.
+    const measured = fit.proposeDimensions();
+    const query = measured === undefined ? "" : `?cols=${String(measured.cols)}&rows=${String(measured.rows)}`;
+    const ws = new WebSocket(`${proto}://${window.location.host}/api/sessions/${env}/${paneId}/attach${query}`);
     ws.binaryType = "arraybuffer";
 
     let disposed = false;

@@ -20,6 +20,15 @@ export const CHEAP_INTERVAL_MS = intFromEnv("HERDR_DASH_POLL_MS", 30000, { min: 
 export const ATTENTION_MIN_WORK_MS = intFromEnv("ATTENTION_MIN_WORK_MS", 600_000, { min: 0 }); // 10 min (§3.6)
 export const LIST_TIMEOUT = 15000;
 export const READ_TIMEOUT = 30000;
+// Pane sizing is one round-trip to a local herdr socket — measured at 188ms — and the command it uses
+// is a streaming bridge that exits on stdin EOF. Remote does NOT use it: the ssh leg alone is allowed
+// 8s to connect, so this bound would fail every remote spawn — remote takes LIST_TIMEOUT instead.
+export const PANE_SIZE_TIMEOUT_MS = 2000;
+// Retry window for the paneSetSize latch (server/herdr.ts) — see there for why it decays.
+export const PANE_SIZE_RETRY_AFTER_MS = 600_000; // 10 min
+// Narrowest reading corral will act on: an unsettled xterm reports 80x24, and a narrow panel would
+// otherwise become the birth width of every session spawned afterward.
+export const MIN_SIZED_COLS = 100;
 // #4: coalesce sub-second bursts to GET /read (each shells out to herdr/SSH). 1s is well under the
 // Unassigned mini-terminal's 5s poll, so legit polling passes straight through; only bursts are damped.
 export const READ_CACHE_TTL_MS = intFromEnv("READ_CACHE_TTL_MS", 1000, { min: 0 });

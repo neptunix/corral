@@ -519,6 +519,9 @@ export function formatSpawnReply(a: {
   readonly name: string;
   readonly boardId: string;
   readonly taskId: string;
+  /** The target card's title. A card id is a nanoid: printed alone it names nothing an operator can
+   *  recognise, and the reply is what the session repeats back to them. */
+  readonly cardTitle: string;
   readonly env: string;
   readonly paneId: string;
   readonly workspaceLabel: string;
@@ -531,7 +534,7 @@ export function formatSpawnReply(a: {
   }`;
   const adopted = a.idempotent;
   return emit([
-    `${adopted ? "adopted the existing session" : "spawned"} ${truncate(oneLine(a.name), TASK_TITLE_MAX)} on ${a.boardId}/${a.taskId}${where} — target key ${key}.`,
+    `${adopted ? "adopted the existing session" : "spawned"} ${truncate(oneLine(a.name), TASK_TITLE_MAX)} on ${a.boardId}/${a.taskId} ("${truncate(oneLine(a.cardTitle), TASK_TITLE_MAX)}")${where} — target key ${key}.`,
     adopted
       // The rejoin returns before the launch command is sent (server/spawn.ts), so the brief file is
       // never read. Saying otherwise would leave the operator believing a handoff was delivered.
