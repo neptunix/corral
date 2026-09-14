@@ -320,13 +320,27 @@ describe("createFleetMirror write policy", () => {
     fp.emit();
     const first = readFileSync(mirrorPath(tmpDir), "utf8");
     now += 60_000;
-    fp.emit(); // unchanged fleet
+    fp.repoll(); // unchanged fleet, really re-polled
     expect(readFileSync(mirrorPath(tmpDir), "utf8")).toBe(first); // no rewrite, updatedAt untouched
     now += 60_000;
     fp.set({ e1: UP }, [row("e1", UUID_A), row("e1", UUID_B)]);
     fp.emit();
     const state = m.getState();
     expect(state.envs.e1?.updatedAt).toBe(Math.floor(now / 1000));
+  });
+
+  it("a first-miss poll keeps the record without rewriting the file", () => {
+    const fp = fakePoller();
+    let now = 1_000_000_000_000;
+    const m = createFleetMirror({ dataDir: tmpDir, nowFn: () => now });
+    m.start(fp.poller);
+    fp.set({ e1: UP }, [row("e1", UUID_A), row("e1", UUID_B)]);
+    fp.emit();
+    const first = readFileSync(mirrorPath(tmpDir), "utf8");
+    now += 60_000;
+    fp.set({ e1: UP }, [row("e1", UUID_A)]); // B's first miss
+    fp.emit();
+    expect(readFileSync(mirrorPath(tmpDir), "utf8")).toBe(first);
   });
 
   it("an env with no claude sessions and no prior entry is not written at all (404 no_mirror stays meaningful)", () => {

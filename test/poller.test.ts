@@ -541,6 +541,19 @@ describe("createPoller — registry join", () => {
     expect(patched?.registryStatus).toBe("ok");
   });
 
+  it("a registry emission reuses the env's EnvState object (server/fleet-mirror.ts treats a new one as a poll)", async () => {
+    const p = createPoller({ envs: [A], list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]) });
+    await p.pollOnce();
+    const before = p.getSnapshot();
+    const seen: Snapshot[] = [];
+    p.onSnapshot((s) => seen.push(s));
+    p.applyRegistry(A, ok([{ sessionId: VALID_UUID, status: "busy" }]));
+    const after = seen.at(-1);
+    expect(after).toBeDefined();
+    expect(after).not.toBe(before);
+    expect(after?.envs.a).toBe(before.envs.a);
+  });
+
   it("lands claudeName and claudeNameUserSet from the record", async () => {
     const p = createPoller({ envs: [A], list: () => Promise.resolve([rowWithSession(A.id, "p1", VALID_UUID)]) });
     await p.pollOnce();

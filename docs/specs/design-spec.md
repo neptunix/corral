@@ -575,8 +575,9 @@ therefore keeps a continuous mirror of the live fleet and can bulk-resume it.
   environment's poll, a registry tick or a sweep does not count — so one anomalous listing (a
   partial listing, a transport hiccup) cannot empty the mirror. It does not protect against a
   state-loss restart between ticks: those sessions are still absent on the next poll (see
-  Unobserved restart). The cost is that a closed session stays mirrored for one more poll, and a
-  restore run inside that window resumes it.
+  Unobserved restart). The cost is that a closed session stays mirrored for one more poll: a restore
+  run inside that window resumes it, and if the environment stops answering inside it the record is
+  pinned (see Closed around a gap below).
   The persisted file is additive: an older build's `pendingRestore` boolean is still written,
   derived as "some record is pinned", so neither an upgrade nor a rollback can fail to parse it.
 - **Restore** (`server/fleet-restore.ts`, `POST /api/fleet/restore`): re-lists each environment

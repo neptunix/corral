@@ -254,10 +254,10 @@ comes back with it — but **the processes inside those panes do not**. A restar
 same panes running fresh shells. For agent panes, herdr's `[session] resume_agents_on_restore` is what
 relaunches the agent into its conversation session.
 
-**Keep `resume_agents_on_restore` off.** corral's own fleet mirror (below) is what recovers panes
-after a restart, at a time of its choosing and skipping whatever is already alive; herdr relaunching
-agents on its own races that recovery and double-resumes sessions. Leave the setting off and let
-`fleet:restore` do it.
+**Keep `resume_agents_on_restore` off.** Recovery goes through corral instead, and how depends on the
+restart: after one that loses herdr's own state, `fleet:restore` resumes the mirrored sessions; after
+one that keeps it, the panes come back dormant and each is resumed by opening it (see [Fleet mirror &
+restore](#fleet-mirror--restore)).
 
 ### The TUI and the live terminal
 
@@ -306,11 +306,12 @@ like a quiet fleet until you notice nothing has moved in hours.
 
 Killing the herdr server kills every pane; sessions survive only as transcripts. corral keeps a
 running mirror of the live fleet (`fleet-mirror.json` in the board store, gitignored) so it can
-bulk-resume it afterwards: `npm run fleet:restore [-- --dry-run] [-- --env <id>]` re-lists each
-environment, skips whatever is already alive, and resumes the rest via `claude --resume <uuid>`.
-Run `--dry-run` before killing herdr as a pre-upgrade check — a nonzero `unmirrored` count means
-the mirror is lagging and it is not yet safe to kill the server. See design-spec.md §18 for the
-write policy and its residual risks, and above for why `resume_agents_on_restore` must stay off.
+bulk-resume it after a restart that loses herdr's own state: `npm run fleet:restore [-- --dry-run]
+[-- --env <id>]` re-lists each environment, skips whatever is already alive, and resumes the rest via
+`claude --resume <uuid>`. Run `--dry-run` before killing herdr as a pre-upgrade check — a nonzero
+`unmirrored` count means the mirror is lagging and it is not yet safe to kill the server. See
+design-spec.md §18 for the write policy and its residual risks, and above for the
+`resume_agents_on_restore` requirement.
 
 **Recovering a mirror you don't trust:** stop corral, delete `fleet-mirror.json`, start corral.
 This discards every record that is not currently live, so only do it with a healthy, fully-up

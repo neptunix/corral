@@ -64,9 +64,12 @@ sessions still held are ones they closed or ones that have not come back. The pe
 that from what corral already observed.
 
 Two consecutive misses rather than one is a deliberate asymmetry. Dropping a record that should have
-been kept costs a session that cannot be bulk-restored. Keeping a record one poll longer than
-necessary costs at most a closed session resumed by a restore run inside that one poll. Where the two
-errors are that unequal, the rule should fail toward keeping. Counting polls of the environment
+been kept costs a session that cannot be bulk-restored. Keeping a closed session one poll longer has a
+cost too: a restore run inside that poll resumes it, and if its environment stops answering inside
+that poll — herdr stopped for an upgrade right after a close — it is pinned with the missing records
+and the next restore resumes it. Both are bounded by one poll and undone by closing the session again;
+a wrongly dropped record is not recoverable. Where the two errors are that unequal, the rule should
+fail toward keeping. Counting polls of the environment
 itself, rather than any update that carries its last listing, is what makes the second miss a second
 observation.
 
