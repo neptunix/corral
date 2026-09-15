@@ -100,8 +100,6 @@ export function SessionModal({
   // session and never writes to a closed socket.
   const liveRef = useRef(false);
   const sendInputRef = useRef<((bytes: Uint8Array) => void) | null>(null);
-  // Sticky Ctrl for the on-screen key bar. The ref is what the terminal effect reads — it closes
-  // over its own scope and would otherwise capture the first render's value forever.
   // The region a soft keyboard leaves visible. Null off a phone (and under jsdom), where the
   // stylesheet's own sizing is already right.
   const [viewport, setViewport] = useState<Viewport | null>(null);
@@ -111,6 +109,8 @@ export function SessionModal({
     return observeViewport(window, sync);
   }, []);
 
+  // Sticky Ctrl for the on-screen key bar. The ref is what the terminal effect reads — it closes
+  // over its own scope and would otherwise capture the first render's value forever.
   const [ctrlArmed, setCtrlArmed] = useState(false);
   const ctrlArmedRef = useRef(false);
   ctrlArmedRef.current = ctrlArmed;
