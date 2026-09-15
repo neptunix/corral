@@ -89,6 +89,35 @@ describe("KeyBar", () => {
     expect(onCtrlArmedChange).toHaveBeenCalledWith(false);
   });
 
+  it("disarms Ctrl on a second tap", () => {
+    const { onKey, onCtrlArmedChange } = renderBar({ coarse: true, ctrlArmed: true });
+    fireEvent.pointerDown(screen.getByLabelText("Ctrl"));
+    expect(onCtrlArmedChange).toHaveBeenCalledWith(false);
+    expect(onKey).not.toHaveBeenCalled();
+  });
+
+  // An app can switch DECCKM on mid-session, so a mode captured once would send the wrong spelling.
+  it("reads the cursor-key mode at press time", () => {
+    stubPointer(true);
+    let applicationMode = false;
+    const onKey = vi.fn();
+    render(
+      <KeyBar
+        onKey={onKey}
+        applicationCursorKeys={() => applicationMode}
+        onCtrlArmedChange={vi.fn()}
+        ctrlArmed={false}
+        refocus={vi.fn()}
+        onPaste={vi.fn()}
+      />,
+    );
+    fireEvent.pointerDown(screen.getByLabelText("Up arrow"));
+    applicationMode = true;
+    fireEvent.pointerDown(screen.getByLabelText("Up arrow"));
+    expect(onKey).toHaveBeenNthCalledWith(1, "\x1b[A");
+    expect(onKey).toHaveBeenNthCalledWith(2, "\x1bOA");
+  });
+
   it("shows the armed state, so the modifier is never invisibly stuck", () => {
     renderBar({ coarse: true, ctrlArmed: true });
     expect(screen.getByLabelText("Ctrl").getAttribute("aria-pressed")).toBe("true");
