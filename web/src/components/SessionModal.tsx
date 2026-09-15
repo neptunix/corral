@@ -3,6 +3,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef, useState, type JSX } from "react";
 
+import { KeyBar } from "./KeyBar";
+import { PastePrompt } from "./PastePrompt";
 import { SessionMeta } from "./SessionMeta";
 import { useTheme } from "./ThemeProvider";
 import {
@@ -10,13 +12,16 @@ import {
   RECONNECT_LIMIT_DELAY_MS, RECONNECT_MAX_MS, reconnectNominalMs, RECONNECT_STABLE_MS,
   RESUME_PROBE_MS, type ResumeTrigger, resumeAction, shouldReconnectAfterClose, shouldRetryAttach,
 } from "../lib/attach";
+import { applyStickyCtrl } from "../lib/key-bar";
 import { formatDropInjection, formatPaste } from "../lib/paste";
 import { closeMessage } from "../lib/protocol";
+import { createResizeGate } from "../lib/resize-gate";
 import { sessionStateLabel } from "../lib/session-state";
 import { readTerminalPrefs } from "../lib/terminal-prefs";
 import { attachCommittedTextInput } from "../lib/text-input";
 import { attachTouchScroll } from "../lib/touch-scroll";
 import { isFileDrag, uploadFile, UPLOAD_MAX_BYTES } from "../lib/upload";
+import { observeViewport, overlayStyle, readViewport, type Viewport } from "../lib/visual-viewport";
 import { attachWheelGain } from "../lib/wheel-gain";
 
 import "@xterm/xterm/css/xterm.css";
@@ -95,8 +100,24 @@ export function SessionModal({
   // session and never writes to a closed socket.
   const liveRef = useRef(false);
   const sendInputRef = useRef<((bytes: Uint8Array) => void) | null>(null);
+  // The region a soft keyboard leaves visible. Null off a phone (and under jsdom), where the
+  // stylesheet's own sizing is already right.
+  const [viewport, setViewport] = useState<Viewport | null>(null);
+  useEffect(() => {
+    const sync = (): void => { setViewport(readViewport(window)); };
+    sync();
+    return observeViewport(window, sync);
+  }, []);
+
+  // Sticky Ctrl for the on-screen key bar. The ref is what the terminal effect reads — it closes
+  // over its own scope and would otherwise capture the first render's value forever.
+  const [ctrlArmed, setCtrlArmed] = useState(false);
+  const ctrlArmedRef = useRef(false);
+  ctrlArmedRef.current = ctrlArmed;
   const [dragging, setDragging] = useState(false);
   const [dropError, setDropError] = useState<string | null>(null);
+  // Open only when the clipboard could not be read directly — see handlePasteButton.
+  const [pastePrompt, setPastePrompt] = useState(false);
 
   // Esc closes (kills WS→PTY via the teardown effect). Separate effect so it doesn't churn the terminal.
   useEffect(() => {
@@ -202,12 +223,23 @@ export function SessionModal({
     // takeover lock. Effect-local is the right scope: the next run genuinely starts fresh.
     let pending: "none" | "backoff" | "resume" | "probe" = "none";
 
+    // Raw and unconditional. Kept for the liveness probe below, whose whole purpose is to WRITE —
+    // deduplicating that send would defeat it.
     function sendResize(): void {
       fit.fit();
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
       }
     }
+
+    // Everything driven by layout goes through the gate instead: a resize makes the application
+    // repaint, and the copy it had already drawn is pushed into scrollback. See lib/resize-gate.ts.
+    const resizeGate = createResizeGate({
+      perform: () => { fit.fit(); return { cols: term.cols, rows: term.rows }; },
+      emit: (dims) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "resize", ...dims }));
+      },
+    });
 
     function goLive(): void {
       if (live) return;
@@ -239,7 +271,7 @@ export function SessionModal({
 
     ws.onopen = () => {
       setReconnectInfo(null);
-      sendResize();
+      resizeGate.now(); // immediate: waiting would leave the first paint at the wrong size
       // Completing a handshake is not the same as having a connection. The limiter accepts the
       // upgrade and only then closes 1013, and a flapping server accepts every attach and drops it
       // — treating either as success would clear the backoff and switch on the unlimited retry for
@@ -351,10 +383,15 @@ export function SessionModal({
     window.addEventListener("pageshow", onPageShow);
 
     // Keystrokes → binary frame (the bridge treats binary as raw input); resize → text frame (JSON control).
-    const dataSub = term.onData((d) => {
+    const dataSub = term.onData((raw) => {
       // Drop input while buffering a not-yet-live session: output is hidden during "starting…", so any
       // keystroke would be blind — typed into a terminal the operator can't see. Flows once goLive fires.
       if (!live) return;
+      // Sticky Ctrl from the on-screen bar lands here, not on the beforeinput path: a soft
+      // keyboard produces an ordinary keydown, so the character reaches xterm's own input handler
+      // and arrives as onData. See lib/key-bar.ts for why only single characters consume it.
+      const { text: d, consumed } = applyStickyCtrl(raw, ctrlArmedRef.current);
+      if (consumed) setCtrlArmed(false);
       if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(d));
     });
 
@@ -394,8 +431,12 @@ export function SessionModal({
     const helperTextarea = term.textarea;
     const detachTextInput = helperTextarea === undefined
       ? () => undefined
-      : attachCommittedTextInput(helperTextarea, (text) => {
+      : attachCommittedTextInput(helperTextarea, (raw) => {
         if (!live || ws.readyState !== WebSocket.OPEN) return;
+        // An armed Ctrl consumes exactly one character, whether or not it maps to a control code:
+        // leaving it armed after an unmappable key would silently modify some later, unrelated one.
+        const { text, consumed } = applyStickyCtrl(raw, ctrlArmedRef.current);
+        if (consumed) setCtrlArmed(false);
         ws.send(new TextEncoder().encode(text));
         if (term.options.scrollOnUserInput === true) term.scrollToBottom();
       });
@@ -415,7 +456,7 @@ export function SessionModal({
       if (s.length > 0) void navigator.clipboard.writeText(s).catch(() => undefined);
     });
 
-    const ro = new ResizeObserver(() => { sendResize(); });
+    const ro = new ResizeObserver(() => { resizeGate.later(); });
     ro.observe(el);
     // A second observer, on the TERMINAL rather than on the box holding it, and it sets the HEIGHT
     // only. xterm rounds down to whole rows, so its box is up to one row shorter than the space it
@@ -452,6 +493,7 @@ export function SessionModal({
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
       ro.disconnect();
+      resizeGate.dispose();
       frameObserver.disconnect();
       detachTouchScroll();
       detachWheelGain();
@@ -474,6 +516,31 @@ export function SessionModal({
   // `canAttachFiles` (local only) and a live session (so no orphan temp file is written for a drop that
   // can't be injected). Per-file requests: on a mid-batch failure we still inject whatever uploaded
   // successfully so far (those bytes are already on-host) and surface the error for the rest.
+  // iOS has no paste menu to offer over the terminal (see KeyBar), so the bar's button reads the
+  // clipboard itself. Same bytes as a real paste — formatPaste brackets it, so Claude Code treats a
+  // multi-line clipboard as one paste instead of a run of Enters.
+  function injectPaste(text: string): void {
+    if (text === "") return;
+    setDropError(null);
+    sendInputRef.current?.(formatPaste(text));
+  }
+
+  async function handlePasteButton(): Promise<void> {
+    if (!liveRef.current) { setDropError("session is not live — try again"); return; }
+    // Direct read is one tap, so try it first. It is also the path that does not exist everywhere:
+    // Firefox refuses readText outright, and an insecure origin serves no clipboard API at all.
+    // Neither is an error worth showing — both just mean "ask the user to paste into a real field".
+    try {
+      // No availability check: lib.dom types `navigator.clipboard` as always present and it is not,
+      // so a guard would be flagged as a redundant condition while the real absence still throws.
+      // The throw is the check — a missing API, a refusal and a denied permission all land here, and
+      // all three mean the same thing: fall back to a field the user can paste into.
+      injectPaste(await navigator.clipboard.readText());
+    } catch {
+      setPastePrompt(true);
+    }
+  }
+
   async function handleDrop(e: React.DragEvent): Promise<void> {
     e.preventDefault();
     setDragging(false);
@@ -503,7 +570,11 @@ export function SessionModal({
   // it, so the scrim's one remaining effect was to darken the board showing THROUGH the panel —
   // muting the header without dimming anything the operator can actually see.
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50 sm:bg-black/60" onClick={onClose}>
+    <div
+      className="fixed inset-0 flex items-center justify-center z-50 sm:bg-black/60"
+      style={overlayStyle(viewport)}
+      onClick={onClose}
+    >
       <div
         // dvh, not vh: on iOS `vh` is the LARGE viewport (toolbars hidden), so with the Safari toolbars
         // shown a 90vh panel overflows the visible area — and `fixed inset-0` means it cannot be
@@ -516,7 +587,10 @@ export function SessionModal({
         // nothing — the board it would show through is entirely behind it — so on a phone the effect
         // costs a per-frame backdrop blur, which Safari charges for on every scroll, and returns a
         // muted header. On a desktop the panel is a window over the board, which is the whole point.
-        className="relative bg-card border-border shadow-2xl w-screen h-[100dvh] flex flex-col overflow-hidden sm:bg-card/85 sm:backdrop-blur-md sm:w-[90vw] sm:h-[90dvh] sm:rounded-lg sm:border"
+        // h-full, not h-[100dvh]: the overlay is what tracks the keyboard (visual-viewport.ts), and a
+        // panel measured against the viewport instead would overflow it — centred by the flex parent,
+        // so the overflow splits evenly and the key bar lands back under the keyboard.
+        className="relative bg-card border-border shadow-2xl w-screen h-full flex flex-col overflow-hidden sm:bg-card/85 sm:backdrop-blur-md sm:w-[90vw] sm:h-[90dvh] sm:rounded-lg sm:border"
         onClick={(e) => { e.stopPropagation(); }}
         onDragEnter={(e) => { if (canAttachFiles && isFileDrag(e.dataTransfer.types)) { e.preventDefault(); setDragging(true); } }}
         onDragOver={(e) => { if (canAttachFiles && isFileDrag(e.dataTransfer.types)) e.preventDefault(); }}
@@ -625,6 +699,29 @@ export function SessionModal({
             className="pointer-events-none absolute inset-x-0 top-0 rounded border border-muted-foreground/30"
           />
         </div>
+        <KeyBar
+          ctrlArmed={ctrlArmed}
+          onCtrlArmedChange={setCtrlArmed}
+          // Read at press time, never captured: an app can flip DECCKM mid-session.
+          applicationCursorKeys={() => termRef.current?.modes.applicationCursorKeysMode ?? false}
+          // Same gated bridge the drop handler uses, so a press before the session is live, or after
+          // it closed, is a no-op rather than a write to a dead socket.
+          onKey={(seq) => { sendInputRef.current?.(new TextEncoder().encode(seq)); }}
+          // Conditional: with the bar's keys non-focusable this is normally a no-op, and calling
+          // focus() on an already-focused textarea is itself what iOS answers by cycling the
+          // keyboard. It stays as the recovery path for the ways a tap can still steal focus.
+          refocus={() => {
+            const ta = termRef.current?.textarea;
+            if (ta !== undefined && document.activeElement !== ta) termRef.current?.focus();
+          }}
+          onPaste={() => { void handlePasteButton().finally(() => { termRef.current?.focus(); }); }}
+        />
+        {pastePrompt && (
+          <PastePrompt
+            onCancel={() => { setPastePrompt(false); termRef.current?.focus(); }}
+            onText={(text) => { setPastePrompt(false); injectPaste(text); termRef.current?.focus(); }}
+          />
+        )}
         {dragging && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-sm pointer-events-none">
             <span className="text-foreground text-sm font-medium rounded-md border border-border bg-card/80 px-4 py-2">

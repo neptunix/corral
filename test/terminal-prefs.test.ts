@@ -45,6 +45,22 @@ describe("terminal prefs — round trip", () => {
     expect(readTerminalPrefs().scrollSpeed).toBe(5);
   });
 
+  // A record from a build that predates the field must still parse — a failed parse would reset the
+  // scroll speed along with it.
+  it("reads a record saved before keyBarHidden existed without losing the scroll speed", () => {
+    window.localStorage.setItem(KEY, JSON.stringify({ scrollSpeed: 7 }));
+    expect(readTerminalPrefs()).toEqual({ scrollSpeed: 7, keyBarHidden: false });
+  });
+
+  // Each writer sends only its own field; the other one has to survive.
+  it("merges a one-field write over what is stored", () => {
+    writeTerminalPrefs({ scrollSpeed: 7 });
+    writeTerminalPrefs({ keyBarHidden: true });
+    expect(readTerminalPrefs()).toEqual({ scrollSpeed: 7, keyBarHidden: true });
+    writeTerminalPrefs({ scrollSpeed: 3 });
+    expect(readTerminalPrefs()).toEqual({ scrollSpeed: 3, keyBarHidden: true });
+  });
+
   // Private-mode Safari throws from the accessors themselves, so the whole object is replaced here —
   // spying on the methods of jsdom's Storage does not actually intercept them.
   it("survives a browser that denies storage access", () => {

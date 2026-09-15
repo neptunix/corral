@@ -17,17 +17,18 @@ export function clampScrollSpeed(value: number): number {
   return Math.round(Math.min(SCROLL_SPEED_MAX, Math.max(SCROLL_SPEED_MIN, value)));
 }
 
-// No per-field `.catch` the way spawn-prefs.ts has one: with a single field there is nothing to
-// preserve, and anything the catch would rescue already lands on the same default through the
-// object-level parse failure below.
+// `keyBarHidden` carries a `.default` and must keep it: this schema parses as one object, so a value
+// stored by a build that predates the field would fail the whole parse and silently reset the scroll
+// speed with it. The default is what lets old records through intact.
 const terminalPrefsSchema = z.object({
   scrollSpeed: z.number().transform(clampScrollSpeed),
+  keyBarHidden: z.boolean().default(false),
 });
 
 export type TerminalPrefs = z.infer<typeof terminalPrefsSchema>;
 
 function defaults(): TerminalPrefs {
-  return { scrollSpeed: SCROLL_SPEED_DEFAULT };
+  return { scrollSpeed: SCROLL_SPEED_DEFAULT, keyBarHidden: false };
 }
 
 export function readTerminalPrefs(): TerminalPrefs {
@@ -43,9 +44,12 @@ export function readTerminalPrefs(): TerminalPrefs {
   }
 }
 
-export function writeTerminalPrefs(next: TerminalPrefs): void {
+// A PATCH, merged over what is stored, not a whole record: with more than one field a writer that
+// only cares about its own would otherwise have to restate the others, and forgetting one silently
+// resets it to the default.
+export function writeTerminalPrefs(next: Partial<TerminalPrefs>): void {
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(next));
+    window.localStorage.setItem(KEY, JSON.stringify({ ...readTerminalPrefs(), ...next }));
   } catch {
     // Quota or denied storage — dropping the preference is the correct degradation.
   }
