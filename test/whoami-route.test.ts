@@ -209,6 +209,19 @@ describe("GET /api/whoami and /api/attention", () => {
     expect(calls).toBe(0);
   });
 
+  // Regression for the T4 misidentification: a caller sending a socket path that matches no local
+  // environment must never resolve to the local session sharing its pane id, even though that pane id
+  // is otherwise a perfectly unique match.
+  it("reports resolved:false when the socket hint matches no local environment", async () => {
+    const app = createApi({ poller, envs: ENVIRONMENTS, storage: createStorage(tmpDir) });
+    const res = await app.request(
+      "/api/whoami?paneId=w1%3Ap1&cwd=%2Frepo&socket=" + encodeURIComponent("/repo/path/to/a/different/herdr/session.sock"),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json() as WhoamiResponse;
+    expect(body.resolved).toBe(false);
+  });
+
   it("distinguishes a missing paneId from a malformed one", async () => {
     const app = createApi({ poller, envs: ENVIRONMENTS, storage: createStorage(tmpDir) });
     const bad = await app.request("/api/whoami?paneId=" + encodeURIComponent("w1;rm -rf /"));

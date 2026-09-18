@@ -32,14 +32,42 @@ function sole(candidates: readonly Candidate[]): Candidate | undefined {
 }
 
 /**
+ * A local env with no configured `socket` runs on whatever `HERDR_SOCKET_PATH` corral itself was
+ * launched under (see README "Launching corral" / environments.ts) — a pane in that env forwards that
+ * same ambient value as its own hint. `ambientSocket` carries that value in so this stays a pure,
+ * testable function instead of reading `process.env` here.
+ */
+function effectiveSocket(env: LocalEnv, ambientSocket: string | null): string | null {
+  if (env.socket !== undefined) return expandTilde(env.socket);
+  return ambientSocket === null ? null : expandTilde(ambientSocket);
+}
+
+/**
+ * Ties among same-pane-id candidates: an exact socket match first, then cwd. cwd is only a
+ * tie-breaker — the row's cwd is the pane's, which can legitimately diverge from the Claude process's
+ * working directory, so a hard equality gate would produce false negatives.
+ */
+function pickAmong(candidates: readonly Candidate[], cwd: string, paneId: string): SelfResolution {
+  const only = sole(candidates);
+  if (only !== undefined) return { ok: true, env: only.env, row: only.row };
+  const byCwd = sole(candidates.filter((c) => c.row.cwd === cwd));
+  if (byCwd !== undefined) return { ok: true, env: byCwd.env, row: byCwd.row };
+  const ids = candidates.map((c) => c.env.id).join(", ");
+  return { ok: false, code: "ambiguous", reason: `pane ${paneId} is ambiguous across environments: ${ids}` };
+}
+
+/**
  * Which session is the caller? Only the MCP client's own coordinates are trusted as *hints*: the
  * authoritative data is the poller snapshot plus the trusted env config.
  *
- * A paneId is unique within one herdr session but can repeat across environments, so ties are broken
- * by an exact socket match first, then by cwd. cwd is only a tie-breaker: the row's cwd is the pane's,
- * which can legitimately diverge from the Claude process's working directory, so a hard equality gate
- * would produce false negatives. Remote environments are excluded — the MCP process runs on the same
- * host as corral in phase 1.
+ * A paneId is unique within one herdr session but can repeat across environments — and across other
+ * herdr servers entirely, including remote environments' panes, which this function never sees as
+ * candidates but whose pane ids can still collide with a local one. So a socket hint, when present,
+ * is a GATE, not just a tie-breaker: a candidate whose environment's effective socket (its configured
+ * `socket`, or the ambient default for one that omits it) does not match the hint is refused outright,
+ * even if it is the only local candidate for that pane id. A null/absent hint keeps the pre-hint
+ * behaviour of matching on pane id alone. See ADR 0002 decision 4 — this tightens "socket disambiguates,
+ * never routes" into "socket must at least agree", it does not let the socket pick an env by itself.
  */
 export function resolveSelf(input: {
   readonly snapshot: Snapshot;
@@ -47,8 +75,9 @@ export function resolveSelf(input: {
   readonly paneId: string;
   readonly cwd: string;
   readonly socket: string | null;
+  readonly ambientSocket: string | null;
 }): SelfResolution {
-  const { snapshot, envs, paneId, cwd, socket } = input;
+  const { snapshot, envs, paneId, cwd, socket, ambientSocket } = input;
 
   const candidates: Candidate[] = [];
   for (const env of envs.filter(isLocal)) {
@@ -57,8 +86,6 @@ export function resolveSelf(input: {
     }
   }
 
-  const only = sole(candidates);
-  if (only !== undefined) return { ok: true, env: only.env, row: only.row };
   if (candidates.length === 0) {
     // Not terminal: the route escalates a not_found to a pane-level lookup, which sees panes this
     // snapshot cannot (it is built from `herdr agent list`, so it holds only panes with a registered
@@ -70,19 +97,21 @@ export function resolveSelf(input: {
     };
   }
 
-  if (socket !== null) {
-    const want = expandTilde(socket);
-    const bySocket = sole(
-      candidates.filter((c) => c.env.socket !== undefined && expandTilde(c.env.socket) === want),
-    );
-    if (bySocket !== undefined) return { ok: true, env: bySocket.env, row: bySocket.row };
+  if (socket === null) return pickAmong(candidates, cwd, paneId);
+
+  const want = expandTilde(socket);
+  const matching = candidates.filter((c) => effectiveSocket(c.env, ambientSocket) === want);
+  if (matching.length === 0) {
+    // Reuses the "not_found" code so the route's not_found escalation to resolveSelfViaPane is safe:
+    // that function applies the identical socket gate and refuses to even look, rather than resolving
+    // a fresh pane the same wrong way.
+    return {
+      ok: false,
+      code: "not_found",
+      reason: `pane ${paneId} matches a local environment by pane id, but socket "${socket}" does not match any local environment's socket`,
+    };
   }
-
-  const byCwd = sole(candidates.filter((c) => c.row.cwd === cwd));
-  if (byCwd !== undefined) return { ok: true, env: byCwd.env, row: byCwd.row };
-
-  const ids = candidates.map((c) => c.env.id).join(", ");
-  return { ok: false, code: "ambiguous", reason: `pane ${paneId} is ambiguous across environments: ${ids}` };
+  return pickAmong(matching, cwd, paneId);
 }
 
 export interface PaneIdentity {
@@ -112,24 +141,38 @@ export const STARTING_STATUS = "starting";
  * `linkBindsSession` matches a session-less link on env + paneId, so a spawned session finds the card
  * it was spawned onto without waiting for herdr at all.
  *
- * Environments are tried in socket-match order and the first hit wins: a pane id is unique within one
- * herdr session, and the socket is what says which session the caller sits in.
+ * When a socket hint is present it GATES the environments tried, the same rule `resolveSelf` applies:
+ * a pane id can collide with one from another herdr server entirely (a remote env's pane, say), and
+ * that pane hasn't even reached this snapshot yet — the fresh-pane case this function exists for — so
+ * the socket is the only signal available. An env whose effective socket does not match is never even
+ * asked about the pane. A null hint keeps the pre-hint behaviour of trying every local env.
  */
 export async function resolveSelfViaPane(input: {
   readonly envs: readonly HerdrEnv[];
   readonly paneId: string;
   readonly socket: string | null;
+  readonly ambientSocket: string | null;
   readonly lookup: (env: HerdrEnv, paneId: string) => Promise<PaneIdentity | null>;
 }): Promise<SelfResolution> {
-  const { envs, paneId, socket, lookup } = input;
+  const { envs, paneId, socket, ambientSocket, lookup } = input;
   const locals = envs.filter(isLocal);
-  const want = socket === null ? null : expandTilde(socket);
-  const ordered = want === null ? locals : [
-    ...locals.filter((e) => e.socket !== undefined && expandTilde(e.socket) === want),
-    ...locals.filter((e) => !(e.socket !== undefined && expandTilde(e.socket) === want)),
-  ];
 
-  for (const env of ordered) {
+  let pool: readonly LocalEnv[];
+  if (socket === null) {
+    pool = locals;
+  } else {
+    const want = expandTilde(socket);
+    pool = locals.filter((e) => effectiveSocket(e, ambientSocket) === want);
+    if (pool.length === 0) {
+      return {
+        ok: false,
+        code: "not_found",
+        reason: `pane ${paneId} was not found locally, and socket "${socket}" does not match any local environment's socket`,
+      };
+    }
+  }
+
+  for (const env of pool) {
     const pane = await lookup(env, paneId);
     if (pane === null) continue;
     return {

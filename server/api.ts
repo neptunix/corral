@@ -24,8 +24,8 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 
 import {
-  BRIEF_CLEANUP_DELAY_MS, BRIEF_MAX_BYTES, BRIEF_ROOT, READ_CACHE_TTL_MS, SPAWN_TIMEOUT_MS,
-  TASK_DESCRIPTION_MAX_CHARS, UPLOAD_ROOT, WS_ALLOWED_ORIGINS,
+  AMBIENT_HERDR_SOCKET, BRIEF_CLEANUP_DELAY_MS, BRIEF_MAX_BYTES, BRIEF_ROOT, READ_CACHE_TTL_MS,
+  SPAWN_TIMEOUT_MS, TASK_DESCRIPTION_MAX_CHARS, UPLOAD_ROOT, WS_ALLOWED_ORIGINS,
 } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { briefByteLength, cleanupBrief, composeBrief, START_COMMAND_FALLBACK, writeBrief } from "./brief.ts";
@@ -424,7 +424,10 @@ export function createApi(opts: {
     const socket = c.req.query("socket") ?? null;
     const resolve = (): { snapshot: Snapshot; resolution: ReturnType<typeof resolveSelf> } => {
       const snapshot = opts.poller.getSnapshot();
-      return { snapshot, resolution: resolveSelf({ snapshot, envs: opts.envs, paneId, cwd, socket }) };
+      return {
+        snapshot,
+        resolution: resolveSelf({ snapshot, envs: opts.envs, paneId, cwd, socket, ambientSocket: AMBIENT_HERDR_SOCKET }),
+      };
     };
 
     // The caller is asking about a pane that, by definition, it is sitting in RIGHT NOW, so an
@@ -448,7 +451,9 @@ export function createApi(opts: {
     // Only a not_found escalates: an ambiguous match already found real rows, and replacing them
     // with a synthesized one would silently drop the caller's metrics AND hide the ambiguity.
     if (!resolution.ok && resolution.code === "not_found") {
-      resolution = await resolveSelfViaPane({ envs: opts.envs, paneId, socket, lookup: paneLookup });
+      resolution = await resolveSelfViaPane({
+        envs: opts.envs, paneId, socket, ambientSocket: AMBIENT_HERDR_SOCKET, lookup: paneLookup,
+      });
     }
     return c.json(buildWhoami({
       resolution,
@@ -484,7 +489,7 @@ export function createApi(opts: {
       return c.json({ empty: false });
     }
     const snapshot = opts.poller.getSnapshot();
-    return c.json(cardSignal(boards, snapshot, opts.envs, { paneId, cwd, socket }));
+    return c.json(cardSignal(boards, snapshot, opts.envs, { paneId, cwd, socket }, AMBIENT_HERDR_SOCKET));
   });
 
   // Attention records for the fleet digest. The bare GET /api/state returns a plain Snapshot with no

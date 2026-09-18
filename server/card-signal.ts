@@ -15,8 +15,11 @@ export function cardSignal(
   snapshot: Snapshot,
   envs: readonly HerdrEnv[],
   pane: { readonly paneId: string; readonly cwd: string; readonly socket: string | null },
+  ambientSocket: string | null,
 ): CardSignalResponse {
-  const resolution = resolveSelf({ snapshot, envs, paneId: pane.paneId, cwd: pane.cwd, socket: pane.socket });
+  const resolution = resolveSelf({
+    snapshot, envs, paneId: pane.paneId, cwd: pane.cwd, socket: pane.socket, ambientSocket,
+  });
   if (!resolution.ok) return { empty: false };
   const found = findCard(boards, resolution.row);
   if (found === undefined) return { empty: false };

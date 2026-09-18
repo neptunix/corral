@@ -38,6 +38,11 @@ export const READ_CACHE_TTL_MS = intFromEnv("READ_CACHE_TTL_MS", 1000, { min: 0 
 export const CORRAL_HOME = process.env.CORRAL_HOME ?? path.join(os.homedir(), ".corral");
 export const ENV_CONFIG_PATH = process.env.CORRAL_CONFIG ?? path.join(CORRAL_HOME, "environments.json");
 
+// The socket a `local` environment with no configured `socket` actually runs on: whatever
+// HERDR_SOCKET_PATH corral itself was launched under (see README "Launching corral"). server/whoami.ts
+// needs this to recognize such an env's own pane as a match rather than a mismatch.
+export const AMBIENT_HERDR_SOCKET = process.env.HERDR_SOCKET_PATH ?? null;
+
 // Recap capture configuration
 export const RECAP_ENABLED = process.env.RECAP_ENABLED !== "false";
 export const RECAP_INTERVAL_MS = intFromEnv("RECAP_INTERVAL_MS", 60000, { min: 1 });

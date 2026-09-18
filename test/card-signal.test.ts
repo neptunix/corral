@@ -37,6 +37,7 @@ function board(over: Partial<Board>): Board {
 }
 
 const pane = { paneId: "w1:p1", cwd: "/repo", socket: null };
+const NO_AMBIENT_SOCKET = null;
 
 describe("cardSignal", () => {
   it("reports empty for a bound task with a blank description", () => {
@@ -44,7 +45,7 @@ describe("cardSignal", () => {
       id: "t1", title: "T", description: "", status: "todo", priority: null,
       createdAt: 1, updatedAt: 1, log: [], sessions: [link({})],
     }] });
-    const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane);
+    const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane, NO_AMBIENT_SOCKET);
     expect(out.empty).toBe(true);
   });
 
@@ -53,7 +54,7 @@ describe("cardSignal", () => {
       id: "t1", title: "T", description: "   \n\t  ", status: "todo", priority: null,
       createdAt: 1, updatedAt: 1, log: [], sessions: [link({})],
     }] });
-    const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane);
+    const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane, NO_AMBIENT_SOCKET);
     expect(out.empty).toBe(true);
   });
 
@@ -62,19 +63,19 @@ describe("cardSignal", () => {
       id: "t1", title: "T", description: "the actual task", status: "todo", priority: null,
       createdAt: 1, updatedAt: 1, log: [], sessions: [link({})],
     }] });
-    const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane);
+    const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane, NO_AMBIENT_SOCKET);
     expect(out.empty).toBe(false);
   });
 
   it("reports not-empty when the pane cannot be resolved (not_found)", () => {
-    const out = cardSignal([], snapshot([]), ENVIRONMENTS, pane);
+    const out = cardSignal([], snapshot([]), ENVIRONMENTS, pane, NO_AMBIENT_SOCKET);
     expect(out.empty).toBe(false);
   });
 
   it("reports not-empty when the pane is ambiguous across environments", () => {
     const twoLocal = ENVIRONMENTS.filter((e) => e.kind === "local").slice(0, 2);
     const rows = twoLocal.map((e) => row({ env: e.id, cwd: "/nomatch" }));
-    const out = cardSignal([], snapshot(rows), ENVIRONMENTS, { paneId: "w1:p1", cwd: "/other", socket: null });
+    const out = cardSignal([], snapshot(rows), ENVIRONMENTS, { paneId: "w1:p1", cwd: "/other", socket: null }, NO_AMBIENT_SOCKET);
     expect(out.empty).toBe(false);
   });
 
@@ -83,7 +84,7 @@ describe("cardSignal", () => {
       id: "t1", title: "T", description: "", status: "todo", priority: null,
       createdAt: 1, updatedAt: 1, log: [], sessions: [link({ sessionId: null })],
     }] });
-    const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane);
+    const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane, NO_AMBIENT_SOCKET);
     expect(out.empty).toBe(true);
   });
 
@@ -93,7 +94,7 @@ describe("cardSignal", () => {
       createdAt: 1, updatedAt: 1, log: [], sessions: [link({ paneId: "old:p9", sessionId: SID })],
     }] });
     // The live row now sits on a different paneId, matching what the caller asks about.
-    const out = cardSignal([b], snapshot([row({ paneId: "w1:p1", sessionId: SID })]), ENVIRONMENTS, pane);
+    const out = cardSignal([b], snapshot([row({ paneId: "w1:p1", sessionId: SID })]), ENVIRONMENTS, pane, NO_AMBIENT_SOCKET);
     expect(out.empty).toBe(true);
   });
 
@@ -102,7 +103,7 @@ describe("cardSignal", () => {
       id: "t1", title: "T", description: "", status: "done", priority: null,
       createdAt: 1, updatedAt: 1, log: [], sessions: [link({})],
     }] });
-    const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane);
+    const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane, NO_AMBIENT_SOCKET);
     expect(out.empty).toBe(true);
   });
 
@@ -115,12 +116,25 @@ describe("cardSignal", () => {
         link({}),
       ],
     }] });
-    const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane);
+    const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, pane, NO_AMBIENT_SOCKET);
     expect(out.empty).toBe(true);
   });
 
   it("reports not-empty with an empty board list", () => {
-    const out = cardSignal([], snapshot([row({})]), ENVIRONMENTS, pane);
+    const out = cardSignal([], snapshot([row({})]), ENVIRONMENTS, pane, NO_AMBIENT_SOCKET);
+    expect(out.empty).toBe(false);
+  });
+
+  // Regression for the T4 misidentification, at the card-signal boundary: a colliding pane id from a
+  // caller whose socket names no local env must not answer using the LOCAL session's card, even though
+  // that card genuinely has a blank description.
+  it("reports not-empty when the pane id collides but the caller's socket names no local env", () => {
+    const b = board({ tasks: [{
+      id: "t1", title: "T", description: "", status: "todo", priority: null,
+      createdAt: 1, updatedAt: 1, log: [], sessions: [link({})],
+    }] });
+    const foreignPane = { paneId: "w1:p1", cwd: "/repo", socket: "/repo/path/to/a/different/herdr/session.sock" };
+    const out = cardSignal([b], snapshot([row({})]), ENVIRONMENTS, foreignPane, NO_AMBIENT_SOCKET);
     expect(out.empty).toBe(false);
   });
 });
