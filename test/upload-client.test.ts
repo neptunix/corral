@@ -56,6 +56,22 @@ describe("uploadFile", () => {
     await expect(uploadFile("e-local", new File([new Uint8Array([1])], "f.png"))).rejects.toThrow("25 MB");
   });
 
+  it("falls back to the HTTP status when an error body is not the expected shape", async () => {
+    stubXhr((x) => { x.status = 502; x.response = null; x.onload?.(); });
+    await expect(uploadFile("e", new File([new Uint8Array([1])], "f"))).rejects.toThrow("HTTP 502");
+  });
+
+  it("ignores progress events that cannot be turned into a fraction", async () => {
+    stubXhr((x) => {
+      x.upload.onprogress?.({ lengthComputable: false, loaded: 1, total: 0 });
+      x.upload.onprogress?.({ lengthComputable: true, loaded: 1, total: 0 });
+      x.status = 200; x.response = { path: "/p" }; x.onload?.();
+    });
+    const seen: number[] = [];
+    await uploadFile("e", new File([new Uint8Array([1])], "f"), (f) => seen.push(f));
+    expect(seen).toEqual([]);
+  });
+
   it("rejects on a network error and on a malformed success body", async () => {
     stubXhr((x) => { x.onerror?.(); });
     await expect(uploadFile("e", new File([new Uint8Array([1])], "f"))).rejects.toThrow("network");

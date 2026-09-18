@@ -673,12 +673,14 @@ export function createApi(opts: {
       }
       const bytes = new Uint8Array(await file.arrayBuffer());
       let dest: string;
-      try {
-        dest = env.kind === "remote"
-          ? await writeRemote(env, { name: sanitizeUploadName(file.name), bytes })
-          : await writeUploadFile({ root: uploadRoot, originalName: file.name, bytes });
-      } catch (err) {
-        return c.json({ error: { code: "upload_failed", message: err instanceof Error ? err.message : String(err) } }, 502);
+      if (env.kind === "remote") {
+        try {
+          dest = await writeRemote(env, { name: sanitizeUploadName(file.name), bytes });
+        } catch (err) {
+          return c.json({ error: { code: "upload_failed", message: err instanceof Error ? err.message : String(err) } }, 502);
+        }
+      } else {
+        dest = await writeUploadFile({ root: uploadRoot, originalName: file.name, bytes });
       }
       // Audit (SEC-6 posture): record the write, never the contents.
       console.warn(`[upload] env=${env.id} bytes=${String(bytes.byteLength)} path=${dest}`);
@@ -1501,8 +1503,9 @@ export function createApi(opts: {
     // This is only the BACKSTOP: the launch command deletes the brief itself once it has read it
     // (server/spawn.ts), so this fires on a pane that never ran the command. The delay is deliberate
     // and generous; see config.ts BRIEF_CLEANUP_DELAY_MS.
-    // Local only: a remote brief lives in a private dir on the remote and is removed by the launch
-    // command that reads it (there is no corral-side handle on that filesystem to unlink from).
+    // Local only: corral has no handle on a remote filesystem to unlink from. The launch command
+    // removes the remote brief file once it has read it; the empty private directory (and the file,
+    // if the pane never ran the command) is left to the remote OS's temp cleaning.
     if (briefPath !== undefined && targetEnv.kind === "local") {
       const bp = briefPath;
       void spawnPromise.finally(() => {

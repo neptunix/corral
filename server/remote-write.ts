@@ -10,8 +10,8 @@ type RemoteEnv = Extract<HerdrEnv, { readonly kind: "remote" }>;
 // Runs under `sh -c` on the remote so it does not depend on the login shell's syntax, with the file
 // name passed as a positional parameter ($1) rather than spliced into the script. mktemp -d makes a
 // 0700 directory (and umask 077 the file), so a file dropped into a shared /tmp is readable by the
-// remote user only. On failure after the directory exists it is removed again, so a transfer aborted
-// mid-stream leaves nothing behind.
+// remote user only. When `cat` fails the directory is removed again; a client killed by the timeout
+// is best-effort only, and whatever it leaves is left to the remote OS's temp cleaning.
 const REMOTE_SCRIPT =
   'umask 077; d=$(mktemp -d "${TMPDIR:-/tmp}/corral-upload.XXXXXX") || exit 1; ' +
   'if cat > "$d/$1"; then printf %s "$d/$1"; else rm -rf "$d"; exit 1; fi';
@@ -19,8 +19,8 @@ const REMOTE_SCRIPT =
 // The whole transfer is bounded, not just the connect: ConnectTimeout does not apply to a client
 // attaching to an already-running shared master, so a stalled link would otherwise hang forever.
 // The budget grows with the payload so a 25 MB file on a slow link is not cut off at a fixed limit.
-const BASE_TIMEOUT_MS = 20_000;
-const PER_MB_TIMEOUT_MS = 6_000;
+const BASE_TIMEOUT_MS = 30_000;
+const PER_MB_TIMEOUT_MS = 20_000;
 const MAX_CAPTURE_CHARS = 64 * 1024;
 const REMOTE_PATH_RE = /^\/.+$/;
 
@@ -44,7 +44,7 @@ export function remoteWriteTimeoutMs(byteLength: number): number {
  * Write `bytes` to `<remote tmp>/corral-upload.<random>/<name>` on a remote env over the shared ssh
  * connection and return the file's absolute remote path. `name` must already be a single safe
  * basename (sanitizeUploadName). The caller owns lifetime: the private directory is left in the
- * remote's temp dir, which the OS clears; a brief is removed by the launch command that reads it.
+ * remote's temp dir, which the OS clears; a brief file is removed by the launch command that reads it.
  */
 export function writeRemoteFile(
   env: RemoteEnv,

@@ -1,4 +1,8 @@
+import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { HerdrEnv } from "../environments.ts";
@@ -110,5 +114,61 @@ describe("writeRemoteFile", () => {
 
   it("scales the timeout with payload size", () => {
     expect(remoteWriteTimeoutMs(25 * 1024 * 1024)).toBeGreaterThan(remoteWriteTimeoutMs(1024));
+  });
+});
+
+// Runs the REAL remote command under a local `sh` (the last ssh argument is exactly what the remote
+// login shell would receive), so the script itself is exercised, not just its argv.
+describe("writeRemoteFile remote script (run under a local sh)", () => {
+  function runLocally(tmp: string): SpawnSsh {
+    return (_file, args) => spawn("sh", ["-c", args.at(-1) ?? ""], { env: { ...process.env, TMPDIR: tmp } });
+  }
+  function scratch(): { dir: string; done: () => void } {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "remote-write-"));
+    return { dir, done: () => { rmSync(dir, { recursive: true, force: true }); } };
+  }
+
+  it("writes the bytes into a private 0700 directory with a 0600 file", async () => {
+    const s = scratch();
+    try {
+      const p = await writeRemoteFile(env, { name: "shot.png", bytes: new Uint8Array([9, 8, 7]), spawnFn: runLocally(s.dir) });
+      expect(p.startsWith(s.dir + path.sep + "corral-upload.")).toBe(true);
+      expect([...readFileSync(p)]).toEqual([9, 8, 7]);
+      expect(statSync(path.dirname(p)).mode & 0o777).toBe(0o700);
+      expect(statSync(p).mode & 0o777).toBe(0o600);
+    } finally { s.done(); }
+  });
+
+  it("keeps hostile names literal and executes nothing", async () => {
+    const s = scratch();
+    try {
+      for (const name of ["a b;touch pwned", "$(touch pwned2)", "it's", "-x", "`touch pwned3`"]) {
+        const p = await writeRemoteFile(env, { name, bytes: new Uint8Array([1]), spawnFn: runLocally(s.dir) });
+        expect(path.basename(p)).toBe(name);
+        expect(existsSync(p)).toBe(true);
+      }
+      expect(readdirSync(s.dir).filter((e) => !e.startsWith("corral-upload."))).toEqual([]);
+    } finally { s.done(); }
+  });
+
+  it("handles an empty payload", async () => {
+    const s = scratch();
+    try {
+      const p = await writeRemoteFile(env, { name: "empty", bytes: new Uint8Array(), spawnFn: runLocally(s.dir) });
+      expect(statSync(p).size).toBe(0);
+    } finally { s.done(); }
+  });
+
+  it("fails and leaves nothing behind when the file cannot be created", async () => {
+    const s = scratch();
+    try {
+      // A name longer than the filesystem allows makes `cat >` fail after mktemp succeeded.
+      await expect(writeRemoteFile(env, { name: "x".repeat(300), bytes: new Uint8Array([1]), spawnFn: runLocally(s.dir) })).rejects.toThrow("remote write failed");
+      expect(readdirSync(s.dir)).toEqual([]);
+    } finally { s.done(); }
+  });
+
+  it("fails when the temp dir is unusable", async () => {
+    await expect(writeRemoteFile(env, { name: "f", bytes: new Uint8Array(), spawnFn: runLocally("/nonexistent-corral-tmp") })).rejects.toThrow("remote write failed");
   });
 });
