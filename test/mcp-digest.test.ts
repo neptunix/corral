@@ -940,6 +940,91 @@ describe("formatWhoami", () => {
     expect(out).not.toContain("z".repeat(201));
     expect(accountLine?.endsWith("…")).toBe(true);
   });
+
+  describe("spawned by", () => {
+    function withSpawnedBy(spawnedBy: WhoamiTask["spawnedBy"]) {
+      return formatWhoami({ ...resolved, task: resolved.task === null ? null : { ...resolved.task, spawnedBy } });
+    }
+
+    it("omits the line when spawnedBy is null (unknown origin)", () => {
+      const out = withSpawnedBy(null);
+      expect(out).not.toContain("spawned by:");
+    });
+
+    it("renders \"operator\"", () => {
+      const out = withSpawnedBy("operator");
+      const line = out.split("\n").find((l) => l.startsWith("spawned by:"));
+      expect(line).toBe("spawned by: operator");
+    });
+
+    it("renders a running, captured parent as an address, right after you are:", () => {
+      const out = withSpawnedBy({ name: "orchestrator", running: true, captured: true, account: null });
+      const lines = out.split("\n");
+      const idx = lines.findIndex((l) => l.startsWith("you are:"));
+      expect(lines[idx + 1]).toBe("spawned by: orchestrator (running)");
+    });
+
+    it("marks a running, uncaptured parent as not an address", () => {
+      const out = withSpawnedBy({ name: "orch-tab", running: true, captured: false, account: null });
+      const line = out.split("\n").find((l) => l.startsWith("spawned by:"));
+      expect(line).toBe("spawned by: orch-tab (running)  (name not captured — not an address)");
+    });
+
+    it("renders a closed parent with no capture marker", () => {
+      const out = withSpawnedBy({ name: "orch-tab", running: false, captured: true, account: null });
+      const line = out.split("\n").find((l) => l.startsWith("spawned by:"));
+      expect(line).toBe("spawned by: orch-tab (closed)");
+    });
+
+    it("omits the line when the resolved parent has no usable name", () => {
+      const out = withSpawnedBy({ name: null, running: false, captured: true, account: null });
+      expect(out).not.toContain("spawned by:");
+    });
+
+    it("marks a parent on a different account", () => {
+      // resolved.session.account is "user@example.com" (self); the parent is on another account.
+      const out = withSpawnedBy({ name: "orchestrator", running: true, captured: true, account: "other@example.com" });
+      const line = out.split("\n").find((l) => l.startsWith("spawned by:"));
+      expect(line).toBe("spawned by: orchestrator (running)  account: other@example.com");
+    });
+
+    it("stays silent about the account when the parent is on the same account", () => {
+      const out = withSpawnedBy({ name: "orchestrator", running: true, captured: true, account: "user@example.com" });
+      const line = out.split("\n").find((l) => l.startsWith("spawned by:"));
+      expect(line).toBe("spawned by: orchestrator (running)");
+    });
+
+    it("omits the line entirely when the session is unbound (no task)", () => {
+      const out = formatWhoami({ ...resolved, task: null });
+      expect(out).not.toContain("spawned by:");
+    });
+  });
+
+  describe("card-session account marker", () => {
+    it("marks a card session on another account", () => {
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : {
+          ...resolved.task,
+          sessions: [{ ...resolved.task.sessions[0]!, account: "other@example.com" }],
+        },
+      });
+      const line = out.split("\n").find((l) => l.includes("work-local:w1:p1"));
+      expect(line).toContain("account: other@example.com");
+    });
+
+    it("stays silent for a card session on our own account", () => {
+      const out = formatWhoami({
+        ...resolved,
+        task: resolved.task === null ? null : {
+          ...resolved.task,
+          sessions: [{ ...resolved.task.sessions[0]!, account: "user@example.com" }],
+        },
+      });
+      const line = out.split("\n").find((l) => l.includes("work-local:w1:p1"));
+      expect(line).not.toContain("account:");
+    });
+  });
 });
 
 // formatCardDetail backs corral_task_read: the one formatter whose contract is "give me the whole

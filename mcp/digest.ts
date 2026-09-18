@@ -74,6 +74,18 @@ export const LOG_BLOCK_MAX = 40_000;
 // Shared cap for the smaller single-line identity fields (cwd, statusline account, env error text)
 // that aren't task prose but still carry their own truncation budget.
 const IDENTITY_FIELD_MAX = 200;
+
+/**
+ * The cross-account marker, shared by every row that names another session's account (the fleet
+ * row, a card session, the spawned-by line): shown only when BOTH accounts are known and they
+ * differ. Unknown is not "ours" — a session with no captured account never gets marked, which
+ * would invent reachability the caller would act on.
+ */
+function accountMarker(selfAccount: string | null, other: string | null): string {
+  return selfAccount === null || other === null || other === selfAccount
+    ? ""
+    : `  account: ${truncate(oneLine(other), IDENTITY_FIELD_MAX)}`;
+}
 // Row caps for formatWhoami's two caller-shaped lists (attached sessions, column ids): both are
 // bounded by a live board/task config, same defense-in-depth reasoning as formatFleet's `limit` and
 // formatTaskPicker's TASK_PICKER_ROW_LIMIT — neither list has a caller-supplied argument to clamp,
@@ -265,9 +277,7 @@ export function formatFleet(input: {
     // unreachable row costs one send that answers "not reachable", whereas plumbing the uuid through
     // the whoami schema costs a wider change than the miss is worth.
     const account = r.statusline?.account?.email ?? r.statusline?.account?.org ?? null;
-    const acctCol = selfAccount === null || account === null || account === selfAccount
-      ? ""
-      : `  account: ${truncate(oneLine(account), IDENTITY_FIELD_MAX)}`;
+    const acctCol = accountMarker(selfAccount, account);
     // A session on another machine answers to its name only over Remote Control. Stated where it
     // changes the answer — a remote env with rc explicitly off — and nowhere else: a local session
     // is reachable regardless, and `null` is an unread registry, not a verified "off".
@@ -774,6 +784,19 @@ export function formatCardDetail(t: CardDetailTarget, log?: LogView): string {
   );
 }
 
+/**
+ * The "spawned by" line right after `you are:`, or null to omit it entirely — no line beats a
+ * misleading one. Omitted whenever there is nothing to send to: unknown origin (null), or a
+ * resolved parent with no usable name (neither live nor a stored link name survived).
+ */
+function formatSpawnedByLine(spawnedBy: WhoamiTask["spawnedBy"], selfAccount: string | null): string | null {
+  if (spawnedBy === null) return null;
+  if (spawnedBy === "operator") return "spawned by: operator";
+  if (spawnedBy.name === null) return null;
+  const capturedNote = spawnedBy.running && !spawnedBy.captured ? "  (name not captured — not an address)" : "";
+  return `spawned by: ${spawnedBy.name} (${spawnedBy.running ? "running" : "closed"})${capturedNote}${accountMarker(selfAccount, spawnedBy.account)}`;
+}
+
 /** The whoami rendering. Compact but complete — this is the one call every session makes at start. */
 export function formatWhoami(w: WhoamiResolved): string {
   const s = w.session;
@@ -783,11 +806,13 @@ export function formatWhoami(w: WhoamiResolved): string {
   // workspaceLabel, model, ids) is left as-is and swept by `emit` below.
   const cwd = truncate(oneLine(s.cwd), IDENTITY_FIELD_MAX);
   const account = s.account === null ? "—" : truncate(oneLine(s.account), IDENTITY_FIELD_MAX);
+  const spawnedByLine = w.task === null ? null : formatSpawnedByLine(w.task.spawnedBy, s.account);
   const lines = [
     // The name, or an explicitly-labelled stand-in. A session reads this line to learn the address it
     // hands to a peer, so an uncaptured name must not silently become the tab label — for a RESUMED
     // session that label is the slugified card name, i.e. exactly the string that is not the address.
     `you are: ${s.claudeName ?? `${s.tabLabel} (tab label, name not captured)`}  (${s.status})`,
+    ...(spawnedByLine === null ? [] : [spawnedByLine]),
     `env: ${s.envLabel} [${s.env}]   pane: ${s.paneId}   tab: ${s.tabLabel}   workspace: ${s.workspaceLabel}`,
     `session id: ${s.sessionId ?? "not registered yet"}`,
     `cwd: ${cwd}`,
@@ -833,7 +858,7 @@ export function formatWhoami(w: WhoamiResolved): string {
         const claude = cs.claudeName === cs.name
           ? ""
           : cs.claudeName === null ? "  (claude name not captured)" : `  (as claude: ${cs.claudeName})`;
-        return `  ${cs.self ? "*" : " "} ${cs.name}${claude}  ${cs.key}  ${cs.status}  ctx ${ctx}`;
+        return `  ${cs.self ? "*" : " "} ${cs.name}${claude}  ${cs.key}  ${cs.status}  ctx ${ctx}${accountMarker(s.account, cs.account)}`;
       }),
     );
     if (sessionsDropped > 0) {
