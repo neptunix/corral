@@ -826,9 +826,8 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     expect(call.sessionName).toBe("my-task-4");
   });
 
-  // There is no per-card session cap any more. A card that would have hit the old 26-session limit,
-  // and one with 30 sessions already numbered past the old letter range, must both still spawn.
-  it("still spawns past the old 26-session cap, numbering past 30", async () => {
+  // Session count per card is unbounded — a card with 30 sessions already numbered still spawns.
+  it("keeps numbering past 30 already-taken session names", async () => {
     const many = Array.from({ length: 30 }, (_, i) => `my-task-${String(i + 1)}`);
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, many);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {

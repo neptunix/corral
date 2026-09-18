@@ -167,7 +167,7 @@ describe("composeSessionName — the fallback prefix", () => {
     expect(composeSessionName("my-task", "", () => false, 1)).toBeNull();
   });
 
-  // Numbering goes well past the old 26-letter cap — there is no per-card session limit any more.
+  // Numbering is unbounded — no per-card session limit.
   it("keeps numbering past 30 taken names", () => {
     const taken = Array.from({ length: 30 }, (_, i) => `my-task-${String(i + 1)}`);
     expect(composeSessionName("my-task", "", except(taken), 30)).toBe("my-task-31");

@@ -1436,8 +1436,8 @@ export function createApi(opts: {
     const sessionName = composeSessionName(namePrefix, parsed.data.name ?? "", (n) => !usedNames.has(n), usedNames.size);
     if (sessionName === null) {
       // Type-required null guard only: composeSessionName tries `usedNames.size + 2` numbered
-      // candidates, which by pigeonhole always contains a free one, so this branch is unreachable in
-      // practice — there is no cap on session count any more.
+      // candidates, which by pigeonhole always contains one that is free, so this branch is
+      // unreachable in practice.
       return c.json({ error: { code: "name_unavailable", message: "no free session name left — choose a different name" } }, 409);
     }
     // Brief/start-command delivery is local-only: the file is written on the corral host, and the

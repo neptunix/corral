@@ -56,8 +56,9 @@ export const LOG_LINE_PREFIX = "  > ";
 // operator, the highest-trust source here.
 export const LOG_ENTRY_HEADER_MARK = "# ";
 export const LOG_ENTRY_TEXT_MARK = "  ";
-// How many entries a read returns. The log is capped at 200 stored entries; this is the reading
-// window, and the count of what it leaves out is stated rather than implied.
+// How many entries a read returns. The log itself is capped at LOG_NOTE_QUOTA notes plus
+// LOG_SYSTEM_QUOTA system entries; this is the reading window, and the count of what it leaves out
+// is stated rather than implied.
 export const LOG_ENTRIES_SHOWN = 40;
 // Per-line cap INSIDE an entry, measured on the TEXT — the gutter and the mark are charged on top,
 // because they are this module's own framing and not part of what the writer wrote. Measuring the
@@ -586,9 +587,7 @@ export interface LogView {
   /**
    * True when this view came from a `before` cursor — a follow-up page, not the newest one.
    * Distinguishes "no older entries remain" (an empty last page) from "the log is empty" when
-   * `shown` is `[]`; without it, paging to the end reads identically to a card with no history at
-   * all. Optional so every existing call site (and test fixture) that predates paging still
-   * compiles — absence means "not paged", the same as `false`.
+   * `shown` is `[]`. Optional: absence means "not paged", the same as `false`.
    */
   readonly paged?: boolean | undefined;
 }
@@ -670,13 +669,10 @@ function fitEntryToBudget(lines: readonly string[], budget: number): { readonly 
  * budget. Every line pushed here — headers and markers included — is a literal produced by this
  * function; caller text only ever appears after the gutter.
  *
- * The block budget is spent NEWEST first, whole entries only, dropping from the OLD end — the
- * opposite of the header/text per-line caps above. Spending it oldest-first (as this used to) drops
- * the newest entries once the budget runs out, which is backwards for a reader and, with paging,
- * leaves holes: a page fetched with `before` would render fine, but the very first (cursor-less)
- * read of a large log would cut off the entries a reader most wants. An entry that doesn't fit is
- * simply not shown, and counts toward "older not shown" — except the single newest entry, which is
- * truncated in place if it alone exceeds the whole budget, so a read is never entirely empty.
+ * The block budget is spent NEWEST first, whole entries only — the opposite of the header/text
+ * per-line caps above. An entry that doesn't fit is simply not shown, and counts toward "older not
+ * shown"; the single newest entry is truncated in place, rather than dropped, if it alone exceeds
+ * the whole budget, so a read is never entirely empty.
  */
 function renderLog(view: LogView): string[] {
   const filterNote = view.kinds === null ? "" : ` filtered to ${view.kinds.join(", ")}`;

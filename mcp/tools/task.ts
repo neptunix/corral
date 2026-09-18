@@ -141,21 +141,20 @@ export interface ReadArgs {
  */
 function logView(log: readonly LogEntry[], kind: readonly LogKind[] | undefined, before: string | undefined): LogView | { readonly refusal: string } {
   const kinds = kind === undefined || kind.length === 0 ? null : [...kind];
-  if (before === undefined) {
-    const matched = kinds === null ? log : log.filter((e) => kinds.includes(e.kind));
-    const shown = matched.slice(-LOG_ENTRIES_SHOWN);
-    return { shown, total: log.length, hidden: matched.length - shown.length, kinds, unavailable: false };
-  }
-  const cursorIndex = log.findIndex((e) => e.id === before);
-  if (cursorIndex === -1) {
-    return { refusal: `no log entry with id "${truncate(oneLine(before), TASK_TITLE_MAX)}" — it may have been evicted since your last read, or the id is wrong. Read again without \`before\` to see the newest page.` };
-  }
   // `log` is append order (oldest first), so everything strictly older than the cursor is the prefix
-  // before its index — filtered by kind the same way the cursor-less branch filters the whole log.
-  const olderInFullLog = log.slice(0, cursorIndex);
-  const matched = kinds === null ? olderInFullLog : olderInFullLog.filter((e) => kinds.includes(e.kind));
+  // before its index in the FULL log — resolved before any kind filter, so an id from a read that
+  // used a different `kind` still resolves.
+  let scope = log;
+  if (before !== undefined) {
+    const cursorIndex = log.findIndex((e) => e.id === before);
+    if (cursorIndex === -1) {
+      return { refusal: `no log entry with id "${truncate(oneLine(before), TASK_TITLE_MAX)}" — it may have been evicted since your last read, or the id is wrong. Read again without \`before\` to see the newest page.` };
+    }
+    scope = log.slice(0, cursorIndex);
+  }
+  const matched = kinds === null ? scope : scope.filter((e) => kinds.includes(e.kind));
   const shown = matched.slice(-LOG_ENTRIES_SHOWN);
-  return { shown, total: log.length, hidden: matched.length - shown.length, kinds, unavailable: false, paged: true };
+  return { shown, total: log.length, hidden: matched.length - shown.length, kinds, unavailable: false, paged: before !== undefined };
 }
 
 export function readHandler(deps: TaskDeps, args: ReadArgs = {}): Promise<string> {

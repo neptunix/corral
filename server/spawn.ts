@@ -102,25 +102,18 @@ export function composeSessionName(
   isFree: (name: string) => boolean,
   taken: number,
 ): string | null {
-  const candidates: string[] = [];
   const maxAttempts = taken + 2;
   const nameSlug = slugify(requested, NAME_MAX);
-  // EITHER/OR. Appending both families let an exhausted requested name fall through to a card-derived
-  // one, so the route answered 200 with a name the agent never asked for instead of 409.
-  if (nameSlug !== "") {
-    candidates.push(nameSlug);
-    for (let n = 2; candidates.length < maxAttempts; n++) {
-      const suffix = `-${String(n)}`;
-      candidates.push(`${slugify(requested, NAME_MAX - suffix.length)}${suffix}`);
-    }
-  } else {
-    const prefix = slugify(fallbackPrefix, NAME_MAX);
-    if (prefix !== "") {
-      for (let n = 1; candidates.length < maxAttempts; n++) {
-        const suffix = `-${String(n)}`;
-        candidates.push(`${slugify(fallbackPrefix, NAME_MAX - suffix.length)}${suffix}`);
-      }
-    }
+  // EITHER/OR: an exhausted requested name never falls through to a card-derived one, so the route
+  // answers 409 rather than 200 with a name the agent never asked for.
+  const base = nameSlug !== "" ? requested : fallbackPrefix;
+  const candidates: string[] = nameSlug !== "" ? [nameSlug] : [];
+  // Requested numbers from -2 (the bare slug above is attempt 1); fallback has no bare form, so it
+  // numbers from -1. An empty base yields "-1", "-2", … which NAME_RE rejects, so this loop
+  // naturally returns null without a separate empty-prefix guard.
+  for (let n = nameSlug !== "" ? 2 : 1; candidates.length < maxAttempts; n++) {
+    const suffix = `-${String(n)}`;
+    candidates.push(`${slugify(base, NAME_MAX - suffix.length)}${suffix}`);
   }
   return candidates.find((c) => NAME_RE.test(c) && isFree(c)) ?? null;
 }

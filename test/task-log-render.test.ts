@@ -189,7 +189,7 @@ describe("formatCardDetail — the log block", () => {
     expect(out).toContain(headerMark);
   });
 
-  it("bounds the whole block against a newline-dense entry, which no per-line cap can stop, dropping from the OLD end", () => {
+  it("bounds the whole block against a newline-dense entry, dropping from the OLD end, with an exact footer", () => {
     // 40 entries x 200 lines: every line is short enough to pass the per-line cap, so only the block
     // budget stands between this and ~200 KB of another session's prose. Each entry carries a
     // distinct id/text so which ones survived the budget can be checked directly.
@@ -204,11 +204,18 @@ describe("formatCardDetail — the log block", () => {
     const block = logLines(out).join("\n");
     expect(block.length).toBeLessThanOrEqual(LOG_BLOCK_MAX);
 
-    // Newest-first filling: the entry that survives is the LAST one appended (id d39), never the
-    // first (id d0) — the bug this fixes dropped the newest and kept the oldest.
-    expect(out).toContain("id:d39");
-    expect(out).not.toContain("id:d0");
-    expect(out).toMatch(/older: \d+ more/);
+    const headerMark = `${LOG_LINE_PREFIX}${LOG_ENTRY_HEADER_MARK}`;
+    const headerIds = out.split("\n")
+      .filter((l) => l.startsWith(headerMark))
+      .map((l) => /id:(\S+)/.exec(l)?.[1] ?? "");
+    const oldestKept = headerIds[0];
+    if (oldestKept === undefined || oldestKept === "") throw new Error("nothing survived the budget");
+    const olderNotShown = dense.length - headerIds.length;
+
+    // Newest-first filling: the surviving entries are a contiguous run ending at the newest (d39).
+    expect(headerIds).toEqual(dense.slice(dense.length - headerIds.length).map((e) => e.id));
+    expect(out).toContain(`, ${String(olderNotShown)} older not shown`);
+    expect(out).toContain(`older: ${String(olderNotShown)} more — call corral_task_read with before: "${oldestKept}"`);
   });
 });
 
@@ -316,6 +323,81 @@ describe("corral_task_read with a log", () => {
       expect(out).toContain("no log entry with id");
       expect(out).toContain("does-not-exist");
       expect(out).not.toContain("note 54"); // did not silently render the newest page instead
+    });
+
+    it("says it reached the oldest entry when `before` names the oldest one", async () => {
+      const log = notesLog(55);
+      const client = stub({ board: async () => boardWith(log) });
+
+      const out = await readHandler({ client, identity: createIdentity(client, ctx) }, { before: "n0" });
+
+      expect(out).toContain("reached the oldest");
+      expect(out).not.toContain("log: (no entries)");
+    });
+
+    it("points the cursor at the 40th-newest match and reminds the caller to repeat the kind filter", async () => {
+      // 45 notes plus system entries interleaved — the cursor must resolve against the FULL log's
+      // positions while counting only the note matches for the 40-entry window.
+      const log = [
+        ...notesLog(45),
+        entry({ id: "s1", kind: "session_closed", atMs: 1_700_000_000_100, text: "closed" }),
+      ];
+      const client = stub({ board: async () => boardWith(log) });
+
+      const out = await readHandler({ client, identity: createIdentity(client, ctx) }, { kind: ["note"] });
+
+      expect(out).toContain("46 entries on the card filtered to note; showing 40, 5 older not shown");
+      expect(out).toContain('older: 5 more filtered to note — call corral_task_read with before: "n5" (pass the same kind filter again, or it reads as "everything")');
+    });
+
+    it("resolves a `before` cursor naming a non-matching kind, returning the matching entries older than it", async () => {
+      const log = [
+        ...notesLog(3),
+        entry({ id: "s1", kind: "session_closed", atMs: 1_700_000_000_050, text: "closed" }),
+        entry({ id: "n_after", atMs: 1_700_000_000_060, text: "note after" }),
+      ];
+      const client = stub({ board: async () => boardWith(log) });
+
+      const out = await readHandler({ client, identity: createIdentity(client, ctx) }, { kind: ["note"], before: "s1" });
+
+      expect(out).not.toContain("no log entry with id");
+      expect(out).toContain("note 0");
+      expect(out).toContain("note 1");
+      expect(out).toContain("note 2");
+      expect(out).not.toContain("note after");
+      expect(out).not.toContain("closed");
+    });
+
+    it("round-trips through every page via readHandler with no gaps or duplicates", async () => {
+      // Entries heavy enough (200 lines each) that a single window of 40 still exceeds LOG_BLOCK_MAX,
+      // forcing a real budget cut within most pages — the scenario the cursor design (oldest KEPT
+      // entry, not the window's oldest) exists to page through without dropping the budget-cut ones.
+      const total = 20;
+      const dense = Array.from({ length: total }, (_, i) =>
+        entry({ id: `d${String(i)}`, atMs: 1_700_000_000_000 + i, text: Array.from({ length: 200 }, () => `z${String(i)}`.repeat(25)).join("\n") }));
+      const client = stub({ board: async () => boardWith(dense) });
+      const headerMark = `${LOG_LINE_PREFIX}${LOG_ENTRY_HEADER_MARK}`;
+
+      const seen: string[] = [];
+      let before: string | undefined;
+      let terminated = false;
+      for (let hop = 0; hop < total; hop++) {
+        const out: string = await readHandler({ client, identity: createIdentity(client, ctx) }, before === undefined ? {} : { before });
+        const ids = out.split("\n")
+          .filter((l) => l.startsWith(headerMark))
+          .map((l) => /id:(\S+)/.exec(l)?.[1] ?? "");
+        seen.push(...ids);
+        const cursor = /before: "(\S+)"/.exec(out)?.[1];
+        if (cursor === undefined) {
+          terminated = true;
+          break;
+        }
+        before = cursor;
+      }
+
+      expect(terminated).toBe(true);
+      expect(new Set(seen).size).toBe(seen.length); // no duplicates across pages
+      expect([...seen].sort()).toEqual(dense.map((e) => e.id).sort()); // no gaps
     });
   });
 

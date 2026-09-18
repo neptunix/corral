@@ -51,8 +51,8 @@ describe("task log quotas", () => {
     expect(log.map((e) => e.text)).toEqual(["a", "b", "c"]);
   });
 
-  // Pins the raised quota itself: a regression back to the old 60 would pass every test above
-  // (they parameterize on the constant) but silently ship the wrong size.
+  // Pins the quota's exact value: every other test parameterizes on the constant, so only this one
+  // catches a wrong value at the constant itself.
   it("holds the note quota at 500", () => {
     expect(LOG_NOTE_QUOTA).toBe(500);
   });
