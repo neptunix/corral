@@ -105,6 +105,7 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
         // A successor spawned without it is unreachable from where the operator asked for it.
         ...((args.remoteControl ?? (me.session.remoteControl === true)) ? { remoteControl: true } : {}),
         ...(repo !== null ? { repo } : { targetWorkspaceId: me.session.workspaceId }),
+        spawnedBy: { sessionId: me.session.sessionId, env: me.session.env, paneId: me.session.paneId },
       });
     } catch (err) {
       // Matched on THAT code alone. Every other bad field on this route returns `validation`, so a

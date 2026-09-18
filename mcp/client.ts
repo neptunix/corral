@@ -119,7 +119,7 @@ export interface CorralClient {
   }): Promise<z.infer<typeof TaskFrameSchema>>;
   patchTask(a: { boardId: string; taskId: string; patch: TaskPatch }): Promise<z.infer<typeof TaskSchema>>;
   attach(a: { boardId: string; taskId: string; env: string; paneId: string; name: string }): Promise<void>;
-  spawn(a: { boardId: string; taskId: string; env: string; brief: string; name?: string | undefined; model?: string | undefined; remoteControl?: boolean | undefined; targetWorkspaceId?: string | undefined; repo?: string | undefined }): Promise<z.infer<typeof SpawnResultSchema>>;
+  spawn(a: { boardId: string; taskId: string; env: string; brief: string; name?: string | undefined; model?: string | undefined; remoteControl?: boolean | undefined; targetWorkspaceId?: string | undefined; repo?: string | undefined; spawnedBy?: { sessionId: string | null; env: string; paneId: string } | undefined }): Promise<z.infer<typeof SpawnResultSchema>>;
   closeSession(a: { boardId: string; taskId: string; env: string; paneId: string; sessionId: string | null; deferred?: boolean | undefined }): Promise<void>;
   /** The configured repository NAMES of one environment, from the route the browser's "Into" picker
    *  already uses. Read only when a spawn is being refused, so the happy path pays nothing. */
@@ -220,6 +220,7 @@ export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralC
           // and an explicit null as "create a new space".
           ...(a.targetWorkspaceId === undefined ? {} : { targetWorkspaceId: a.targetWorkspaceId }),
           ...(a.repo === undefined ? {} : { repo: a.repo }),
+          ...(a.spawnedBy === undefined ? {} : { spawnedBy: a.spawnedBy }),
         }),
         SpawnResultSchema,
       ),

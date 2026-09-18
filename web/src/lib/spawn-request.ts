@@ -33,5 +33,6 @@ export function buildSpawnRequest(state: SpawnFormState): SpawnRequestBody {
     ...(state.model === null ? {} : { model: state.model }),
     ...(state.remoteControl ? { remoteControl: true } : {}),
     ...(command === null || command === "" ? {} : { startCommand: command }),
+    spawnedBy: "operator",
   };
 }

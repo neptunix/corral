@@ -290,6 +290,15 @@ describe("spawnHandler", () => {
     expect(seen).toEqual([undefined]);
   });
 
+  it("forwards the caller's own identity as spawnedBy", async () => {
+    const seen: unknown[] = [];
+    const c = stub({
+      spawn: async (a) => { seen.push(a.spawnedBy); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
+    });
+    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
+    expect(seen).toEqual([{ sessionId: SID, env: "work-local", paneId: "w1:p1" }]);
+  });
+
   it("requires a brief", async () => {
     const c = stub({});
     expect((await spawnHandler({ client: c, identity: idOf(c) }, { brief: "  " })).toLowerCase())

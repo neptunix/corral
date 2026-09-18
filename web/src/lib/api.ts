@@ -57,6 +57,8 @@ export interface SpawnRequestBody {
   readonly model?: string;
   readonly remoteControl?: true;
   readonly startCommand?: string;
+  // The web UI is always the operator — it never spawns on another session's behalf.
+  readonly spawnedBy?: "operator";
 }
 
 export const api = {

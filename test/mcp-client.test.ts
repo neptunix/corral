@@ -188,6 +188,17 @@ describe("corral client", () => {
   // The existing "exact JSON body" test above asserts `toEqual({ env, brief })`. Absent optionals must
   // stay ABSENT rather than serialising as `"name": null` — the route's Zod schema would still accept
   // it, but the body would stop being the minimal one that test pins.
+  it("sends spawnedBy in the spawn body when supplied", async () => {
+    const bodies: unknown[] = [];
+    const client = createClient("http://127.0.0.1:8787", async (_input, init) => {
+      bodies.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
+      return jsonResponse({ env: "work-local", paneId: "w2:p3", name: "task-a", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false });
+    });
+    const spawnedBy = { sessionId: "11111111-1111-1111-1111-111111111111", env: "work-local", paneId: "w1:p1" };
+    await client.spawn({ boardId: "b", taskId: "t_abcdefg", env: "work-local", brief: "go", spawnedBy });
+    expect(bodies[0]).toEqual({ env: "work-local", brief: "go", spawnedBy });
+  });
+
   it("omits name, model and remoteControl from the spawn body when absent", async () => {
     const bodies: unknown[] = [];
     const client = createClient("http://127.0.0.1:8787", async (_input, init) => {
