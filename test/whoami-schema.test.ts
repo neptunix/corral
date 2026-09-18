@@ -62,4 +62,29 @@ describe("whoami schema", () => {
     if (!parsed.resolved) throw new Error("expected resolved");
     expect(parsed.task).toBeNull();
   });
+
+  it("defaults task.spawnedBy to null for a server that predates the field", () => {
+    const parsed = WhoamiResponseSchema.parse(resolved);
+    if (!parsed.resolved) throw new Error("expected resolved");
+    expect(parsed.task?.spawnedBy).toBeNull();
+  });
+
+  it("accepts a resolved parent spawnedBy", () => {
+    const spawnedBy = { name: "orchestrator", running: true, captured: true, account: null };
+    const parsed = WhoamiResponseSchema.parse({ ...resolved, task: { ...resolved.task, spawnedBy } });
+    if (!parsed.resolved) throw new Error("expected resolved");
+    expect(parsed.task?.spawnedBy).toEqual(spawnedBy);
+  });
+
+  it("accepts spawnedBy: \"operator\"", () => {
+    const parsed = WhoamiResponseSchema.parse({ ...resolved, task: { ...resolved.task, spawnedBy: "operator" } });
+    if (!parsed.resolved) throw new Error("expected resolved");
+    expect(parsed.task?.spawnedBy).toBe("operator");
+  });
+
+  it("defaults a card session's account to null for a server that predates the field", () => {
+    const parsed = WhoamiResponseSchema.parse(resolved);
+    if (!parsed.resolved) throw new Error("expected resolved");
+    expect(parsed.task?.sessions[0]?.account).toBeNull();
+  });
 });

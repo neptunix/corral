@@ -14,7 +14,7 @@ const boundTask: WhoamiTask = {
   boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "T", description: "",
   status: "doing", priority: null,
   columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
-  sessions: [], logCount: 0, lastLogAtMs: null,
+  sessions: [], logCount: 0, lastLogAtMs: null, spawnedBy: null,
 };
 const bound: WhoamiResponse = {
   resolved: true,
@@ -467,7 +467,7 @@ describe("closeHandler", () => {
         ...bound,
         task: {
           ...boundTask,
-          sessions: [{ name: "alpha", claudeName: null, key: "work-local:w1:p1", sessionId: null, status: "working", detached: false, ctxPct: 41, self: true }],
+          sessions: [{ name: "alpha", claudeName: null, key: "work-local:w1:p1", sessionId: null, status: "working", detached: false, ctxPct: 41, self: true, account: null }],
         },
       }),
       closeSession: async (a) => { calls.push(a.sessionId); },
@@ -492,8 +492,8 @@ describe("closeHandler", () => {
         task: {
           ...boundTask,
           sessions: [
-            { name: "alpha-old", claudeName: null, key: "work-local:w1:p1", sessionId: SID_B, status: "idle", detached: true, ctxPct: null, self: false },
-            { name: "alpha", claudeName: null, key: "work-local:w1:p1", sessionId: SID, status: "working", detached: false, ctxPct: 41, self: true },
+            { name: "alpha-old", claudeName: null, key: "work-local:w1:p1", sessionId: SID_B, status: "idle", detached: true, ctxPct: null, self: false, account: null },
+            { name: "alpha", claudeName: null, key: "work-local:w1:p1", sessionId: SID, status: "working", detached: false, ctxPct: 41, self: true, account: null },
           ],
         },
       }),
@@ -511,7 +511,7 @@ describe("closeHandler", () => {
         ...bound,
         task: {
           ...boundTask,
-          sessions: [{ name: "t-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false }],
+          sessions: [{ name: "t-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false, account: null }],
         },
       }),
       closeSession: async (a) => { calls.push(`${a.env}:${a.paneId}`); },
@@ -528,7 +528,7 @@ describe("closeHandler", () => {
         ...bound,
         task: {
           ...boundTask,
-          sessions: [{ name: "t-b", claudeName: null, key: "work-local:w1:p2", sessionId: SID_B, status: "working", detached: false, ctxPct: 10, self: false }],
+          sessions: [{ name: "t-b", claudeName: null, key: "work-local:w1:p2", sessionId: SID_B, status: "working", detached: false, ctxPct: 10, self: false, account: null }],
         },
       }),
       closeSession: async (a) => { sids.push(a.sessionId); },
@@ -557,7 +557,7 @@ describe("closeHandler", () => {
         ...bound,
         task: {
           ...boundTask,
-          sessions: [{ name: "t-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false }],
+          sessions: [{ name: "t-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false, account: null }],
         },
       }),
       closeSession: async (a) => { calls.push(a.paneId); },

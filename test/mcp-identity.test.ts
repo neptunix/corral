@@ -16,7 +16,7 @@ const resolvedBody: WhoamiResponse = {
   task: {
     boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "T",
     description: "", status: "doing", priority: null, columns: [{ id: "doing", label: "Doing", closed: false }],
-    sessions: [], logCount: 0, lastLogAtMs: null,
+    sessions: [], logCount: 0, lastLogAtMs: null, spawnedBy: null,
   },
   envs: [],
 };

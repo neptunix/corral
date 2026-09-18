@@ -14,7 +14,7 @@ const boundTask: WhoamiTask = {
   boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Own card", description: "own desc",
   status: "doing", priority: null,
   columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
-  sessions: [], logCount: 0, lastLogAtMs: null,
+  sessions: [], logCount: 0, lastLogAtMs: null, spawnedBy: null,
 };
 const bound: WhoamiResponse = {
   resolved: true,
@@ -201,7 +201,7 @@ describe("the invariant — staffing another card grants no right to close its s
     // from this session's card list and close must refuse it.
     const withSibling: WhoamiResponse = {
       ...bound,
-      task: { ...boundTask, sessions: [{ name: "self", claudeName: null, key: "work-local:w1:p1", sessionId: SID, status: "working", detached: false, ctxPct: null, self: true }] },
+      task: { ...boundTask, sessions: [{ name: "self", claudeName: null, key: "work-local:w1:p1", sessionId: SID, status: "working", detached: false, ctxPct: null, self: true, account: null }] },
     };
     const out = await closeHandler(deps(stub({ whoami: async () => withSibling })), { target: "work-local:w2:p1" });
     expect(out).toContain("not attached to this session's card");

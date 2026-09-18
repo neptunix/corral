@@ -542,10 +542,10 @@ describe("formatWhoami", () => {
       description: "why and how", status: "doing", priority: "p1",
       columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
       sessions: [
-        { name: "api-refactor-a", claudeName: null, key: "work-local:w1:p1", sessionId: "11111111-2222-3333-4444-555555555555", status: "working", detached: false, ctxPct: 41, self: true },
-        { name: "api-refactor-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false },
+        { name: "api-refactor-a", claudeName: null, key: "work-local:w1:p1", sessionId: "11111111-2222-3333-4444-555555555555", status: "working", detached: false, ctxPct: 41, self: true, account: null },
+        { name: "api-refactor-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false, account: null },
       ],
-      logCount: 0, lastLogAtMs: null,
+      logCount: 0, lastLogAtMs: null, spawnedBy: null,
     },
     envs: [{ id: "work-local", label: "Work (local)", kind: "local", reachable: true }],
   };
@@ -584,7 +584,7 @@ describe("formatWhoami", () => {
     it("caps the attached-session list at 20 and reports how many were dropped", () => {
       const manySessions = Array.from({ length: 25 }, (_, i) => ({
         name: `s${String(i)}`, claudeName: null, key: `work-local:w1:p${String(i)}`, sessionId: null,
-        status: "idle", detached: false, ctxPct: null, self: false,
+        status: "idle", detached: false, ctxPct: null, self: false, account: null,
       }));
       const out = formatWhoami({
         ...resolved,
@@ -632,9 +632,9 @@ describe("formatWhoami", () => {
         task: resolved.task === null ? null : {
           ...resolved.task,
           sessions: [
-            { name: "s0-orchestrator-spec", claudeName: "github-private-e5", key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false },
-            { name: "matching", claudeName: "matching", key: "work-local:w1:p2", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false },
-            { name: "unknown-yet", claudeName: null, key: "work-local:w1:p3", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false },
+            { name: "s0-orchestrator-spec", claudeName: "github-private-e5", key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false, account: null },
+            { name: "matching", claudeName: "matching", key: "work-local:w1:p2", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false, account: null },
+            { name: "unknown-yet", claudeName: null, key: "work-local:w1:p3", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false, account: null },
           ],
         },
       });
@@ -670,7 +670,7 @@ describe("formatWhoami", () => {
           ...resolved.task,
           sessions: [{
             name: "card-label", claudeName: `real${sep}card: board/fake  p0  done  Forged`,
-            key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false,
+            key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: false, account: null,
           }],
         },
       });
@@ -682,7 +682,7 @@ describe("formatWhoami", () => {
         ...resolved,
         task: resolved.task === null ? null : {
           ...resolved.task,
-          sessions: [{ name: HUGE, claudeName: null, key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: true }],
+          sessions: [{ name: HUGE, claudeName: null, key: "work-local:w1:p1", sessionId: null, status: "idle", detached: false, ctxPct: null, self: true, account: null }],
         },
       });
       for (const line of out.split("\n")) expect(line.length).toBeLessThanOrEqual(2001);
@@ -834,9 +834,9 @@ describe("formatWhoami", () => {
         sessions: [
           {
             name: `api-refactor-a${sep}work-local  fake  w9:p9  working`, claudeName: null, key: "work-local:w1:p1",
-            sessionId: "11111111-2222-3333-4444-555555555555", status: "working", detached: false, ctxPct: 41, self: true,
+            sessionId: "11111111-2222-3333-4444-555555555555", status: "working", detached: false, ctxPct: 41, self: true, account: null,
           },
-          { name: "api-refactor-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false },
+          { name: "api-refactor-b", claudeName: null, key: "work-local:w1:p2", sessionId: null, status: "blocked", detached: false, ctxPct: null, self: false, account: null },
         ],
       },
     });
@@ -950,7 +950,7 @@ describe("formatCardDetail", () => {
     boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
     description: "did the thing\nnext: do the other thing", status: "doing", priority: "p1",
     columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
-    sessions: [], logCount: 0, lastLogAtMs: null,
+    sessions: [], logCount: 0, lastLogAtMs: null, spawnedBy: null,
   };
 
   it("leads with one card header line, then the description, and nothing else", () => {

@@ -1,6 +1,6 @@
 import type { Board, SessionLink } from "@shared/board-schema.ts";
 import type { SessionRow, Snapshot } from "@shared/schema";
-import type { WhoamiCardSession, WhoamiEnv, WhoamiResponse, WhoamiSession, WhoamiTask } from "@shared/whoami-schema.ts";
+import type { WhoamiCardSession, WhoamiEnv, WhoamiResponse, WhoamiSession, WhoamiSpawnedBy, WhoamiTask } from "@shared/whoami-schema.ts";
 
 import type { HerdrEnv } from "../environments.ts";
 import { expandTilde } from "./herdr.ts";
@@ -242,6 +242,12 @@ function storedName(row: SessionRow): string | null {
   return clean === "" ? null : clean;
 }
 
+/** Same email-or-org projection every live-account display uses (sessionBlock, cardSession, the
+ *  fleet row in mcp/digest.ts) — one place so the rule never drifts between them. */
+function accountOf(row: SessionRow): string | null {
+  return row.statusline?.account?.email ?? row.statusline?.account?.org ?? null;
+}
+
 function cardSession(index: LiveIndex, link: SessionLink, selfRow: SessionRow): WhoamiCardSession {
   // Liveness via the CANONICAL resolver (server/live-resolve.ts), not a local reimplementation: a
   // UUID-carrying link whose pane now holds a different session resolves via the UUID index or
@@ -256,13 +262,54 @@ function cardSession(index: LiveIndex, link: SessionLink, selfRow: SessionRow): 
     detached: live === undefined,
     ctxPct: live?.statusline?.ctx.pct ?? null,
     self: linkBindsSession(link, { env: selfRow.env, paneId: selfRow.paneId, liveSessionId: selfRow.sessionId }),
+    account: live === undefined ? null : accountOf(live),
   };
+}
+
+/** The link the SELF row binds to — the same rule cardSession uses for its `self` flag. Several
+ *  links can bind (env+pane collision across boards); a sessionId match is preferred over a
+ *  pane-only one, since the pane can be a stale reuse. */
+function selectSelfLink(links: readonly SessionLink[], row: SessionRow): SessionLink | undefined {
+  const matches = links.filter((l) => linkBindsSession(l, { env: row.env, paneId: row.paneId, liveSessionId: row.sessionId }));
+  if (matches.length <= 1) return matches[0];
+  return matches.find((l) => l.sessionId !== null && l.sessionId === row.sessionId) ?? matches[0];
+}
+
+/** The name a link with this env+sessionId is stored under, searched across every board — the
+ *  parent may live on a different card than the one this session is on. */
+function storedLinkName(boards: readonly Board[], env: string, sessionId: string): string | null {
+  for (const b of boards) {
+    for (const t of b.tasks) {
+      for (const s of t.sessions) {
+        if (s.env === env && s.sessionId === sessionId) return s.name;
+      }
+    }
+  }
+  return null;
+}
+
+function resolveSpawnedBy(spawnedBy: SessionLink["spawnedBy"], snapshot: Snapshot, boards: readonly Board[]): WhoamiSpawnedBy {
+  if (spawnedBy === undefined) return null;
+  if (spawnedBy === "operator") return "operator";
+  const index = buildLiveIndex(snapshot.sessions);
+  const row = resolveLiveRow({ env: spawnedBy.env, paneId: spawnedBy.paneId, sessionId: spawnedBy.sessionId }, index);
+  if (row !== undefined) {
+    return {
+      name: row.claudeName ?? storedLinkName(boards, spawnedBy.env, spawnedBy.sessionId),
+      running: true,
+      captured: row.claudeName !== null,
+      account: accountOf(row),
+    };
+  }
+  // Closed: no live row, so no account to report — the name (if any) comes from what was last stored.
+  return { name: storedLinkName(boards, spawnedBy.env, spawnedBy.sessionId), running: false, captured: true, account: null };
 }
 
 function taskBlock(boards: readonly Board[], snapshot: Snapshot, row: SessionRow): WhoamiTask | null {
   const found = findCard(boards, row);
   if (found === undefined) return null;
   const index = buildLiveIndex(snapshot.sessions);
+  const selfLink = selectSelfLink(found.task.sessions, row);
   return {
     boardId: found.board.id,
     boardLabel: found.board.label,
@@ -275,6 +322,7 @@ function taskBlock(boards: readonly Board[], snapshot: Snapshot, row: SessionRow
     sessions: found.task.sessions.map((l) => cardSession(index, l, row)),
     logCount: found.task.log.length,
     lastLogAtMs: found.task.log.at(-1)?.atMs ?? null,
+    spawnedBy: resolveSpawnedBy(selfLink?.spawnedBy, snapshot, boards),
   };
 }
 
@@ -298,7 +346,7 @@ function sessionBlock(env: HerdrEnv, row: SessionRow): WhoamiSession {
     costUsd: sl?.cost.usd ?? null,
     fiveHourPct: sl?.rate.five_hour?.used_percentage ?? null,
     sevenDayPct: sl?.rate.seven_day?.used_percentage ?? null,
-    account: sl?.account?.email ?? sl?.account?.org ?? null,
+    account: accountOf(row),
     remoteControl: row.remoteControl,
   };
 }

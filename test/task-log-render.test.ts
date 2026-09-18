@@ -14,7 +14,7 @@ const card: WhoamiTask = {
   boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
   description: "why and how", status: "doing", priority: "p1",
   columns: [{ id: "doing", label: "Doing", closed: false }],
-  sessions: [], logCount: 0, lastLogAtMs: null,
+  sessions: [], logCount: 0, lastLogAtMs: null, spawnedBy: null,
 };
 
 const resolved: WhoamiResponse = {

@@ -1,4 +1,4 @@
-import type { Board } from "@shared/board-schema.ts";
+import type { Board, SessionLink } from "@shared/board-schema.ts";
 import type { SessionRow, Snapshot, StatuslineData } from "@shared/schema";
 import { describe, expect, it } from "vitest";
 
@@ -231,5 +231,113 @@ describe("buildWhoami", () => {
     expect(c?.detached).toBe(true);
     expect(c?.status).toBe("detached");
     expect(c?.ctxPct).toBeNull();
+  });
+});
+
+describe("buildWhoami — spawnedBy", () => {
+  const PARENT_SID = "22222222-3333-4444-5555-666666666666";
+  const found = ENVIRONMENTS.find((e) => e.id === "work-local");
+  if (found === undefined) throw new Error("fixture missing work-local");
+  const localEnv = found;
+
+  // A single-session card whose self link carries the given spawnedBy — everything a resolution
+  // needs to run through `resolveSpawnedBy`, isolated from the larger shared fixture above.
+  function selfBoard(spawnedBy: SessionLink["spawnedBy"] | undefined): Board {
+    const link: SessionLink = {
+      env: "work-local", paneId: "w1:p1", tabId: "tab1", tabLabel: "self-tab",
+      workspaceId: "ws1", workspaceLabel: "repo", name: "self-tab", cwdSnapshot: "/repo",
+      sessionId: SID, ...(spawnedBy === undefined ? {} : { spawnedBy }),
+    };
+    return {
+      id: "board", label: "Board",
+      columns: [{ id: "doing", label: "Doing" }],
+      tasks: [{
+        id: "t_self", title: "T", description: "", status: "doing", priority: null,
+        createdAt: 1, updatedAt: 1, log: [], sessions: [link],
+      }],
+      spawnPresets: [], defaultSpawnPresetId: null,
+    };
+  }
+
+  function resolve(boards: readonly Board[], snap: Snapshot) {
+    const out = buildWhoami({ resolution: { ok: true, env: localEnv, row: me }, envs: ENVIRONMENTS, snapshot: snap, boards });
+    if (!out.resolved) throw new Error("expected resolved");
+    return out.task?.spawnedBy;
+  }
+
+  it("is null when the self link carries no spawnedBy (legacy/attach/from-session)", () => {
+    expect(resolve([selfBoard(undefined)], { envs: {}, sessions: [me] })).toBeNull();
+  });
+
+  it("is \"operator\" when the self link was spawned by the operator", () => {
+    expect(resolve([selfBoard("operator")], { envs: {}, sessions: [me] })).toBe("operator");
+  });
+
+  it("running with a live claudeName: captured, and the live name wins", () => {
+    const parentRow = row({ paneId: "w2:p1", sessionId: PARENT_SID, claudeName: "orchestrator" });
+    const result = resolve(
+      [selfBoard({ sessionId: PARENT_SID, env: "work-local", paneId: "w2:p1" })],
+      { envs: {}, sessions: [me, parentRow] },
+    );
+    expect(result).toEqual({ name: "orchestrator", running: true, captured: true, account: null });
+  });
+
+  it("running without a claudeName: not captured, falls back to a stored link name on any board", () => {
+    const parentRow = row({ paneId: "w2:p1", sessionId: PARENT_SID, claudeName: null });
+    const otherBoard: Board = {
+      id: "b2", label: "B2", columns: [{ id: "doing", label: "Doing" }],
+      tasks: [{
+        id: "t_other", title: "T2", description: "", status: "doing", priority: null, createdAt: 1, updatedAt: 1, log: [],
+        sessions: [{ env: "work-local", paneId: "w2:p1", tabId: "t", tabLabel: "orch-tab", workspaceId: "w", workspaceLabel: "w", name: "orch-tab", cwdSnapshot: "/", sessionId: PARENT_SID }],
+      }],
+      spawnPresets: [], defaultSpawnPresetId: null,
+    };
+    const result = resolve(
+      [selfBoard({ sessionId: PARENT_SID, env: "work-local", paneId: "w2:p1" }), otherBoard],
+      { envs: {}, sessions: [me, parentRow] },
+    );
+    expect(result).toEqual({ name: "orch-tab", running: true, captured: false, account: null });
+  });
+
+  it("closed: falls back to the stored link name when the parent is no longer live", () => {
+    const otherBoard: Board = {
+      id: "b2", label: "B2", columns: [{ id: "doing", label: "Doing" }],
+      tasks: [{
+        id: "t_other", title: "T2", description: "", status: "doing", priority: null, createdAt: 1, updatedAt: 1, log: [],
+        sessions: [{ env: "work-local", paneId: "w2:p1", tabId: "t", tabLabel: "orch-tab", workspaceId: "w", workspaceLabel: "w", name: "orch-tab", cwdSnapshot: "/", sessionId: PARENT_SID }],
+      }],
+      spawnPresets: [], defaultSpawnPresetId: null,
+    };
+    const result = resolve(
+      [selfBoard({ sessionId: PARENT_SID, env: "work-local", paneId: "w2:p1" }), otherBoard],
+      { envs: {}, sessions: [me] }, // parent absent from the live snapshot entirely
+    );
+    expect(result).toEqual({ name: "orch-tab", running: false, captured: true, account: null });
+  });
+
+  it("closed with no stored name anywhere: name is null", () => {
+    const result = resolve(
+      [selfBoard({ sessionId: PARENT_SID, env: "work-local", paneId: "w2:p1" })],
+      { envs: {}, sessions: [me] },
+    );
+    expect(result).toEqual({ name: null, running: false, captured: true, account: null });
+  });
+
+  it("a pane reused by a different session UUID is not named — the stranger's identity never leaks in", () => {
+    const stranger = row({ paneId: "w2:p1", sessionId: "99999999-8888-7777-6666-555555555555", claudeName: "stranger" });
+    const result = resolve(
+      [selfBoard({ sessionId: PARENT_SID, env: "work-local", paneId: "w2:p1" })],
+      { envs: {}, sessions: [me, stranger] },
+    );
+    expect(result).toEqual({ name: null, running: false, captured: true, account: null });
+  });
+
+  it("carries the parent's account when running", () => {
+    const parentRow = row({ paneId: "w2:p1", sessionId: PARENT_SID, claudeName: "orchestrator", statusline, statuslineStatus: "ok" });
+    const result = resolve(
+      [selfBoard({ sessionId: PARENT_SID, env: "work-local", paneId: "w2:p1" })],
+      { envs: {}, sessions: [me, parentRow] },
+    );
+    expect(result).toEqual({ name: "orchestrator", running: true, captured: true, account: "user@example.com" });
   });
 });

@@ -39,7 +39,26 @@ export const WhoamiCardSessionSchema = z.object({
   detached: z.boolean(),
   ctxPct: z.number().nullable(),
   self: z.boolean(),
+  /** Same projection as WhoamiSession.account — null when not running or unknown. Defaulted: an
+   *  older server predates the field. */
+  account: z.string().nullable().default(null),
 });
+
+/**
+ * The resolved parent, for the "spawned by" line in corral_whoami. Three shapes:
+ * - `"operator"`: the operator spawned this session directly (the web UI).
+ * - an object: the parent session, resolved from the stored SessionLink.spawnedBy against the live
+ *   registry — `running`+`captured` tell the reader whether `name` is an address (see
+ *   mcp/digest.ts formatWhoami), and `account` rides along for the same cross-account marker every
+ *   other session name gets.
+ * - `null`: unknown (a legacy link, attach, from-session, or an old client's spawn) — nothing to show.
+ *
+ * Defaulted to null, not required: an older server predates the field entirely.
+ */
+export const WhoamiSpawnedBySchema = z.union([
+  z.object({ name: z.string().nullable(), running: z.boolean(), captured: z.boolean(), account: z.string().nullable() }),
+  z.literal("operator"),
+]).nullable().default(null);
 
 // `closed` marks a column that ENDS the work: the session must tell one apart before writing
 // `status`, and ids and labels alone cannot. Defaulted, not optional, so a corral server older than
@@ -73,6 +92,7 @@ export const WhoamiTaskSchema = z.object({
    */
   logCount: z.number().default(0),
   lastLogAtMs: z.number().nullable().default(null),
+  spawnedBy: WhoamiSpawnedBySchema,
 });
 
 export const WhoamiSessionSchema = z.object({
@@ -132,6 +152,7 @@ export const WhoamiResponseSchema = z.discriminatedUnion("resolved", [
 
 export type WhoamiEnv = z.infer<typeof WhoamiEnvSchema>;
 export type WhoamiCardSession = z.infer<typeof WhoamiCardSessionSchema>;
+export type WhoamiSpawnedBy = z.infer<typeof WhoamiSpawnedBySchema>;
 export type WhoamiColumn = z.infer<typeof WhoamiColumnSchema>;
 export type WhoamiTask = z.infer<typeof WhoamiTaskSchema>;
 export type WhoamiSession = z.infer<typeof WhoamiSessionSchema>;
