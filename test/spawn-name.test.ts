@@ -36,33 +36,35 @@ describe("sanitizeSlug — unchanged", () => {
 
 describe("composeSessionName — the agent's name is the name", () => {
   it("returns the requested name verbatim, with no card prefix", () => {
-    expect(composeSessionName("my-task", "wm-stake rc toggle", free)).toBe("wm-stake-rc-toggle");
+    expect(composeSessionName("my-task", "wm-stake rc toggle", free, 0)).toBe("wm-stake-rc-toggle");
   });
 
   it("never consults the fallback prefix when a name was supplied", () => {
-    expect(composeSessionName("some-very-long-card-slug", "short", free)).toBe("short");
+    expect(composeSessionName("some-very-long-card-slug", "short", free, 0)).toBe("short");
   });
 
-  it("appends the first free letter when the requested name is already taken", () => {
-    expect(composeSessionName("my-task", "rc-toggle", except(["rc-toggle"]))).toBe("rc-toggle-a");
+  it("appends -2 when the requested name is already taken", () => {
+    expect(composeSessionName("my-task", "rc-toggle", except(["rc-toggle"]), 1)).toBe("rc-toggle-2");
   });
 
-  it("takes the next free letter when earlier ones are taken", () => {
-    expect(composeSessionName("my-task", "rc", except(["rc", "rc-a", "rc-b"]))).toBe("rc-c");
+  it("takes the next free number when earlier ones are taken", () => {
+    expect(composeSessionName("my-task", "rc", except(["rc", "rc-2", "rc-3"]), 3)).toBe("rc-4");
   });
 
   it("returns null when nothing is both free and valid, so the route can 409", () => {
-    expect(composeSessionName("my-task", "rc-toggle", () => false)).toBeNull();
+    expect(composeSessionName("my-task", "rc-toggle", () => false, 1)).toBeNull();
   });
 
   // The case `() => false` above CANNOT catch: it rejects the fallback-prefix candidates too, so a
   // function that wrongly falls through to them still returns null and looks correct. Here only the
-  // requested name's 27 candidates are taken and every `my-task-<letter>` is free — a fallthrough
-  // returns "my-task-a" and the agent gets a name it never asked for, with a 200.
-  it("returns null — not a fallback-prefix name — when the requested name's 27 candidates are taken", () => {
-    const letters = "abcdefghijklmnopqrstuvwxyz".split("");
-    const taken = ["rc-toggle", ...letters.map((l) => `rc-toggle-${l}`)];
-    expect(composeSessionName("my-task", "rc-toggle", except(taken))).toBeNull();
+  // requested name's candidates (bare + numbered, bounded by taken+2) are taken and every
+  // `my-task-<n>` is free — a fallthrough returns "my-task-1" and the agent gets a name it never
+  // asked for, with a 200.
+  it("returns null — not a fallback-prefix name — when every requested-name candidate is taken", () => {
+    const taken = 30;
+    // taken+2 candidates total: the bare name plus suffixes -2 .. -(taken+2).
+    const numbered = Array.from({ length: taken + 2 }, (_, i) => i === 0 ? "rc-toggle" : `rc-toggle-${String(i + 1)}`);
+    expect(composeSessionName("my-task", "rc-toggle", except(numbered), taken)).toBeNull();
   });
 });
 
@@ -75,12 +77,12 @@ describe("composeSessionName — the agent's name is the name", () => {
 describe("composeSessionName — names longer than the old 56-character bound", () => {
   it("returns a 70-character name intact rather than rejecting it", () => {
     const requested = "b".repeat(70);
-    expect(composeSessionName("fb", requested, free)).toBe(requested);
+    expect(composeSessionName("fb", requested, free, 0)).toBe(requested);
   });
 
   it("still disambiguates a name past the old bound", () => {
     const requested = "b".repeat(70);
-    expect(composeSessionName("fb", requested, except([requested]))).toBe(`${requested}-a`);
+    expect(composeSessionName("fb", requested, except([requested]), 1)).toBe(`${requested}-2`);
   });
 });
 
@@ -90,19 +92,29 @@ describe("composeSessionName — the cap", () => {
   // own goalpost when NAME_MAX changes. Pinning where the cut lands is the only assertion that fails
   // when truncation breaks.
   it("cuts the requested name to exactly NAME_MAX characters", () => {
-    const out = composeSessionName("fb", "b".repeat(200), free);
+    const out = composeSessionName("fb", "b".repeat(200), free, 0);
     expect(out).toBe("b".repeat(NAME_MAX));
     expect(out).toHaveLength(NAME_MAX);
   });
 
-  // Pre-trimming the lettered base by 2 is what stops truncation from eating the letter that
-  // disambiguates. Asserts the EXACT string: `length <= NAME_MAX` plus `endsWith("-a")` also holds
-  // for a broken output that dropped the name entirely.
-  it("keeps the disambiguating letter when the name is already at the cap", () => {
-    const first = composeSessionName("fb", "b".repeat(200), free) ?? "";
-    const second = composeSessionName("fb", "b".repeat(200), except([first]));
-    expect(second).toBe(`${"b".repeat(NAME_MAX - 2)}-a`);
+  // Pre-trimming the numbered base by the suffix's OWN length is what stops truncation from eating
+  // the digits that disambiguate. Asserts the EXACT string: `length <= NAME_MAX` plus `endsWith("-2")`
+  // also holds for a broken output that dropped the name entirely.
+  it("keeps the disambiguating suffix when the name is already at the cap", () => {
+    const first = composeSessionName("fb", "b".repeat(200), free, 0) ?? "";
+    const second = composeSessionName("fb", "b".repeat(200), except([first]), 1);
+    expect(second).toBe(`${"b".repeat(NAME_MAX - 2)}-2`);
     expect(second).toHaveLength(NAME_MAX);
+  });
+
+  // A double-digit suffix is one character longer than "-2" and must still not be the part
+  // truncation eats — each candidate is pre-trimmed by ITS OWN suffix length, not a fixed amount.
+  it("keeps a double-digit suffix intact at the cap", () => {
+    const requested = "b".repeat(200);
+    const already = Array.from({ length: 9 }, (_, i) => i === 0 ? "b".repeat(NAME_MAX) : `${"b".repeat(NAME_MAX - 2)}-${String(i + 1)}`);
+    const tenth = composeSessionName("fb", requested, except(already), 9);
+    expect(tenth).toBe(`${"b".repeat(NAME_MAX - 3)}-10`);
+    expect(tenth).toHaveLength(NAME_MAX);
   });
 
   // The candidate is re-trimmed after the slice, so a cut landing on a dash cannot emit a
@@ -111,36 +123,36 @@ describe("composeSessionName — the cap", () => {
   it("re-trims a dash the truncation cut lands on", () => {
     // The cut at NAME_MAX lands on the dash between the two runs.
     const requested = `${"b".repeat(NAME_MAX)} ${"c".repeat(5)}`;
-    expect(composeSessionName("fb", requested, free)).toBe("b".repeat(NAME_MAX));
+    expect(composeSessionName("fb", requested, free, 0)).toBe("b".repeat(NAME_MAX));
   });
 
   // THE invariant two spec revisions got backwards: the string tested for freeness must be the
   // string returned. Truncation happens BEFORE the test, so a taken TRUNCATED name is rejected.
   it("tests the truncated string for freeness, not the untruncated one", () => {
     const requested = "b".repeat(200);
-    const first = composeSessionName("fb", requested, free) ?? "";
+    const first = composeSessionName("fb", requested, free, 0) ?? "";
     expect(first).toHaveLength(NAME_MAX); // it really was truncated
-    const second = composeSessionName("fb", requested, except([first]));
+    const second = composeSessionName("fb", requested, except([first]), 1);
     expect(second).not.toBeNull();
     expect(second).not.toBe(first);
   });
 });
 
 describe("composeSessionName — the fallback prefix", () => {
-  it("falls back to <prefix>-<first free letter> when the name is absent or unusable", () => {
-    expect(composeSessionName("my-task", "", free)).toBe("my-task-a");
-    expect(composeSessionName("my-task", "***", free)).toBe("my-task-a");
+  it("falls back to <prefix>-1 when the name is absent or unusable", () => {
+    expect(composeSessionName("my-task", "", free, 0)).toBe("my-task-1");
+    expect(composeSessionName("my-task", "***", free, 0)).toBe("my-task-1");
   });
 
-  it("takes the next free letter when earlier ones are taken", () => {
-    expect(composeSessionName("my-task", "", except(["my-task-a", "my-task-b"]))).toBe("my-task-c");
+  it("takes the next free number when earlier ones are taken", () => {
+    expect(composeSessionName("my-task", "", except(["my-task-1", "my-task-2"]), 2)).toBe("my-task-3");
   });
 
   // A name written in a non-Latin script reduces to nothing, which IS the "not supplied" signal —
   // the fallback carries it rather than the spawn failing.
   it("treats a name in a non-Latin script as not supplied", () => {
-    expect(composeSessionName("my-task", "исправить зомби", free)).toBe("my-task-a");
-    expect(composeSessionName("my-task", "日本語", free)).toBe("my-task-a");
+    expect(composeSessionName("my-task", "исправить зомби", free, 0)).toBe("my-task-1");
+    expect(composeSessionName("my-task", "日本語", free, 0)).toBe("my-task-1");
   });
 
   // THE regression for revision 1's second blocker. The chain's last resort is task.id, minted as
@@ -148,11 +160,23 @@ describe("composeSessionName — the fallback prefix", () => {
   // a raw id made the last-resort fallback a guaranteed 409. Measured over 2000 generated ids, 2000
   // of 2000 failed. The prefix must go through the same charset reduction as everything else.
   it("reduces a task-id prefix to the launch-flag charset", () => {
-    expect(composeSessionName("t_Ab3D9xk", "", free)).toBe("t-ab3d9xk-a");
+    expect(composeSessionName("t_Ab3D9xk", "", free, 0)).toBe("t-ab3d9xk-1");
   });
 
-  it("returns null when every lettered fallback candidate is taken", () => {
-    expect(composeSessionName("my-task", "", () => false)).toBeNull();
+  it("returns null when every numbered fallback candidate is taken", () => {
+    expect(composeSessionName("my-task", "", () => false, 1)).toBeNull();
+  });
+
+  // Numbering goes well past the old 26-letter cap — there is no per-card session limit any more.
+  it("keeps numbering past 30 taken names", () => {
+    const taken = Array.from({ length: 30 }, (_, i) => `my-task-${String(i + 1)}`);
+    expect(composeSessionName("my-task", "", except(taken), 30)).toBe("my-task-31");
+  });
+
+  // A legacy `-a` name (from before the numeric scheme) sits in the taken set but is not a numeric
+  // candidate this function would ever produce, so it must not perturb numbering.
+  it("ignores a legacy letter-suffixed name already on the card", () => {
+    expect(composeSessionName("my-task", "", except(["my-task-a"]), 1)).toBe("my-task-1");
   });
 });
 
@@ -168,7 +192,7 @@ describe("fallbackNamePrefix", () => {
   });
 
   // The case the whole design exists for: a title with no Latin characters used to reduce to the
-  // sentinel "task", so every session on every such card was named task-a, task-b — indistinguishable
+  // sentinel "task", so every session on every such card was named task-1, task-2 — indistinguishable
   // in the herdr tab bar and the /resume picker, which are global.
   it("falls through to the repo when the title has nothing usable", () => {
     expect(fallbackNamePrefix("Починить зомби-ридер", "corral", "t_ab3d9xk")).toBe("corral");
@@ -204,6 +228,6 @@ describe("composeSessionName — charset reduction", () => {
     ["--leading", "leading"],                // a leading dash run cannot survive into a flag value
     ["under_score", "under-score"],          // "_" is not in the charset
   ])("reduces %j to the launch-flag charset as %j", (requested, expected) => {
-    expect(composeSessionName("my-task", requested, free)).toBe(expected);
+    expect(composeSessionName("my-task", requested, free, 0)).toBe(expected);
   });
 });

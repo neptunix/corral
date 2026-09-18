@@ -367,8 +367,9 @@ Drag a pooled session onto a task (or API) → stored by `(env,paneId)`. Detach 
 4. **Spawn:** `herdr agent start <name> --workspace <id> -- claude`.
 5. **Name:** the spawning agent supplies the WHOLE name via `corral_spawn`'s `name`, as
    `{slug}-{name}`; corral passes it as `claude --name` and as the tab label, adding no prefix. It is
-   reduced to `[a-z0-9-]` and capped at `NAME_MAX` (96), and a letter `-a … -z` is appended only to
-   break a collision **on the same card**. Two cards may hold the same name: a session is addressed by
+   reduced to `[a-z0-9-]` and capped at `NAME_MAX` (96), and a numeric suffix `-2`, `-3`, … is
+   appended only to break a collision **on the same card**; there is no cap on session count. Two
+   cards may hold the same name: a session is addressed by
    `(env,paneId)`, with the card for context. corral derives a name only when none was supplied (the
    UI sends none): card title → target repo → task id, every step slugified.
 6. **Auto-attach** `(env,paneId)` + capture `cwdSnapshot` via `pane get`.
@@ -397,7 +398,7 @@ exist in herdr across a state-loss restart — this limitation is explicit, not 
 - Each transition snapshots the session's last output lines into the attention record (§6.5), so
   the feed (and a future agent) can show/summarize *what happened* without relying on the volatile
   rolling buffer (`pane_history` defaults false in herdr — see §13).
-- Surfaced as an **Attention feed** of ackable items ("`task-42-a` went blocked" / "just finished").
+- Surfaced as an **Attention feed** of ackable items ("`task-42-1` went blocked" / "just finished").
   Acked items don't re-surface until a *new* transition (different `since`).
 - **Future-agent seam:** the agent reads attention records (incl. `lastLines`) + board state via the
   API, summarizes/prioritizes, and writes comments (with `idemKey` = `env:paneId:since` to avoid

@@ -91,7 +91,7 @@ export function logTooLong(length: number): string {
  * for. The `kind` filter lets a reader ignore the noise; only separate quotas stop the noise from
  * DELETING the signal. Enforced in server/task-log.ts; here because the board's Log tab names them.
  */
-export const LOG_NOTE_QUOTA = 60;
+export const LOG_NOTE_QUOTA = 500;
 export const LOG_SYSTEM_QUOTA = 140;
 
 // STORED SHAPE — deliberately permissive on `text`, the same reasoning as SpawnPresetSchema and

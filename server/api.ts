@@ -60,11 +60,6 @@ const LAST_ACTIVE_TTL_MS = 60_000;
 // How long a ?deferred=1 close waits after responding before killing the pane. Long enough for the
 // HTTP response to flush to the MCP client, short enough that the operator sees the pane die "now".
 const CLOSE_DEFER_MS = 150;
-// The per-card session cap. COUNTED, not inferred from letter exhaustion: a named spawn does not
-// have to consume a letter, so "no free a–z suffix" stopped being the same question as "too many
-// sessions". This does now cap a card holding 26 ATTACHED sessions, which the letter check did not —
-// intended, and the only reading of "cap" that survives named spawns.
-const SPAWN_CAP = 26;
 // Floor under POST /api/diagnostics/refresh: within this window the route answers from the store
 // without re-running. That route is the only one an unauthenticated caller can use to make the server
 // spawn processes on demand — the loopback bind is the whole access control, and a cross-origin POST is
@@ -1211,7 +1206,7 @@ export function createApi(opts: {
     const resumeCwd = (await sessionCwd(env, link.sessionId)) ?? link.cwdSnapshot;
     // ONLY a herdr tab label: resume launches `claude --resume <id>` with no flags, so Claude restores
     // its own name, and spawn.ts's tab-name rejoin is skipped on this path. Nothing to disambiguate
-    // against, hence the bare `-a` rather than composeSessionName's collision search.
+    // against, hence the bare `-1` rather than composeSessionName's collision search.
     //
     // Deriving it here is what lets spawn.ts's `<taskSlug>-a` go: that was a second name source the
     // route's fallback chain could not reach, so a card titled without Latin characters resumed as
@@ -1221,7 +1216,7 @@ export function createApi(opts: {
     const storedName = slugify(link.name, NAME_MAX);
     const resumeName = storedName !== ""
       ? storedName
-      : `${fallbackNamePrefix(task.title, null, task.id)}-a`;
+      : `${fallbackNamePrefix(task.title, null, task.id)}-1`;
     let result: SpawnResult;
     try {
       result = await opts.spawn({
@@ -1422,9 +1417,6 @@ export function createApi(opts: {
     }
 
     const slug = sanitizeSlug(task.title);
-    if (task.sessions.length >= SPAWN_CAP) {
-      return c.json({ error: { code: "session_cap", message: `task already has ${String(SPAWN_CAP)} sessions — remove or unlink one first` } }, 409);
-    }
     // One string for tab label, link name and `claude --name`. The requested name IS the name — corral
     // no longer prefixes it with the card slug. The prefix below is consulted ONLY when nothing usable
     // was supplied (the UI sends no name at all, and a name in a non-Latin script reduces to nothing).
@@ -1436,16 +1428,16 @@ export function createApi(opts: {
     // SLUGIFIED, because a stored link name is not always a string this route composed: attach and
     // from-session take it as `z.string().default("")` from the client, so a card can hold
     // "Fix the auth bug". Candidates are always slugified, so comparing against the raw form never
-    // matches and the `-a` suffix silently fails to fire. Only reachable since the requested name
+    // matches and the `-2` suffix silently fails to fire. Only reachable since the requested name
     // stopped being prefixed with the card slug — before that no candidate could equal a bare
     // stored name's slug.
     const usedNames = new Set(task.sessions.map((s) => slugify(s.name, NAME_MAX)));
     const namePrefix = fallbackNamePrefix(task.title, newSpaceRepo, task.id);
-    const sessionName = composeSessionName(namePrefix, parsed.data.name ?? "", (n) => !usedNames.has(n));
+    const sessionName = composeSessionName(namePrefix, parsed.data.name ?? "", (n) => !usedNames.has(n), usedNames.size);
     if (sessionName === null) {
-      // Unreachable: SPAWN_CAP above caps the card at 25 existing sessions, so at most 25 of the 27
-      // candidates can be taken. Kept because composeSessionName's type admits null, not as a path
-      // the route expects to serve.
+      // Type-required null guard only: composeSessionName tries `usedNames.size + 2` numbered
+      // candidates, which by pigeonhole always contains a free one, so this branch is unreachable in
+      // practice — there is no cap on session count any more.
       return c.json({ error: { code: "name_unavailable", message: "no free session name left — choose a different name" } }, 409);
     }
     // Brief/start-command delivery is local-only: the file is written on the corral host, and the

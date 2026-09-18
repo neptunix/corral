@@ -112,8 +112,8 @@ describe("DELETE /api/boards/:bid", () => {
     expect(res.status).toBe(409);
     const body = await res.json() as { error: { code: string; message: string } };
     expect(body.error.code).toBe("board_not_empty");
-    // Asserts the MESSAGE, not just the code — mirrors the session_cap precedent above: the count is
-    // the part a bare status/code can't prove, and it's what tells the operator what to do next.
+    // Asserts the MESSAGE, not just the code: the count is the part a bare status/code can't prove,
+    // and it's what tells the operator what to do next.
     expect(body.error.message).toContain("1 task");
     const stillThere = await app.request("/api/boards/test");
     expect(stillThere.status).toBe(200);
@@ -802,46 +802,43 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     return { app, spawn, tid: id };
   }
 
-  it("passes suffix 'b' and stores name '<slug>-b' when '<slug>-a' already exists", async () => {
-    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["my-task-a"]);
+  it("passes suffix '-2' and stores name '<slug>-2' when '<slug>-1' already exists", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["my-task-1"]);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     expect(res.status).toBe(200);
     const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
-    expect(call.sessionName).toBe("my-task-b");
+    expect(call.sessionName).toBe("my-task-2");
     const body = await res.json() as { name: string };
-    expect(body.name).toBe("my-task-b");
+    expect(body.name).toBe("my-task-2");
   });
 
-  it("picks 'd' (not a cap) when a, b, c are already taken", async () => {
-    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["my-task-a", "my-task-b", "my-task-c"]);
+  it("picks '-4' when -1, -2, -3 are already taken", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["my-task-1", "my-task-2", "my-task-3"]);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     expect(res.status).toBe(200);
     const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
-    expect(call.sessionName).toBe("my-task-d");
+    expect(call.sessionName).toBe("my-task-4");
   });
 
-  it("409s with session_cap once the card holds 26 sessions", async () => {
-    const allLetters = Array.from({ length: 26 }, (_, i) => `my-task-${String.fromCharCode(97 + i)}`);
-    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, allLetters);
+  // There is no per-card session cap any more. A card that would have hit the old 26-session limit,
+  // and one with 30 sessions already numbered past the old letter range, must both still spawn.
+  it("still spawns past the old 26-session cap, numbering past 30", async () => {
+    const many = Array.from({ length: 30 }, (_, i) => `my-task-${String(i + 1)}`);
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, many);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
-    expect(res.status).toBe(409);
-    const err = await res.json() as { error: { code: string; message: string } };
-    expect(err.error.code).toBe("session_cap");
-    // Asserts the MESSAGE, not just the code. This fixture fills every a–z name, so BOTH 409 branches
-    // can fire and they share the `session_cap` code — on the code alone the test passed even with the
-    // counted cap disabled, because the "no free session name" branch answered instead. The message is
-    // what tells the two apart.
-    expect(err.error.message).toContain("already has 26 sessions");
-    expect(spawn).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
+    expect(call.sessionName).toBe("my-task-31");
+    expect(spawn).toHaveBeenCalledOnce();
   });
 
   // The card slug is NOT prefixed any more. It used to take the length budget first, so truncation
@@ -873,7 +870,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     });
     expect(res.status).toBe(200);
     const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
-    expect(call.sessionName).toBe("fix-the-auth-bug-a");
+    expect(call.sessionName).toBe("fix-the-auth-bug-2");
   });
 
   // A name past the OLD 56-character bound must survive. NAME_RE hardcoded that bound as {0,55}
@@ -890,29 +887,29 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     expect(call.sessionName).toBe(long);
   });
 
-  it("falls back to <slug>-<letter> when no name is supplied", async () => {
-    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["my-task-a"]);
+  it("falls back to <slug>-1 when no name is supplied", async () => {
+    const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["my-task-1"]);
     await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
     const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
-    expect(call.sessionName).toBe("my-task-b");
+    expect(call.sessionName).toBe("my-task-2");
   });
 
-  it("appends a letter when the requested name is already taken", async () => {
+  it("appends a number when the requested name is already taken", async () => {
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, ["rc-toggle-ui"]);
     await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "RC toggle UI" }),
     });
     const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
-    expect(call.sessionName).toBe("rc-toggle-ui-a");
+    expect(call.sessionName).toBe("rc-toggle-ui-2");
   });
 
   // The case the design exists for. `sanitizeSlug` keeps only [a-z0-9], so a title in any non-Latin
   // script used to reduce to the sentinel "task" and every session on every such card was named
-  // task-a, task-b — indistinguishable wherever the name is actually read.
+  // task-1, task-2 — indistinguishable wherever the name is actually read.
   it("derives a name from the task id when the card title has no Latin characters", async () => {
     const { app, spawn } = makeApiWithSpawn(tmpDir);
     await app.request("/api/boards", {
@@ -929,7 +926,7 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     });
     expect(res.status).toBe(200);
     const call = spawn.mock.calls[0]?.[0] as { sessionName: string };
-    expect(call.sessionName).not.toBe("task-a");          // the old degenerate name
+    expect(call.sessionName).not.toBe("task-1");          // the old degenerate name
     expect(call.sessionName).toMatch(/^t-/);              // derived from the task id
     expect(call.sessionName).toMatch(/^[a-z0-9][a-z0-9-]*$/); // and inside the launch-flag charset
   });
@@ -1041,19 +1038,17 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn — next free session suffix", 
     expect(Object.hasOwn(off.spawn.mock.calls[0]?.[0] ?? {}, "remoteControl")).toBe(false);
   });
 
-  // A.2: the cap is COUNTED, not inferred from letter exhaustion. A named spawn need not consume a
-  // letter, so "no free letter" stopped being the same question as "too many sessions". These 26
-  // links are ATTACHED-style names — no letter of `my-task-<a..z>` is taken, and it still caps.
-  it("409s with session_cap at 26 sessions whatever they are named", async () => {
+  // There is no per-card session cap. These 26 links are ATTACHED-style names — no numbered
+  // `my-task-<n>` candidate is taken by any of them — and a spawn still succeeds past that count.
+  it("still spawns at 26 sessions whatever they are named", async () => {
     const names = Array.from({ length: 26 }, (_, i) => `attached-${String(i)}`);
     const { app, spawn, tid } = await seedTaskWithSessionNames(tmpDir, names);
     const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
     });
-    expect(res.status).toBe(409);
-    expect((await res.json() as { error: { code: string } }).error.code).toBe("session_cap");
-    expect(spawn).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(spawn).toHaveBeenCalledOnce();
   });
 });
 
@@ -1424,7 +1419,7 @@ describe("POST resume", () => {
     expect(res.status).toBe(200);
     expect((seen as { sessionName?: string }).sessionName).toBe("x-a");
     // The flags themselves are spawn.ts's job (test/spawn.test.ts pins that resume sends none); what
-    // the route owns is passing the NAME — so the recreated tab is not silently relabelled `<slug>-a`
+    // the route owns is passing the NAME — so the recreated tab is not silently relabelled `<slug>-1`
     // — and passing NO launch-flag option at all. Both are asserted: checking only `model` let the
     // route start sending `remoteControl: true`, silently re-connecting a resumed session to
     // claude.ai, with this test still green.
@@ -1437,14 +1432,14 @@ describe("POST resume", () => {
   // `link.name` is client-supplied on the attach / from-session routes (`z.string().default("")`), and
   // the MCP bind path puts the session's own `/rename`d name there — so it is NOT a string this route
   // composed. Sanitize, don't drop: the operator's intent survives, and a leading `-` never reaches
-  // `herdr tab create` as a flag. Only a name with nothing usable left falls back to `<slug>-a`.
+  // `herdr tab create` as a flag. Only a name with nothing usable left falls back to `<slug>-1`.
   it.each([
     ["Fix the auth bug", "fix-the-auth-bug"],
     ["My Session", "my-session"],
     ["-rf", "rf"],
     ["--dangerously-skip-permissions", "dangerously-skip-permissions"],
     ["a b; rm -rf /", "a-b-rm-rf"],
-    ["my-task-a", "my-task-a"],                       // already valid → unchanged
+    ["my-task-a", "my-task-a"],                       // legacy letter-suffixed name: already valid, unchanged
   ])("sanitizes a stored link name (%j → %j)", async (name, expected) => {
     let seen: unknown;
     const storage = createStorage(tmpDir);
@@ -1468,10 +1463,10 @@ describe("POST resume", () => {
   });
 
   // Nothing usable left → the route derives the name from the card and PASSES it. It used to omit the
-  // field so spawn.ts could fill in `<taskSlug>-a` — a second name source the route's fallback chain
+  // field so spawn.ts could fill in `<taskSlug>-1` — a second name source the route's fallback chain
   // could not reach, which is why a card titled without Latin characters ("Отладка" here stands for
-  // the stored name, but the same held for the title) always resumed as `task-a`. One name source now,
-  // in the route. seedTaskWithLink's card is titled "x", so the derived name is `x-a`.
+  // the stored name, but the same held for the title) always resumed as `task-1`. One name source now,
+  // in the route. seedTaskWithLink's card is titled "x", so the derived name is `x-1`.
   it.each(["", "***", "Отладка"])("derives the name when the stored one has nothing usable left (%j)", async (name) => {
     let seen: unknown;
     const storage = createStorage(tmpDir);
@@ -1493,7 +1488,7 @@ describe("POST resume", () => {
     const res = await app.request("/api/boards/t/tasks/t_aaaaaaa/sessions/work-local/w1:p1/resume", { method: "POST" });
     expect(res.status).toBe(200);
     expect(seen).toBeDefined();
-    expect((seen as { sessionName?: string }).sessionName).toBe("x-a");
+    expect((seen as { sessionName?: string }).sessionName).toBe("x-1");
   });
 
 });

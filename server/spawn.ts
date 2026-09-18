@@ -24,11 +24,6 @@ export const NAME_MAX = 96;
 // route answered 409 "no free session name left on this task" for a card with no sessions at all.
 const NAME_RE = new RegExp(`^[a-z0-9][a-z0-9-]{0,${String(NAME_MAX - 1)}}$`);
 
-// The a-z candidate letters a colliding name is disambiguated by, appended to whichever base
-// composeSessionName is working from: `${name}-<letter>` or `${fallbackPrefix}-<letter>`.
-const SESSION_LETTERS: readonly string[] =
-  Array.from({ length: 26 }, (_, i) => String.fromCharCode(97 + i));
-
 /**
  * Slug, or "" when nothing usable survives — callers read "" as "not supplied".
  *
@@ -75,7 +70,7 @@ export function fallbackNamePrefix(title: string, repo: string | null, taskId: s
 /**
  * The requested name IS the session name — corral no longer prefixes it with the card's slug.
  * Returns the first candidate `isFree` accepts, or null when none is both free and valid (the route
- * then 409s).
+ * then 409s — unreachable in practice, see `taken` below).
  *
  * The agent that spawns holds what the old mechanical prefix was approximating: the card's meaning,
  * and its own session's slug. It supplies the whole `{slug}-{name}`, so corral's job here is only to
@@ -89,30 +84,42 @@ export function fallbackNamePrefix(title: string, repo: string | null, taskId: s
  * resort is `task.id`, and a raw `t_${nanoid(7)}` fails NAME_RE every single time ("_" is not in the
  * charset — measured 2000/2000).
  *
+ * Disambiguation is numeric and unbounded: `name`, `name-2`, `name-3`, … (or `prefix-1`, `prefix-2`,
+ * … when nothing was requested) — there is no per-card cap on session count. `taken` is the number of
+ * names already on the card; the search tries `taken + 2` candidates, which by pigeonhole always
+ * contains one `isFree` accepts, since at most `taken` of them can be occupied.
+ *
  * INVARIANT: the string handed to `isFree` is byte-identical to the string returned. Every candidate
  * is truncated to NAME_MAX and re-trimmed BEFORE the test, never after — two design revisions had
- * this backwards and could hand back a truncated name that collided with one already taken. `isFree`
- * is a callback rather than a Set so that rule lives in exactly one place and is unit-testable
- * without the route.
+ * this backwards and could hand back a truncated name that collided with one already taken. Each
+ * numbered candidate is pre-trimmed by ITS OWN suffix length ("-10" and "-100" are longer than "-2"),
+ * so a fixed pre-trim can't let a wide suffix be the part truncation eats. `isFree` is a callback
+ * rather than a Set so that rule lives in exactly one place and is unit-testable without the route.
  */
 export function composeSessionName(
   fallbackPrefix: string,
   requested: string,
   isFree: (name: string) => boolean,
+  taken: number,
 ): string | null {
   const candidates: string[] = [];
+  const maxAttempts = taken + 2;
   const nameSlug = slugify(requested, NAME_MAX);
   // EITHER/OR. Appending both families let an exhausted requested name fall through to a card-derived
   // one, so the route answered 200 with a name the agent never asked for instead of 409.
   if (nameSlug !== "") {
     candidates.push(nameSlug);
-    // Pre-trimmed by 2 so the disambiguating letter can never be the part truncation eats.
-    const base = slugify(requested, NAME_MAX - 2);
-    for (const letter of SESSION_LETTERS) candidates.push(`${base}-${letter}`);
+    for (let n = 2; candidates.length < maxAttempts; n++) {
+      const suffix = `-${String(n)}`;
+      candidates.push(`${slugify(requested, NAME_MAX - suffix.length)}${suffix}`);
+    }
   } else {
-    const prefix = slugify(fallbackPrefix, NAME_MAX - 2);
+    const prefix = slugify(fallbackPrefix, NAME_MAX);
     if (prefix !== "") {
-      for (const letter of SESSION_LETTERS) candidates.push(`${prefix}-${letter}`);
+      for (let n = 1; candidates.length < maxAttempts; n++) {
+        const suffix = `-${String(n)}`;
+        candidates.push(`${slugify(fallbackPrefix, NAME_MAX - suffix.length)}${suffix}`);
+      }
     }
   }
   return candidates.find((c) => NAME_RE.test(c) && isFree(c)) ?? null;

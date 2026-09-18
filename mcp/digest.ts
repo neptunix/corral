@@ -583,6 +583,14 @@ export interface LogView {
    * history and writes its outcome into `description` — the exact failure the split prevents.
    */
   readonly unavailable: boolean;
+  /**
+   * True when this view came from a `before` cursor — a follow-up page, not the newest one.
+   * Distinguishes "no older entries remain" (an empty last page) from "the log is empty" when
+   * `shown` is `[]`; without it, paging to the end reads identically to a card with no history at
+   * all. Optional so every existing call site (and test fixture) that predates paging still
+   * compiles — absence means "not paged", the same as `false`.
+   */
+  readonly paged?: boolean | undefined;
 }
 
 function formatSource(source: LogSource): string {
@@ -602,12 +610,73 @@ function formatAt(atMs: number): string {
   return `${d.toISOString().slice(0, 16).replace("T", " ")}Z`;
 }
 
+// Ids are nanoid(8) in practice, but the field is untrusted board-file text like everything else
+// rendered here — bounded and swept the same way, so a hand-edited id cannot break the header shape.
+const LOG_ENTRY_ID_MAX = 64;
+
+function safeId(id: string): string {
+  return truncate(oneLine(id), LOG_ENTRY_ID_MAX);
+}
+
+/**
+ * One entry's own lines — header then text — each capped at `LOG_ENTRY_LINE_MAX` (plus gutter),
+ * independent of the block budget. `mark` is always one of this module's two literals, never
+ * anything derived from an entry — that is what makes the header shape unreachable from a caller's
+ * text.
+ */
+function renderEntryLines(e: LogEntry): { readonly lines: string[]; readonly lineTruncated: boolean } {
+  const lines: string[] = [];
+  let lineTruncated = false;
+  const push = (mark: string, line: string): void => {
+    const gutter = `${LOG_LINE_PREFIX}${mark}`;
+    const full = `${gutter}${line}`;
+    const kept = truncate(full, LOG_ENTRY_LINE_MAX + gutter.length);
+    if (kept !== full) lineTruncated = true;
+    lines.push(kept);
+  };
+  // The header carries kind, time, writer and this entry's id — the id is what a caller echoes
+  // back as `before` to page further, so it must be readable, not just present in the payload.
+  push(LOG_ENTRY_HEADER_MARK, `[${e.kind}] ${formatAt(e.atMs)}  ${formatSource(e.source)}  id:${safeId(e.id)}`);
+  for (const line of splitLines(e.text)) push(LOG_ENTRY_TEXT_MARK, line);
+  return { lines, lineTruncated };
+}
+
+/**
+ * Fit as many whole lines of a single entry into `budget` characters as possible, cutting the last
+ * one that doesn't fully fit. Used ONLY for the newest entry when it alone exceeds the whole block
+ * budget — every other entry that doesn't fit is dropped whole (see `renderLog`), so this is the one
+ * place an entry can still be truncated mid-body.
+ */
+function fitEntryToBudget(lines: readonly string[], budget: number): { readonly lines: string[]; readonly truncated: boolean } {
+  const out: string[] = [];
+  let remaining = budget;
+  for (const line of lines) {
+    if (remaining <= 1) return { lines: out, truncated: true };
+    if (line.length + 1 <= remaining) {
+      out.push(line);
+      remaining -= line.length + 1; // +1: the newline `emit` joins with
+      continue;
+    }
+    out.push(truncate(line, remaining - 1));
+    return { lines: out, truncated: true };
+  }
+  return { lines: out, truncated: out.length < lines.length };
+}
+
 /**
  * The log as formatCardDetail renders it. `emit()` alone is not enough here for the same reason it
  * was not enough for `description`: this is multi-line text written by ANOTHER session, so it needs a
  * line prefix (no entry line can impersonate a digest row), a per-line cap, and a stated total
  * budget. Every line pushed here — headers and markers included — is a literal produced by this
  * function; caller text only ever appears after the gutter.
+ *
+ * The block budget is spent NEWEST first, whole entries only, dropping from the OLD end — the
+ * opposite of the header/text per-line caps above. Spending it oldest-first (as this used to) drops
+ * the newest entries once the budget runs out, which is backwards for a reader and, with paging,
+ * leaves holes: a page fetched with `before` would render fine, but the very first (cursor-less)
+ * read of a large log would cut off the entries a reader most wants. An entry that doesn't fit is
+ * simply not shown, and counts toward "older not shown" — except the single newest entry, which is
+ * truncated in place if it alone exceeds the whole budget, so a read is never entirely empty.
  */
 function renderLog(view: LogView): string[] {
   const filterNote = view.kinds === null ? "" : ` filtered to ${view.kinds.join(", ")}`;
@@ -617,45 +686,58 @@ function renderLog(view: LogView): string[] {
     } that are NOT shown here. This is not an empty log; try corral_task_read again.)`];
   }
   if (view.shown.length === 0) {
+    if (view.paged === true) {
+      return [`log (${String(view.total)} entries on the card${filterNote}): no older entries — you have reached the oldest.`];
+    }
     return [`log: (no entries${view.total === 0 ? "" : `${filterNote} — the card holds ${String(view.total)}`})`];
   }
-  const lines: string[] = [];
+
+  const rendered = view.shown.map((e) => ({ id: e.id, ...renderEntryLines(e) }));
+  const n = rendered.length;
   let budget = LOG_BLOCK_MAX;
-  let truncated = false;
-  // `mark` is always one of this module's two literals, never anything derived from an entry — that
-  // is what makes the header shape unreachable from a caller's text. The per-line cap measures
-  // `line` alone, so the gutter and the mark never eat into what the writer wrote.
-  const push = (mark: string, line: string): boolean => {
-    const gutter = `${LOG_LINE_PREFIX}${mark}`;
-    if (budget <= gutter.length) return false;
-    const full = `${gutter}${line}`;
-    // `budget - 1` reserves the newline this line will be joined with. Spending the whole budget on
-    // the text and charging the newline afterwards lets the last line overrun the stated ceiling by
-    // one character — small, but the ceiling is only worth stating if it holds exactly.
-    const kept = truncate(full, Math.min(budget - 1, LOG_ENTRY_LINE_MAX + gutter.length));
-    if (kept !== full) truncated = true;
-    lines.push(kept);
-    budget -= kept.length + 1; // +1 for the newline `emit` joins with, charged to the same budget
-    return true;
-  };
-  for (const e of view.shown) {
-    // The entry's own header carries kind, time and who wrote it, behind a mark no text line can
-    // carry; the text follows on its own lines behind the other mark.
-    if (!push(LOG_ENTRY_HEADER_MARK, `[${e.kind}] ${formatAt(e.atMs)}  ${formatSource(e.source)}`)) { truncated = true; break; }
-    let stopped = false;
-    for (const line of splitLines(e.text)) {
-      if (!push(LOG_ENTRY_TEXT_MARK, line)) { stopped = true; break; }
+  let firstKeptIndex = n; // entries [firstKeptIndex, n) are kept; [0, firstKeptIndex) dropped by budget
+  let budgetTruncated = false;
+  for (let i = n - 1; i >= 0; i--) {
+    const r = rendered[i];
+    if (r === undefined) break;
+    const size = r.lines.reduce((s, l) => s + l.length + 1, 0);
+    if (size <= budget) {
+      budget -= size;
+      firstKeptIndex = i;
+      continue;
     }
-    if (stopped) { truncated = true; break; }
+    if (firstKeptIndex === n) {
+      // Nothing kept yet: the newest entry alone exceeds the budget — keep as much of it as fits.
+      const fit = fitEntryToBudget(r.lines, budget);
+      rendered[i] = { id: r.id, lines: fit.lines, lineTruncated: r.lineTruncated || fit.truncated };
+      firstKeptIndex = i;
+    }
+    budgetTruncated = true;
+    break;
   }
+
+  const kept = rendered.slice(firstKeptIndex);
+  const droppedByBudget = firstKeptIndex;
+  const olderNotShown = view.hidden + droppedByBudget;
+  const truncated = budgetTruncated || kept.some((k) => k.lineTruncated);
+  const oldestShown = kept[0];
+
   // The two marks are stated to the CONSUMER, not just enforced here: a reader that cannot tell a
   // header from quoted text gains nothing from the header being unforgeable.
-  const header = `log (${String(view.total)} entries on the card${filterNote}; showing ${String(view.shown.length)}${
-    view.hidden > 0 ? `, ${String(view.hidden)} older not shown` : ""
+  const header = `log (${String(view.total)} entries on the card${filterNote}; showing ${String(kept.length)}${
+    olderNotShown > 0 ? `, ${String(olderNotShown)} older not shown` : ""
   }${truncated ? ", TRUNCATED" : ""}; every line below is prefixed by this tool — "${LOG_LINE_PREFIX}${LOG_ENTRY_HEADER_MARK}" starts an entry header corral wrote, "${LOG_LINE_PREFIX}${LOG_ENTRY_TEXT_MARK}" starts that entry's own text):`;
+  // The exact call to page further — or the explicit statement that there is nothing further, so a
+  // reader never has to guess whether pagination exists.
+  const paging = olderNotShown > 0 && oldestShown !== undefined
+    ? `older: ${String(olderNotShown)} more${filterNote} — call corral_task_read with before: "${safeId(oldestShown.id)}"${
+      view.kinds === null ? "" : ` (pass the same kind filter again, or it reads as "everything")`
+    }`
+    : `no older entries${filterNote}`;
   return [
     header,
-    ...lines,
+    ...kept.flatMap((k) => k.lines),
+    paging,
     // Said to the CONSUMER, not just in a comment: a name in this block is what a session was called
     // when it wrote, captured at write time and never refreshed. Sending a message to it is how a
     // handoff goes to the wrong session.

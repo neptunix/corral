@@ -128,14 +128,34 @@ export interface ReadArgs {
   readonly kind?: readonly LogKind[] | undefined;
   readonly boardId?: string | undefined;
   readonly taskId?: string | undefined;
+  // An entry id from a PREVIOUS read's paging footer — pages back to entries strictly older than it.
+  readonly before?: string | undefined;
 }
 
-/** Window and filter a card's log into a LogView for formatCardDetail. */
-function logView(log: readonly LogEntry[], kind: readonly LogKind[] | undefined): LogView {
+/**
+ * Window and filter a card's log into a LogView for formatCardDetail, or refuse when `before` names
+ * no entry. The cursor is located in the FULL log, never the kind-filtered one — an id from a read
+ * that used a different `kind` must still resolve — so a stale or wrong id gets an explicit refusal
+ * rather than silently falling back to the newest page, which would look like a normal read and hide
+ * the mistake instead of surfacing it.
+ */
+function logView(log: readonly LogEntry[], kind: readonly LogKind[] | undefined, before: string | undefined): LogView | { readonly refusal: string } {
   const kinds = kind === undefined || kind.length === 0 ? null : [...kind];
-  const matched = kinds === null ? log : log.filter((e) => kinds.includes(e.kind));
+  if (before === undefined) {
+    const matched = kinds === null ? log : log.filter((e) => kinds.includes(e.kind));
+    const shown = matched.slice(-LOG_ENTRIES_SHOWN);
+    return { shown, total: log.length, hidden: matched.length - shown.length, kinds, unavailable: false };
+  }
+  const cursorIndex = log.findIndex((e) => e.id === before);
+  if (cursorIndex === -1) {
+    return { refusal: `no log entry with id "${truncate(oneLine(before), TASK_TITLE_MAX)}" — it may have been evicted since your last read, or the id is wrong. Read again without \`before\` to see the newest page.` };
+  }
+  // `log` is append order (oldest first), so everything strictly older than the cursor is the prefix
+  // before its index — filtered by kind the same way the cursor-less branch filters the whole log.
+  const olderInFullLog = log.slice(0, cursorIndex);
+  const matched = kinds === null ? olderInFullLog : olderInFullLog.filter((e) => kinds.includes(e.kind));
   const shown = matched.slice(-LOG_ENTRIES_SHOWN);
-  return { shown, total: log.length, hidden: matched.length - shown.length, kinds, unavailable: false };
+  return { shown, total: log.length, hidden: matched.length - shown.length, kinds, unavailable: false, paged: true };
 }
 
 export function readHandler(deps: TaskDeps, args: ReadArgs = {}): Promise<string> {
@@ -149,9 +169,11 @@ export function readHandler(deps: TaskDeps, args: ReadArgs = {}): Promise<string
       const board = await deps.client.board(target.boardId).catch(() => null);
       const task = board?.tasks.find((t) => t.id === target.taskId);
       if (task === undefined) return `could not read ${target.boardId}/${target.taskId} — it may have just been deleted, or corral is unreachable`;
+      const view = logView(task.log, args.kind, args.before);
+      if ("refusal" in view) return view.refusal;
       return formatCardDetail(
         { boardId: target.boardId, taskId: task.id, title: task.title, description: task.description, status: task.status, priority: task.priority },
-        logView(task.log, args.kind),
+        view,
       );
     }
 
@@ -167,7 +189,9 @@ export function readHandler(deps: TaskDeps, args: ReadArgs = {}): Promise<string
     if (task === undefined) {
       return formatCardDetail(card, { shown: [], total: card.logCount, hidden: 0, kinds: null, unavailable: true });
     }
-    return formatCardDetail(card, logView(task.log, args.kind));
+    const view = logView(task.log, args.kind, args.before);
+    if ("refusal" in view) return view.refusal;
+    return formatCardDetail(card, view);
   });
 }
 
@@ -285,7 +309,7 @@ export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string>
  */
 export const TASK_TOOL_DESCRIPTIONS = {
   read:
-    "Read the FULL description of a card, plus its log — corral_whoami shows only a one-line description preview and the log's size. Defaults to the card THIS session is bound to; pass `boardId` AND `taskId` together to read ANY card on the machine (a bare `taskId` is refused — a task id is unique only within its board, and corral_task_bind with no arguments lists both). Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. The log returns the most recent entries and says how many older ones it left out; `kind` narrows it to particular entry kinds. Read-only.",
+    "Read the FULL description of a card, plus its log — corral_whoami shows only a one-line description preview and the log's size. Defaults to the card THIS session is bound to; pass `boardId` AND `taskId` together to read ANY card on the machine (a bare `taskId` is refused — a task id is unique only within its board, and corral_task_bind with no arguments lists both). Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. The log returns the most recent entries and says how many older ones it left out; `kind` narrows it to particular entry kinds. To page further back, take the id from an entry's header line (or the paging footer) in a previous read and pass it as `before` — repeat with each page's oldest id to walk the whole log; an unknown or evicted id is refused rather than silently returning the newest page. Read-only.",
   log:
     "Append ONE entry to a card's log. The log is APPEND-ONLY and is the card's history, beside `description`, which states the task — writing an outcome into the description destroys the statement of the task, which is what this field exists to prevent. Defaults to the card THIS session is bound to; pass `boardId` AND `taskId` together to append to ANOTHER card — a session may add to any card even though it may only rewrite its own. Write an entry when a fact about the task changed that the next session would otherwise have to re-derive: a decision and what it rejected, a limitation or blocker found, a phase finished and what is now true. Do NOT write per-file progress, \"starting work\", a restatement of the diff, or test results — the repository and the PR already record those. ONE decision or fact per entry, the decision FIRST in one short line, then at most two sentences of why or what was rejected — around 200 characters; no lists, no retelling of the diff. The character limit is a ceiling, not a target: over it the entry is REFUSED with the overage — shorten it and log again; nothing is truncated. The server stamps the time and the writer.",
   create:
@@ -321,6 +345,9 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
         taskId: z.string().optional().describe("with boardId, read another card; a bare taskId is refused"),
         kind: z.array(LogKindSchema).optional().describe(
           "narrow the log to these kinds; omit for all. `note` is what a session wrote; the rest name corral's own lifecycle events (created, session_*, status_changed).",
+        ),
+        before: z.string().optional().describe(
+          "page back to log entries older than this one. The id comes from a previous corral_task_read — either an entry's header line (`id:<id>`) or the paging footer (`older: N more — call corral_task_read with before: \"<id>\"`). Omit for the newest page. An id not found in the log (evicted, or wrong) is refused.",
         ),
       },
       annotations: { readOnlyHint: true },
