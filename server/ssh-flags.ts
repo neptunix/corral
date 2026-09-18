@@ -17,8 +17,12 @@ export const SSH_SOCKET_DIR = path.join(CORRAL_HOME, "ssh");
 
 // %C is ssh's own hash of (local host, remote host, port, user) — short and collision-free, unlike
 // spelling those out, which routinely exceeds the ~100-byte unix-domain-socket path limit once
-// CORRAL_HOME sits a few directories deep.
+// CORRAL_HOME sits a few directories deep. Double-quoted per ssh_config's own quoting rule: `-o`
+// values are parsed with the SAME tokenizer as an ssh_config line, which splits on a bare space — a
+// CORRAL_HOME containing one (a macOS "First Last" home directory, say) would otherwise break every
+// remote ssh call with an "extra arguments" error.
 const CONTROL_PATH = path.join(SSH_SOCKET_DIR, "%C");
+const QUOTED_CONTROL_PATH = `"${CONTROL_PATH}"`;
 
 // How long the shared connection lingers after its last client disconnects, so a burst of calls a
 // few seconds apart (poller, statusline, recap sweep) reuses one connection instead of paying a new
@@ -37,13 +41,28 @@ const SAFE_SOCKET_PATH_BUDGET = 100;
 
 let socketDirEnsured = false;
 
-// Idempotent and synchronous, so every flag builder below can call it inline with no `await`. Mode is
-// set with an explicit chmod rather than trusting `mkdirSync`'s `mode` option, which the OS applies
-// through the process umask and so cannot be relied on to land at exactly 0700.
+/**
+ * Idempotent and synchronous, so every flag builder below can call it inline with no `await`. Mode is
+ * set with an explicit chmod rather than trusting `mkdirSync`'s `mode` option, which the OS applies
+ * through the process umask and so cannot be relied on to land at exactly 0700.
+ *
+ * Failure is caught and logged, never thrown: `sshFlags`'s only interactive-attach caller
+ * (`buildAttachSpec`, via `server/ws-attach.ts`'s synchronous `onConnection`) has no surrounding
+ * try/catch, since building an ssh argv used to be pure string work that could never fail. A bad
+ * `CORRAL_HOME` (read-only, a stray file already occupying the path, a full disk) must degrade —
+ * ssh itself falls back to an unshared connection when it can't create the control socket — not
+ * crash the whole server on the next attach or one-shot call.
+ */
 function ensureSocketDir(): void {
   if (socketDirEnsured) return;
-  mkdirSync(SSH_SOCKET_DIR, { recursive: true, mode: 0o700 });
-  chmodSync(SSH_SOCKET_DIR, 0o700);
+  try {
+    mkdirSync(SSH_SOCKET_DIR, { recursive: true, mode: 0o700 });
+    chmodSync(SSH_SOCKET_DIR, 0o700);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[ssh-flags] could not create ${SSH_SOCKET_DIR} (${msg}) — ssh calls will run unshared.`);
+    return;
+  }
   if (SSH_SOCKET_DIR.length + 1 + CONTROL_PATH_HASH_LEN > SAFE_SOCKET_PATH_BUDGET) {
     console.error(
       `[ssh-flags] CORRAL_HOME (${CORRAL_HOME}) puts the ssh control socket path close to or over the ` +
@@ -53,46 +72,38 @@ function ensureSocketDir(): void {
   socketDirEnsured = true;
 }
 
-/** The connection-sharing flags alone — every ssh invocation below folds these in. */
+/**
+ * The connection-sharing flags alone: `ControlMaster`/`ControlPath`/`ControlPersist` plus the
+ * keepalives. Every ssh invocation folds these in — NOT only the interactive attach — because
+ * whichever invocation happens to establish the master (a poll, a statusline read, an attach) is the
+ * one whose flags govern that connection's liveness. Splitting the keepalives into a
+ * separate "attach-only" flag set would silently disable them whenever a plain one-shot call won the
+ * race to create the master, which is the common case: one-shot traffic (poller, statusline, recap
+ * sweep) vastly outnumbers attach opens.
+ */
 export function sshShareFlags(): string[] {
   ensureSocketDir();
   return [
     "-o", "ControlMaster=auto",
-    "-o", `ControlPath=${CONTROL_PATH}`,
+    "-o", `ControlPath=${QUOTED_CONTROL_PATH}`,
     "-o", `ControlPersist=${String(SSH_CONTROL_PERSIST_S)}`,
-  ];
-}
-
-/**
- * The ONE definition of the flags for a one-shot ssh call (`buildExec`, transcript/statusline reads,
- * the session registry, the diagnostics remote probe). `ConnectTimeout` only bounds the initial
- * connect — a mux client attaching to an already-running master skips that step entirely — so callers
- * still need their own overall `timeout` on the exec itself; this function does not replace that.
- */
-export function sshOneShotFlags(): string[] {
-  return [
-    "-o", "ConnectTimeout=8",
-    "-o", "StrictHostKeyChecking=yes",
-    ...sshShareFlags(),
-  ];
-}
-
-/**
- * The ONE definition of the flags for the interactive live-terminal attach (`buildAttachSpec`). It
- * DOES share the master: every corral ssh call multiplexes onto the same `ControlPath`, so whichever
- * call happens to establish the connection first — a poll, a statusline read, or the attach itself —
- * makes no difference, and an attach that reuses an already-open connection skips a full handshake
- * before the terminal becomes interactive. `ControlPersist` also means killing the attach's ssh
- * process (the pty-bridge's SIGHUP/SIGKILL reap) only closes that one multiplexed channel, never the
- * shared master. `ServerAliveInterval`/`ServerAliveCountMax` are kept alongside the share flags rather
- * than folded into a single universal flag set: they apply only when THIS invocation is the one that
- * establishes the master, which any of corral's ssh calls could end up being.
- */
-export function sshAttachFlags(): string[] {
-  return [
-    "-o", "ConnectTimeout=8",
     "-o", "ServerAliveInterval=15",
     "-o", "ServerAliveCountMax=2",
+  ];
+}
+
+/**
+ * The ONE definition of the flags for every corral ssh call — one-shot herdr/read commands
+ * (`buildExec`, transcript/statusline reads, the session registry, the diagnostics remote probe) and
+ * the interactive live-terminal attach (`buildAttachSpec`) alike. `ConnectTimeout` only bounds the
+ * initial connect — a mux client attaching to an already-running master skips that step entirely — so
+ * one-shot callers still need their own overall `timeout` on the exec itself; this function does not
+ * replace that. The attach has no such timeout by design (a long-lived pty), which is exactly why the
+ * keepalives in `sshShareFlags` matter regardless of which call establishes the master.
+ */
+export function sshFlags(): string[] {
+  return [
+    "-o", "ConnectTimeout=8",
     "-o", "StrictHostKeyChecking=yes",
     ...sshShareFlags(),
   ];

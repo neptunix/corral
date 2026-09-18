@@ -7,7 +7,8 @@ import path from "node:path";
 import { STATUSLINE_MAX_BYTES, STATUSLINE_READ_TIMEOUT_MS } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { defaultExec, type ExecFn } from "./herdr.ts";
-import { sshOneShotFlags } from "./ssh-flags.ts";
+import { sshFlags } from "./ssh-flags.ts";
+
 // Mirrors transcript.ts: no shell metacharacters may reach the remote command string.
 const SAFE_REMOTE_PATH_RE = /^[A-Za-z0-9~/._:@/-]+$/;
 // session_id is used as a filename segment; match the capture script's charset guard.
@@ -67,7 +68,7 @@ async function readRemote(
   // `|| true`: a missing file yields empty stdout + exit 0 (→ not-found), not a rejected exec.
   const sshCmd = `cat ${filePath} 2>/dev/null || true`;
   try {
-    const { stdout } = await exec("ssh", [...sshOneShotFlags(), env.sshHost, sshCmd], { timeout: STATUSLINE_READ_TIMEOUT_MS });
+    const { stdout } = await exec("ssh", [...sshFlags(), env.sshHost, sshCmd], { timeout: STATUSLINE_READ_TIMEOUT_MS });
     if (stdout.trim() === "") return { data: null, status: "not-found" };
     const body = stdout.length > STATUSLINE_MAX_BYTES ? stdout.slice(0, STATUSLINE_MAX_BYTES) : stdout;
     return parseStatusline(body);

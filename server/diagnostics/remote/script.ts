@@ -1,7 +1,7 @@
 import { quote } from "shell-quote";
 
 import type { HerdrEnv } from "../../../environments.ts";
-import { sshOneShotFlags } from "../../ssh-flags.ts";
+import { sshFlags } from "../../ssh-flags.ts";
 import { MAX_READABLE_BYTES } from "../deps.ts";
 import type { ManifestEntry, ProbeManifest } from "./manifest.ts";
 import { toolCallSignature } from "./recorder.ts";
@@ -95,7 +95,7 @@ const TRAILER = ":";
 
 function toSpec(env: RemoteEnv, lines: readonly string[], expectedKeys: ReadonlySet<string>): RoundSpec {
   const script = [PREAMBLE, ...lines, TRAILER].join("\n");
-  return { file: "ssh", args: [...sshOneShotFlags(), env.sshHost, script], timeoutMs: ROUND_TIMEOUT_MS, expectedKeys };
+  return { file: "ssh", args: [...sshFlags(), env.sshHost, script], timeoutMs: ROUND_TIMEOUT_MS, expectedKeys };
 }
 
 /** Round F: filesystem facts. One `ssh` call, one remote-shell parse — walks the manifest exactly. */
