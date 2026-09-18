@@ -1356,6 +1356,13 @@ export function createApi(opts: {
       // Start with Remote Control connected. Default OFF: this connects the session to claude.ai, so
       // it is an explicit per-spawn decision, never implied (spec A.1). Absent === off.
       remoteControl: z.boolean().optional(),
+      // Who is spawning this session. Absent means unknown — an old client is never recorded as
+      // "operator". A session value's sessionId may be null (the caller may not have registered
+      // yet); it is resolved from the poller snapshot below, and dropped if that fails.
+      spawnedBy: z.union([
+        z.literal("operator"),
+        z.object({ sessionId: z.string().regex(UUID_RE).nullable(), env: z.string(), paneId: z.string().regex(PANE_RE) }),
+      ]).optional(),
     }).safeParse(body);
     if (!parsed.success) {
       // A non-object body yields an issue with path [] — "".join(".") is "", not undefined, so ?? never fires.
@@ -1371,6 +1378,11 @@ export function createApi(opts: {
     const rawTwid = parsed.data.targetWorkspaceId;
     if (rawTwid !== null && rawTwid !== undefined && !WS_RE.test(rawTwid)) {
       return c.json({ error: { code: "validation", message: "bad targetWorkspaceId" } }, 400);
+    }
+
+    const spawnedByInput = parsed.data.spawnedBy;
+    if (typeof spawnedByInput === "object" && opts.envs.find((e) => e.id === spawnedByInput.env) === undefined) {
+      return c.json({ error: { code: "validation", message: "unknown env in spawnedBy" } }, 400);
     }
 
     const board = opts.storage.getBoard(bid);
@@ -1505,6 +1517,21 @@ export function createApi(opts: {
     try {
       const result = await Promise.race([spawnPromise, spawnTimeoutPromise]);
       const liveSessionId = opts.poller.getSnapshot().sessions.find((s) => s.env === targetEnv.id && s.paneId === result.paneId)?.sessionId ?? null;
+      // A session value with a null sessionId (the spawner hadn't registered yet) is resolved by
+      // env+paneId against the live snapshot — a pane alone is not trustworthy (herdr reuses pane
+      // ids) — and dropped if that fails, rather than stored as a bare, unverifiable pane claim.
+      const resolvedSpawnedBy: SessionLink["spawnedBy"] = spawnedByInput === undefined
+        ? undefined
+        : spawnedByInput === "operator"
+          ? "operator"
+          : spawnedByInput.sessionId !== null
+            ? { sessionId: spawnedByInput.sessionId, env: spawnedByInput.env, paneId: spawnedByInput.paneId }
+            : (() => {
+                const row = opts.poller.getSnapshot().sessions.find((s) => s.env === spawnedByInput.env && s.paneId === spawnedByInput.paneId);
+                return row?.sessionId === null || row?.sessionId === undefined
+                  ? undefined
+                  : { sessionId: row.sessionId, env: spawnedByInput.env, paneId: spawnedByInput.paneId };
+              })();
       const link: SessionLink = {
         env: targetEnv.id, paneId: result.paneId,
         tabId: result.tabId, tabLabel: result.tabLabel,
@@ -1513,6 +1540,7 @@ export function createApi(opts: {
         // Almost always null here — Claude hasn't registered on the fresh pane yet (it's absent from
         // `agent list` until then). Not a bug: the reconciler backfills it once the poller sees the id.
         sessionId: liveSessionId,
+        ...(resolvedSpawnedBy === undefined ? {} : { spawnedBy: resolvedSpawnedBy }),
       };
       // An idempotent spawn adopts a pane spawnSession found ALREADY live in the workspace (see
       // spawn.ts's join-path rejoin scan) — that pane can already be linked on THIS card (e.g. a

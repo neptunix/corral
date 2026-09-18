@@ -706,6 +706,162 @@ describe("POST /api/boards/:bid/tasks/:tid/spawn", () => {
   });
 });
 
+describe("POST /api/boards/:bid/tasks/:tid/spawn — spawnedBy", () => {
+  it("stores \"operator\" as given", async () => {
+    const { app, tid } = await (async () => {
+      const { app, spawn: _spawn } = makeApiWithSpawn(tmpDir);
+      const tid = await createTaskOnTestBoard(app);
+      return { app, tid };
+    })();
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", spawnedBy: "operator" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { spawnedBy?: unknown };
+    expect(body.spawnedBy).toBe("operator");
+  });
+
+  it("stores a session spawnedBy with an explicit sessionId", async () => {
+    const { app, tid } = await (async () => {
+      const { app } = makeApiWithSpawn(tmpDir);
+      const tid = await createTaskOnTestBoard(app);
+      return { app, tid };
+    })();
+    const spawnedBy = { sessionId: "11111111-1111-1111-1111-111111111111", env: "work-local", paneId: "w1:parent" };
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", spawnedBy }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { spawnedBy?: unknown };
+    expect(body.spawnedBy).toEqual(spawnedBy);
+  });
+
+  it("fills a null sessionId from the poller snapshot by env+paneId", async () => {
+    const snapshot: Snapshot = {
+      envs: { "work-local": { reachable: true } },
+      sessions: [{
+        env: "work-local", paneId: "w1:parent", status: "idle", agent: "claude",
+        cwd: "/repo", tab: "parent-tab", workspace: "w1",
+        sessionId: "22222222-2222-2222-2222-222222222222", recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
+      }],
+    };
+    const spawn = vi.fn(async (_opts: unknown): Promise<SpawnResult> => ({
+      paneId: "w1:p2", tabId: "w1:t2", workspaceId: "w1",
+      workspaceLabel: "corral", tabLabel: "t-a", cwdSnapshot: "/proj", idempotent: false,
+    }));
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage: createStorage(tmpDir), spawn, listWorkspaces: vi.fn().mockResolvedValue([]) });
+    const tid = await createTaskOnTestBoard(app);
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", spawnedBy: { sessionId: null, env: "work-local", paneId: "w1:parent" } }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { spawnedBy?: unknown };
+    expect(body.spawnedBy).toEqual({ sessionId: "22222222-2222-2222-2222-222222222222", env: "work-local", paneId: "w1:parent" });
+  });
+
+  it("drops a null sessionId that the snapshot cannot resolve", async () => {
+    const { app, tid } = await (async () => {
+      const { app } = makeApiWithSpawn(tmpDir);
+      const tid = await createTaskOnTestBoard(app);
+      return { app, tid };
+    })();
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", spawnedBy: { sessionId: null, env: "work-local", paneId: "w1:unknown-pane" } }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { spawnedBy?: unknown };
+    expect(body.spawnedBy).toBeUndefined();
+  });
+
+  it("stores nothing when spawnedBy is absent", async () => {
+    const { app, tid } = await (async () => {
+      const { app } = makeApiWithSpawn(tmpDir);
+      const tid = await createTaskOnTestBoard(app);
+      return { app, tid };
+    })();
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { spawnedBy?: unknown };
+    expect(body.spawnedBy).toBeUndefined();
+  });
+
+  it("400s on a bad env in spawnedBy", async () => {
+    const { app, tid } = await (async () => {
+      const { app } = makeApiWithSpawn(tmpDir);
+      const tid = await createTaskOnTestBoard(app);
+      return { app, tid };
+    })();
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", spawnedBy: { sessionId: null, env: "no-such-env", paneId: "w1:p1" } }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on a bad paneId in spawnedBy", async () => {
+    const { app, tid } = await (async () => {
+      const { app } = makeApiWithSpawn(tmpDir);
+      const tid = await createTaskOnTestBoard(app);
+      return { app, tid };
+    })();
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", spawnedBy: { sessionId: null, env: "work-local", paneId: "../etc" } }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on a bad sessionId in spawnedBy", async () => {
+    const { app, tid } = await (async () => {
+      const { app } = makeApiWithSpawn(tmpDir);
+      const tid = await createTaskOnTestBoard(app);
+      return { app, tid };
+    })();
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", spawnedBy: { sessionId: "not-a-uuid", env: "work-local", paneId: "w1:p1" } }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("keeps the existing link's spawnedBy on idempotent adoption of an already-bound pane", async () => {
+    const snapshot: Snapshot = {
+      envs: { "work-local": { reachable: true } },
+      sessions: [{
+        env: "work-local", paneId: "w1-1", status: "idle", agent: "claude",
+        cwd: "/repo/x", tab: "already-here", workspace: "demo-api",
+        sessionId: "sess-abc", recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
+      }],
+    };
+    const spawn = vi.fn(async (_opts: unknown): Promise<SpawnResult> => ({
+      paneId: "w1-1", tabId: "w1-1", workspaceId: "w1",
+      workspaceLabel: "demo-api", tabLabel: "already-here", cwdSnapshot: "/repo/x", idempotent: true,
+    }));
+    const app = createApi({ poller: { ...poller, getSnapshot: () => snapshot }, envs: ENVIRONMENTS, storage: createStorage(tmpDir), spawn, listWorkspaces: vi.fn().mockResolvedValue([]) });
+    const tid = await createTaskOnTestBoard(app);
+    await app.request(`/api/boards/test/tasks/${tid}/attach`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", paneId: "w1-1" }),
+    });
+
+    const res = await app.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", targetWorkspaceId: null, repo: "corral", name: "second-name", spawnedBy: "operator" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { spawnedBy?: unknown; idempotent: boolean };
+    expect(body.idempotent).toBe(true);
+    expect(body.spawnedBy).toBeUndefined(); // attach did not set one — adoption must not overwrite with this request's value
+  });
+});
+
 describe("POST /api/boards/:bid/tasks/:tid/spawn — idempotent adoption of an already-bound pane", () => {
   it("heals a churn-moved link's location fields instead of returning the stale pane", async () => {
     // The stored link's pane moved (herdr restart) — same Claude session, new paneId. linkBindsSession
