@@ -303,7 +303,6 @@ const PaneListAllSchema = z.object({
       workspace_id: z.string(),
       agent: z.string().optional(),
       agent_status: z.string().optional(),
-      agent_session: AgentSessionSchema,
     })),
   }),
 });
@@ -455,8 +454,10 @@ const warnedPaneListShape = new Set<string>();
  * Every pane herdr knows about, with its tab/workspace and whether an agent is registered on it.
  * Distinct from `listPanes` above, which is workspace-scoped and carries `cwd` for spawn.
  *
- * `hasAgent` reports whether herdr shows ANY agent signal on the pane: an `agent` string, an
- * `agent_session`, or an `agent_status` other than "unknown". It is NOT authoritative for absence:
+ * `hasAgent` reports whether herdr shows a live agent signal on the pane: an `agent` string or an
+ * `agent_status` other than "unknown". `agent_session` is deliberately not one: herdr keeps it on the
+ * pane after Claude exits, so counting it marks every post-exit shell occupied and nothing is ever
+ * reaped. It is NOT authoritative for absence:
  * an agent started as a bare shell (`herdr agent start <name> -- bash`) is reported here exactly like
  * a free pane. Occupancy is decided by the `agent list` index in the poller snapshot, which does list
  * that case; this call supplies pane IDENTITY. An unparseable list yields [], which the reaper reads
@@ -478,7 +479,7 @@ export async function listAllPanes(env: HerdrEnv, exec?: ExecFn): Promise<PaneId
     paneId: p.pane_id,
     tabId: p.tab_id,
     workspaceId: p.workspace_id,
-    hasAgent: p.agent !== undefined || p.agent_session !== undefined || (p.agent_status ?? "unknown") !== "unknown",
+    hasAgent: p.agent !== undefined || (p.agent_status ?? "unknown") !== "unknown",
   }));
 }
 

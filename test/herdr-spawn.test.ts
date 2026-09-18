@@ -229,10 +229,12 @@ describe("listAllPanes", () => {
     expect((await listAllPanes(env, makeExec(payload)))[0]!.hasAgent).toBe(true);
   });
 
-  it("treats a lone agent_session as occupied (no `agent`, status unknown)", async () => {
+  it("treats a lingering agent_session as agentless (no `agent`, status unknown)", async () => {
+    // Live-observed post-exit shape on current herdr: the pane keeps `agent_session` after Claude
+    // exits. Counting it as occupied left every such shell unreaped.
     const payload = JSON.stringify({ result: { panes: [{ agent_status: "unknown", cwd: "/x", pane_id: "w1:p7", tab_id: "w1:t7", workspace_id: "w1",
-      agent_session: { source: "herdr:claude", kind: "id", value: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" } }] } });
-    expect((await listAllPanes(env, makeExec(payload)))[0]!.hasAgent).toBe(true);
+      agent_session: { agent: "claude", source: "herdr:claude", kind: "id", value: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" } }] } });
+    expect((await listAllPanes(env, makeExec(payload)))[0]!.hasAgent).toBe(false);
   });
 
   it("calls `pane list` with no --workspace flag", async () => {

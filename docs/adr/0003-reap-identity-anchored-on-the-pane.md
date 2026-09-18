@@ -123,10 +123,11 @@ in the original design of this change and restored after review:
   list it, because a missing `agent` string defaults to `""`. So the two calls carry
   different authority: `pane list` decides **identity**, `agent list` decides
   **occupancy**, and the reap needs both. The complementary state was observed live
-  the same way: a pane whose Claude has **exited** reports exactly that shape too and
-  is absent from `agent list`, so the reap path's `hasAgent === false` condition does
-  accept the one state the reaper exists to act on — that entry is pinned as a
-  fixture in `test/herdr-spawn.test.ts`.
+  the same way: a pane whose Claude has **exited** reports no `agent` and
+  `agent_status: "unknown"` and is absent from `agent list`. Current herdr keeps the
+  exited session's `agent_session` on the pane, so `hasAgent` ignores that field —
+  counting it made every post-exit shell look occupied and none was ever reaped.
+  Both post-exit shapes are pinned as fixtures in `test/herdr-spawn.test.ts`.
 - The re-read of the snapshot immediately before closing. The tempting argument for
   deleting it — that a fresh `pane list` is strictly newer evidence — is false:
   response *arrival* order is not state order. A `pane list` reply can be generated

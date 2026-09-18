@@ -8,8 +8,8 @@
 // This runs as a `postinstall` step. It is a no-op where the file is missing — Linux builds
 // node-pty from source (compiler sets the bit) and Windows has no spawn-helper at all.
 //
-// Remove once node-pty ships a stable release >= 1.2.0 (the fix currently only exists in the
-// 1.2.0-beta prereleases).
+// corral now pins a 1.2.0 beta that ships the bit set, so this is a no-op there; kept as a guard
+// until node-pty ships a stable release >= 1.2.0.
 
 import { chmodSync, existsSync, statSync } from "node:fs";
 import { relative } from "node:path";
