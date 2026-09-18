@@ -23,31 +23,35 @@ const env: RemoteEnv = {
 };
 
 describe("buildRoundF", () => {
-  it("composes ssh with the probe's own flag list and ONE remote command argument", () => {
+  it("composes ssh with the shared one-shot flags and ONE remote command argument", () => {
     const spec = buildRoundF(env, buildManifest(env.claudeConfigDirs));
     expect(spec.file).toBe("ssh");
-    expect(spec.args.slice(0, 4)).toEqual(["-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=yes"]);
-    expect(spec.args[4]).toBe("h");
-    expect(spec.args).toHaveLength(6);
+    expect(spec.args).toContain("ConnectTimeout=8");
+    expect(spec.args).toContain("StrictHostKeyChecking=yes");
+    expect(spec.args).toContain("ControlMaster=auto");
+    // Last two args are always the host then the ONE composed remote script, whatever flags precede them.
+    expect(spec.args[spec.args.length - 2]).toBe("h");
     expect(spec.timeoutMs).toBe(ROUND_TIMEOUT_MS);
   });
 
   it("wraps bash -lc around ONLY the PATH snippet and emits PATH as its own key", () => {
     const spec = buildRoundF(env, buildManifest(env.claudeConfigDirs));
-    const cmd = spec.args[5] ?? "";
+    const cmd = spec.args[spec.args.length - 1] ?? "";
     expect(cmd.match(/bash -lc/g)).toHaveLength(1);
     expect(cmd).toContain(`bash -lc 'printf %s "$PATH"'`);
   });
 
   it("pins the per-file cap to MAX_READABLE_BYTES and emits markers, never truncated content", () => {
-    const cmd = buildRoundF(env, buildManifest(env.claudeConfigDirs)).args[5] ?? "";
+    const args = buildRoundF(env, buildManifest(env.claudeConfigDirs)).args;
+    const cmd = args[args.length - 1] ?? "";
     expect(cmd).toContain(`-gt ${String(MAX_READABLE_BYTES)}`);
     expect(cmd).toContain("!too-large:x");
     expect(cmd).not.toContain("head -c"); // truncation is banned outright
   });
 
   it("uses only POSIX primitives — no stat, no timeout(1), no base64 -w", () => {
-    const cmd = buildRoundF(env, buildManifest(env.claudeConfigDirs)).args[5] ?? "";
+    const args = buildRoundF(env, buildManifest(env.claudeConfigDirs)).args;
+    const cmd = args[args.length - 1] ?? "";
     expect(cmd).not.toMatch(/\bstat\b/);
     expect(cmd).not.toMatch(/\btimeout\b/);
     expect(cmd).not.toContain("-w0");
@@ -58,7 +62,7 @@ describe("buildRoundF", () => {
 describe("buildRoundT", () => {
   it("maps tool tokens from config: herdrBin+socket unquoted, spawnCommand for claude", () => {
     const { spec, tools } = buildRoundT(env);
-    const cmd = spec.args[5] ?? "";
+    const cmd = spec.args[spec.args.length - 1] ?? "";
     expect(cmd).toContain("HERDR_SOCKET_PATH=~/s.sock ~/.local/bin/herdr --version");
     expect(cmd).toContain("claude --version");
     expect(cmd).toContain("CLAUDE_CONFIG_DIR="); // one integration probe per config dir
@@ -94,13 +98,15 @@ describe("buildRound2", () => {
       ({ key: `r2_${String(i)}`, kind: "file" as const, path: `/very/long/path/number/${String(i)}/statusline command.sh` }));
     const specs = buildRound2(env, reqs);
     expect(specs.length).toBeGreaterThan(1);
-    for (const s of specs) expect((s.args[5] ?? "").length).toBeLessThanOrEqual(100_000);
-    expect(specs[0]?.args[5]).toContain("'/very/long/path/number/0/statusline command.sh'");
+    for (const s of specs) expect((s.args[s.args.length - 1] ?? "").length).toBeLessThanOrEqual(100_000);
+    const firstArgs = specs[0]?.args ?? [];
+    expect(firstArgs[firstArgs.length - 1]).toContain("'/very/long/path/number/0/statusline command.sh'");
   });
 
   it("a metacharacter payload cannot escape quote() — the composed command carries it inert", () => {
     const specs = buildRound2(env, [{ key: "r2_0", kind: "file", path: "/tmp/a b" }]);
-    const cmd = specs[0]?.args[5] ?? "";
+    const args = specs[0]?.args ?? [];
+    const cmd = args[args.length - 1] ?? "";
     expect(cmd).toContain("'/tmp/a b'");
   });
 });
@@ -120,7 +126,7 @@ describe("the composed round-F script, executed under a local sh (no ssh)", () =
     await mkdir(path.join(dir, "themes/corral.json"));
     const manifest = buildManifest([dir]);
     const spec = buildRoundF({ ...env, claudeConfigDirs: [dir] }, manifest);
-    const script = spec.args[5] ?? "";
+    const script = spec.args[spec.args.length - 1] ?? "";
     const stdout = await new Promise<string>((resolve, reject) => {
       execFile("sh", ["-c", script], { maxBuffer: 32 * 1024 * 1024 }, (err, out) => {
         if (err) reject(new Error(err.message)); else resolve(out); // non-zero exit = the design's unconditional-success rule broke

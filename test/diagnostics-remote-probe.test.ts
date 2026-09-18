@@ -35,7 +35,7 @@ function cannedT(tools: readonly ToolRequest[]): string {
 
 /** Routes a fake command by its literal remote-shell text, per the probe's own round tells. */
 function routeCmd(args: readonly string[]): "T" | "R2" | "F" {
-  const cmd = args[5] ?? "";
+  const cmd = args[args.length - 1] ?? "";
   if (cmd.includes("integration status")) return "T";
   if (cmd.includes("'r2_")) return "R2";
   return "F";

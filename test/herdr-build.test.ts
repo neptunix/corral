@@ -18,19 +18,24 @@ describe("buildExec", () => {
     expect(spec.options.env?.HERDR_SOCKET_PATH).toBe(os.homedir() + "/.config/herdr/sessions/personal/herdr.sock");
   });
 
-  it("remote env: ssh with ConnectTimeout + assembled command", () => {
+  it("remote env: ssh with ConnectTimeout + share flags + assembled command", () => {
     const spec = buildExec(getEnv("work-remote"), ["agent", "list"], 15000);
     expect(spec.file).toBe("ssh");
-    expect(spec.args.slice(0, 3)).toEqual(["-o", "ConnectTimeout=8", "work-box"]);
-    expect(spec.args[3]!).toBe(
+    expect(spec.args).toContain("ConnectTimeout=8");
+    expect(spec.args).toContain("StrictHostKeyChecking=yes");
+    expect(spec.args).toContain("ControlMaster=auto");
+    // Last two args are always the host then the assembled remote command, whatever flags precede them.
+    expect(spec.args[spec.args.length - 2]).toBe("work-box");
+    expect(spec.args[spec.args.length - 1]).toBe(
       "HERDR_SOCKET_PATH=~/.config/herdr/sessions/work/herdr.sock ~/.local/bin/herdr agent list",
     );
   });
 
   it("remote env: shell-quotes hostile tokens", () => {
     const spec = buildExec(getEnv("work-remote"), ["pane", "run", "w1-1", "x; rm -rf /"], 30000);
-    expect(spec.args[3]!).toContain("pane run w1-1 'x; rm -rf /'");
-    expect(spec.args[3]!).not.toMatch(/herdr pane run w1-1 x; rm/);
+    const inner = spec.args[spec.args.length - 1]!;
+    expect(inner).toContain("pane run w1-1 'x; rm -rf /'");
+    expect(inner).not.toMatch(/herdr pane run w1-1 x; rm/);
   });
 
   it("expandTilde leaves non-tilde paths untouched", () => {
@@ -62,13 +67,17 @@ describe("buildAttachSpec", () => {
     expect(s.env?.HERDR_SOCKET_PATH).toBe(os.homedir() + "/.config/herdr/sessions/personal/herdr.sock");
   });
 
-  it("remote: ssh -tt + keepalives + strict host key + assignment OUTSIDE quote()", () => {
+  it("remote: ssh -tt + keepalives + strict host key + share flags + assignment OUTSIDE quote()", () => {
     const s = buildAttachSpec(getEnv("work-remote"), "w1-1");
     expect(s.file).toBe("ssh");
     expect(s.args).toContain("-tt");
     expect(s.args).toContain("ServerAliveInterval=15");
     expect(s.args).toContain("ServerAliveCountMax=2");
     expect(s.args).toContain("StrictHostKeyChecking=yes");
+    // Shares the same ControlPath every other corral ssh call uses (server/ssh-flags.ts) — the
+    // interactive attach rides the master a poll/statusline call may already have open.
+    expect(s.args).toContain("ControlMaster=auto");
+    expect(s.args.some((a) => a.startsWith("ControlPath="))).toBe(true);
     // Last arg is the inner remote command: the env assignment + trusted socket/herdrBin stay OUTSIDE
     // quote() (so the REMOTE shell expands ~ in the socket); no `--`; paneId is a bare positional.
     const inner = s.args[s.args.length - 1] ?? "";

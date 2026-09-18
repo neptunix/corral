@@ -6,8 +6,7 @@ import path from "node:path";
 import { RECAP_CONTENT_MAX, RECAP_READ_TIMEOUT_MS, RECAP_TAIL_BYTES } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { defaultExec, type ExecFn } from "./herdr.ts";
-
-const SSH_FLAGS = ["-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=yes"];
+import { sshOneShotFlags } from "./ssh-flags.ts";
 
 // Validates that a path returned from a remote ls command contains no shell metacharacters.
 // Must be checked before interpolating into an SSH command string.
@@ -59,7 +58,7 @@ async function findTranscriptRemote(
   try {
     const { stdout } = await exec(
       "ssh",
-      [...SSH_FLAGS, env.sshHost, sshCmd],
+      [...sshOneShotFlags(), env.sshHost, sshCmd],
       { timeout: RECAP_READ_TIMEOUT_MS },
     );
     const line = stdout.trim().split("\n")[0];
@@ -127,7 +126,7 @@ async function readTailRemote(
   const sshCmd = `tail -c ${String(RECAP_TAIL_BYTES)} ${filePath}`;
   const { stdout } = await exec(
     "ssh",
-    [...SSH_FLAGS, env.sshHost, sshCmd],
+    [...sshOneShotFlags(), env.sshHost, sshCmd],
     { timeout: RECAP_READ_TIMEOUT_MS },
   );
   return stdout.length > RECAP_TAIL_BYTES ? stdout.slice(stdout.length - RECAP_TAIL_BYTES) : stdout;

@@ -10,6 +10,7 @@ import {
 } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
 import { parsePane } from "./parser.ts";
+import { sshAttachFlags, sshOneShotFlags } from "./ssh-flags.ts";
 
 export interface ExecSpec {
   readonly file: string;
@@ -32,7 +33,7 @@ export function buildExec(env: HerdrEnv, herdrArgs: readonly string[], timeoutMs
     // left literal so the REMOTE shell expands it. NOTE: socket/herdrBin must not contain spaces
     // or shell metacharacters — they are interpolated unquoted (safe only as hardcoded constants).
     const remoteCmd = `HERDR_SOCKET_PATH=${env.socket} ${env.herdrBin} ${quote([...herdrArgs])}`;
-    return { file: "ssh", args: ["-o", "ConnectTimeout=8", env.sshHost, remoteCmd], options: { timeout: timeoutMs } };
+    return { file: "ssh", args: [...sshOneShotFlags(), env.sshHost, remoteCmd], options: { timeout: timeoutMs } };
   }
   if (env.socket !== undefined) {
     return {
@@ -47,7 +48,9 @@ export function buildExec(env: HerdrEnv, herdrArgs: readonly string[], timeoutMs
 /**
  * Argv for a PTY-hosted `herdr agent attach` (consumed by the WS attach server, Task 10). Unlike
  * `buildExec` this is NOT one-shot: the remote leg gets `ssh -tt` (a real pty) + keepalives so an
- * orphaned attach is reaped, and there is no `timeout`.
+ * orphaned attach is reaped, and there is no `timeout`. It shares the same `ControlPath` as every
+ * other corral ssh call (see `sshAttachFlags`), so an attach opened while the poller already holds
+ * the connection open skips its own handshake.
  *
  * CLI syntax (Task 0, empirical on herdr 0.7.1): the attach target is a PLAIN POSITIONAL arg. There
  * is deliberately NO `--` separator — `agent attach -- <paneId>` errors "unknown option" on 0.7.1.
@@ -72,14 +75,7 @@ export function buildAttachSpec(
     const remoteCmd = `HERDR_SOCKET_PATH=${env.socket} ${env.herdrBin} ${quote([...attachArgs])}`;
     return {
       file: "ssh",
-      args: [
-        "-tt",
-        "-o", "ConnectTimeout=8",
-        "-o", "ServerAliveInterval=15",
-        "-o", "ServerAliveCountMax=2",
-        "-o", "StrictHostKeyChecking=yes",
-        env.sshHost, remoteCmd,
-      ],
+      args: ["-tt", ...sshAttachFlags(), env.sshHost, remoteCmd],
     };
   }
   return env.socket !== undefined

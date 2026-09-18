@@ -1,6 +1,7 @@
 import { quote } from "shell-quote";
 
 import type { HerdrEnv } from "../../../environments.ts";
+import { sshOneShotFlags } from "../../ssh-flags.ts";
 import { MAX_READABLE_BYTES } from "../deps.ts";
 import type { ManifestEntry, ProbeManifest } from "./manifest.ts";
 import { toolCallSignature } from "./recorder.ts";
@@ -22,11 +23,6 @@ export const PROBE_TOTAL_CAP_BYTES = 8 * MAX_READABLE_BYTES;
 
 /** No composed round-2 remote command may exceed this many characters — well under ARG_MAX. */
 const ROUND2_MAX_CMD_CHARS = 100_000;
-
-// The probe's own flag list — deliberately NOT `buildExec`'s (herdr.ts:33) or session-registry's
-// `SSH_FLAGS` (session-registry.ts:15): adding to `buildExec` would change every herdr call, so the
-// probe carries its own copy instead.
-const SSH_PROBE_FLAGS: readonly string[] = ["-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=yes"];
 
 /**
  * `ef`/`ed`/`ex` — one shell function per subject kind, defined once and called per subject.
@@ -99,7 +95,7 @@ const TRAILER = ":";
 
 function toSpec(env: RemoteEnv, lines: readonly string[], expectedKeys: ReadonlySet<string>): RoundSpec {
   const script = [PREAMBLE, ...lines, TRAILER].join("\n");
-  return { file: "ssh", args: [...SSH_PROBE_FLAGS, env.sshHost, script], timeoutMs: ROUND_TIMEOUT_MS, expectedKeys };
+  return { file: "ssh", args: [...sshOneShotFlags(), env.sshHost, script], timeoutMs: ROUND_TIMEOUT_MS, expectedKeys };
 }
 
 /** Round F: filesystem facts. One `ssh` call, one remote-shell parse — walks the manifest exactly. */

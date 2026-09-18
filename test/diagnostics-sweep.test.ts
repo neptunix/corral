@@ -47,14 +47,15 @@ function cannedT(tools: readonly ToolRequest[]): string {
 
 /**
  * A healthy fake SSH transport for one remote env — routes by literal script/host text the same way
- * Task 7's probe fixture does (`args[5]`), copied locally rather than shared: this file only needs a
- * "fully answered" variant, not the whole failure-mode matrix `diagnostics-remote-probe.test.ts` covers.
+ * Task 7's probe fixture does (last arg = the composed remote command), copied locally rather than
+ * shared: this file only needs a "fully answered" variant, not the whole failure-mode matrix
+ * `diagnostics-remote-probe.test.ts` covers.
  */
 function healthyExec(env: RemoteEnv): ExecFn {
   const manifest = buildManifest(env.claudeConfigDirs);
   const roundT = buildRoundT(env);
   return (_file, args) => {
-    const cmd = args[5] ?? "";
+    const cmd = args[args.length - 1] ?? "";
     if (cmd.includes("integration status")) return Promise.resolve({ stdout: cannedT(roundT.tools), stderr: "" });
     return Promise.resolve({ stdout: healthyCannedF(manifest), stderr: "" });
   };
@@ -171,7 +172,7 @@ describe("createDiagnosticsSweep", () => {
     const h2 = remoteEnvFixture("h2", "host2");
     const exec1 = healthyExec(h1);
     const probeExec: ExecFn = (file, args, options) =>
-      args[4] === "host2" ? Promise.reject(new Error("ssh: connect to host2: unreachable")) : exec1(file, args, options);
+      args[args.length - 2] === "host2" ? Promise.reject(new Error("ssh: connect to host2: unreachable")) : exec1(file, args, options);
     const sweep = createDiagnosticsSweep(opts({
       store, envs: [local("work"), h1, h2],
       poller: { getSnapshot: () => snapshot({ work: { reachable: true }, h1: { reachable: true }, h2: { reachable: true } }) },

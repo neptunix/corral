@@ -11,8 +11,7 @@ import type { HerdrEnv } from "../environments.ts";
 // SSH_NOISE is exported from herdr.ts — the ONE definition of "lines the ssh client wrote, not the
 // remote command". A second copy here would drift the day one of them is extended.
 import { defaultExec, type ExecFn, SSH_NOISE } from "./herdr.ts";
-
-const SSH_FLAGS = ["-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=yes"];
+import { sshOneShotFlags } from "./ssh-flags.ts";
 // Mirrors statusline.ts: no shell metacharacter may reach the remote command string. The
 // `/sessions/*.json` suffix is appended as a CONSTANT after this guard passes, so no glob character
 // ever originates from configuration.
@@ -237,7 +236,7 @@ async function readRemoteDir(sshHost: string, configDir: string, exec: ExecFn): 
   const cmd = `test -d ${configDir}/sessions || exit ${String(REMOTE_NO_DIR_EXIT)}; awk 1 ${configDir}/sessions/*.json 2>/dev/null || true`;
   let stdout: string;
   try {
-    ({ stdout } = await exec("ssh", [...SSH_FLAGS, sshHost, cmd], { timeout: CLAUDE_REGISTRY_READ_TIMEOUT_MS }));
+    ({ stdout } = await exec("ssh", [...sshOneShotFlags(), sshHost, cmd], { timeout: CLAUDE_REGISTRY_READ_TIMEOUT_MS }));
   } catch (err) {
     // A timed-out read yields a READ ERROR, never zero records — the row must not read as "idle".
     return {
