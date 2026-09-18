@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -48,8 +48,29 @@ describe("POST /api/envs/:env/uploads", () => {
   it("rejects a missing origin with 403", async () => {
     expect((await post(app, "e-local", {})).status).toBe(403);
   });
-  it("rejects a remote env with 400", async () => {
-    expect((await post(app, "e-remote", { origin: ORIGIN })).status).toBe(400);
+  it("streams a remote env's file through the remote writer with a sanitized name", async () => {
+    const calls: { host: string; name: string; bytes: number[] }[] = [];
+    const remoteApp = createApi({
+      poller, envs: [local, remote], allowedOrigins: [ORIGIN], uploadRoot: root,
+      writeRemote: (env, o) => {
+        calls.push({ host: env.sshHost, name: o.name, bytes: [...o.bytes] });
+        return Promise.resolve("/remote/tmp/corral-upload.x/shot.png");
+      },
+    });
+    const res = await post(remoteApp, "e-remote", { origin: ORIGIN });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ path: "/remote/tmp/corral-upload.x/shot.png" });
+    expect(calls).toEqual([{ host: "h", name: "shot.png", bytes: [1, 2, 3] }]);
+    expect(existsSync(root) ? readdirSync(root) : []).toEqual([]); // nothing written on this host
+  });
+  it("answers 502 when the remote write fails", async () => {
+    const failApp = createApi({
+      poller, envs: [local, remote], allowedOrigins: [ORIGIN], uploadRoot: root,
+      writeRemote: () => Promise.reject(new Error("remote write failed (ssh exit 255)")),
+    });
+    const res = await post(failApp, "e-remote", { origin: ORIGIN });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: { code: "upload_failed", message: "remote write failed (ssh exit 255)" } });
   });
   it("rejects an unknown env with 400", async () => {
     expect((await post(app, "nope", { origin: ORIGIN })).status).toBe(400);

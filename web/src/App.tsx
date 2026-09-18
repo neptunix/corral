@@ -371,7 +371,7 @@ export function App(): JSX.Element {
           waitingFor={liveByKey.get(`${session.env}:${session.paneId}`)?.waitingFor ?? null}
           remoteControl={liveByKey.get(`${session.env}:${session.paneId}`)?.remoteControl ?? null}
           registryStatus={liveByKey.get(`${session.env}:${session.paneId}`)?.registryStatus ?? null}
-          canAttachFiles={globalState?.envs[session.env]?.kind === "local"}
+          canAttachFiles={globalState?.envs[session.env] !== undefined}
           onClose={closeSession}
         />
       )}

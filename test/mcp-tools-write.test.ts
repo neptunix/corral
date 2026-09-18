@@ -306,19 +306,14 @@ describe("spawnHandler", () => {
     expect(out).toContain("pane run failed");
   });
 
-  it("refuses to spawn into a known remote environment instead of letting the server 400 (item 7)", async () => {
-    // brief is mandatory in corral_spawn's schema, and the server always rejects a brief targeting a
-    // non-local env — so a remote `env` here would otherwise ALWAYS 400. Refusing it up front (once
-    // corral_whoami's env list identifies it as remote) is strictly more useful than a generic HTTP
-    // error, and never reaches deps.client.spawn at all.
+  it("spawns into a known remote environment — the brief is delivered over ssh by the server", async () => {
     const calls: string[] = [];
     const c = stub({
       whoami: async () => ({ ...bound, envs: [...bound.envs, { id: "prod-remote", label: "Prod (remote)", kind: "remote", reachable: true }] }),
       spawn: async (a) => { calls.push(a.env); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "prod-remote" });
-    expect(calls).toHaveLength(0);
-    expect(out.toLowerCase()).toContain("local");
+    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "prod-remote", repo: "repo" });
+    expect(calls).toEqual(["prod-remote"]);
   });
 
   it("still spawns into a known LOCAL non-default environment (the remote guard is kind-specific, not env-specific)", async () => {

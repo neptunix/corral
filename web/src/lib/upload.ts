@@ -8,20 +8,36 @@ export function isFileDrag(types: readonly string[]): boolean {
   return types.includes("Files");
 }
 
-/** Upload one file to the local env's upload endpoint; returns the absolute on-host path. */
-export async function uploadFile(env: string, file: File): Promise<string> {
+/**
+ * Upload one file to an env's upload endpoint; returns the absolute path on that env's machine.
+ * XHR rather than fetch because fetch exposes no upload progress. `onProgress` reports the
+ * browser→server leg as a 0..1 fraction; for a remote env the server then still has to stream the
+ * bytes on over ssh, which the browser cannot observe, so the request outlives the last report.
+ */
+export function uploadFile(env: string, file: File, onProgress?: (fraction: number) => void): Promise<string> {
   const fd = new FormData();
   fd.append("file", file);
-  // No Content-Type header — the browser sets multipart/form-data with the boundary.
-  const res = await fetch(`/api/envs/${encodeURIComponent(env)}/uploads`, { method: "POST", body: fd });
-  if (!res.ok) {
-    const raw: unknown = await res.json().catch(() => ({}));
-    const parsed = ErrorBodySchema.safeParse(raw);
-    const message = parsed.success ? (parsed.data.error?.message ?? `HTTP ${String(res.status)}`) : `HTTP ${String(res.status)}`;
-    throw new Error(message);
-  }
-  const json: unknown = await res.json();
-  return UploadResponseSchema.parse(json).path;
+  return new Promise<string>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/envs/${encodeURIComponent(env)}/uploads`);
+    xhr.responseType = "json";
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) onProgress?.(e.loaded / e.total);
+    };
+    xhr.onerror = () => { reject(new Error("upload failed: network error")); };
+    xhr.onload = () => {
+      const raw: unknown = xhr.response;
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const parsed = ErrorBodySchema.safeParse(raw);
+        reject(new Error(parsed.success ? (parsed.data.error?.message ?? `HTTP ${String(xhr.status)}`) : `HTTP ${String(xhr.status)}`));
+        return;
+      }
+      const ok = UploadResponseSchema.safeParse(raw);
+      if (ok.success) resolve(ok.data.path); else reject(new Error("upload failed: malformed response"));
+    };
+    // No Content-Type header — the browser sets multipart/form-data with the boundary.
+    xhr.send(fd);
+  });
 }
 
 export { UPLOAD_MAX_BYTES };

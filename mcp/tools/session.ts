@@ -66,15 +66,6 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
     }
     const me = await deps.identity.load();
     const env = args.env ?? me.session.env;
-    // brief is mandatory in this tool's schema, and the server rejects ANY spawn that carries a
-    // brief when the target env isn't local (brief delivery writes a file on the corral host and
-    // relies on a `$(cat …)` substitution in the pane's own shell — neither exists for a remote
-    // box). A remote `env` here would therefore always 400 server-side; refuse it here instead, with
-    // a message that explains why, rather than let the tool advertise an override it can never honor.
-    const targetEnv = me.envs.find((e) => e.id === env);
-    if (targetEnv !== undefined && targetEnv.kind !== "local") {
-      return `corral_spawn only supports local environments in this phase — "${env}" is remote, and a brief cannot be delivered there (the server would refuse it). Omit env to spawn in this session's own environment, or pick a local one from corral_whoami's environment list.`;
-    }
     // Two modes, and `repo` picks between them. Omitted: continue where the caller is — the new tab
     // joins the caller's own workspace, so a worktree checkout stays visible and the idempotent
     // rejoin applies. Given: work in that project, which is the route's resolve-by-repo shape.
@@ -196,10 +187,10 @@ export function registerSessionTools(server: McpServer, deps: SessionDeps): void
     {
       title: "Spawn a session on a card",
       description:
-        "Start a NEW Claude session attached to a card — for a context handoff or a parallel strand. An operator asking for \"a new session\" means THIS, on the card already open — not a new card, and not corral_task_create first. Defaults to THIS session's card; pass `boardId` AND `taskId` together to staff ANOTHER card (placing an executor is an ADD, which a session may do on any card — but it grants NO right to close that card's sessions). The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment; on your OWN card, omit `repo` and the new session joins THIS session's workspace. On ANOTHER card there is no shared workspace to join, so `repo` is REQUIRED — pass the project the new session should work in. Pass `repo` on your own card too to land in a DIFFERENT project's workspace instead. LOCAL ENVIRONMENTS ONLY in this phase: `env` may only name a local environment (kind=local in corral_whoami's environment list) — a brief cannot be delivered to a remote environment, so a remote `env` is refused here rather than left to 400 on the server. Supply `name`, and supply the WHOLE name: corral uses your string verbatim as the Claude session name, the herdr tab label and the card's label — it no longer prefixes anything. Write it as `{slug}-{name}`, where `{slug}` is a very short label for the card (reuse the slug of your OWN session name when you have one, so the card's sessions cluster) and `{name}` is two to four words for what THIS session does. Destructive: this starts a real session that consumes tokens.",
+        "Start a NEW Claude session attached to a card — for a context handoff or a parallel strand. An operator asking for \"a new session\" means THIS, on the card already open — not a new card, and not corral_task_create first. Defaults to THIS session's card; pass `boardId` AND `taskId` together to staff ANOTHER card (placing an executor is an ADD, which a session may do on any card — but it grants NO right to close that card's sessions). The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment; on your OWN card, omit `repo` and the new session joins THIS session's workspace. On ANOTHER card there is no shared workspace to join, so `repo` is REQUIRED — pass the project the new session should work in. Pass `repo` on your own card too to land in a DIFFERENT project's workspace instead. `env` may name a remote environment too: the brief is written to a private temp file on that machine over ssh. Supply `name`, and supply the WHOLE name: corral uses your string verbatim as the Claude session name, the herdr tab label and the card's label — it no longer prefixes anything. Write it as `{slug}-{name}`, where `{slug}` is a very short label for the card (reuse the slug of your OWN session name when you have one, so the card's sessions cluster) and `{name}` is two to four words for what THIS session does. Destructive: this starts a real session that consumes tokens.",
       inputSchema: {
         brief: z.string().describe("handoff text the new session starts from; required"),
-        env: z.string().optional().describe("LOCAL environment id from corral_whoami; defaults to this session's. A remote environment is refused."),
+        env: z.string().optional().describe("environment id from corral_whoami (local or remote); defaults to this session's."),
         boardId: z.string().optional().describe("with taskId, staff another card; omit both for this session's own card"),
         taskId: z.string().optional().describe("with boardId, staff another card; a bare taskId is refused"),
         repo: z.string().optional().describe(

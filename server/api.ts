@@ -38,6 +38,7 @@ import { isLoopbackHost } from "./host-guard.ts";
 import { displacingName } from "./link-name.ts";
 import { buildLiveIndex, resolveLiveRow } from "./live-resolve.ts";
 import type { Poller } from "./poller.ts";
+import { writeRemoteFile } from "./remote-write.ts";
 import { isSessionBound, linkBindsSession, resolveLinkIndex } from "./session-binding.ts";
 import { composeSessionName, fallbackNamePrefix, NAME_MAX, sanitizeSlug, slugify } from "./spawn.ts";
 import type { SpawnOpts, SpawnResult } from "./spawn.ts";
@@ -46,7 +47,7 @@ import type { Storage } from "./storage.ts";
 import { appendLogEntry, resolveLogSource, resolveWriter, sessionRef, stampSystem } from "./task-log.ts";
 import { readLastActivity, readSessionCwd } from "./transcript.ts";
 import { createTtlCache } from "./ttl-cache.ts";
-import { writeUploadFile } from "./uploads.ts";
+import { sanitizeUploadName, writeUploadFile } from "./uploads.ts";
 import type { PaneIdentity } from "./whoami.ts";
 import { buildWhoami, resolveSelf, resolveSelfViaPane } from "./whoami.ts";
 import { PANE_RE } from "./ws-attach-guard.ts";
@@ -328,6 +329,7 @@ export function createApi(opts: {
   closeDeferMs?: number; // injectable so the deferred-close ordering is testable without real waits
   spawnTimeoutMs?: number; // injectable so the timeout-cleanup path is testable without a 60s wait
   allowedOrigins?: readonly string[]; // Origin allowlist for the file-upload route (default WS_ALLOWED_ORIGINS)
+  writeRemote?: typeof writeRemoteFile; // remote file write over ssh (injectable so tests need no ssh)
   uploadRoot?: string; // drop-upload temp root (injectable so tests write to a scratch dir)
   briefRoot?: string; // spawn-brief root (injectable so tests write to a scratch dir)
   briefCleanupDelayMs?: number; // injectable so the post-spawn brief unlink is testable without a real wait
@@ -348,6 +350,7 @@ export function createApi(opts: {
   const spawnTimeoutMs = opts.spawnTimeoutMs ?? SPAWN_TIMEOUT_MS;
   const allowedOrigins = opts.allowedOrigins ?? WS_ALLOWED_ORIGINS;
   const uploadRoot = opts.uploadRoot ?? UPLOAD_ROOT;
+  const writeRemote = opts.writeRemote ?? writeRemoteFile;
   const briefRoot = opts.briefRoot ?? BRIEF_ROOT;
   const briefCleanupDelayMs = opts.briefCleanupDelayMs ?? BRIEF_CLEANUP_DELAY_MS;
   // Last-active timestamps (transcript-derived); caches `null` too (no transcript). Bounded + TTL'd.
@@ -640,11 +643,11 @@ export function createApi(opts: {
     return c.json({ spaces, repos });
   });
 
-  // Drop-to-attach upload (local envs only). Bytes land in a temp file on THIS machine; the web then
-  // injects the returned absolute path into the pane. Origin-allowlisted (multipart is a CORS-simple
+  // Drop-to-attach upload. Bytes land in a temp file on the env's own machine — written directly for a
+  // local env, streamed over the shared ssh connection for a remote one; the web then injects the
+  // returned absolute path into the pane. Origin-allowlisted (multipart is a CORS-simple
   // content type, so the Host-only anti-rebinding middleware above is insufficient) + a pre-buffer
-  // body-limit (a post-parse size check cannot prevent the OOM). Remote envs are refused — remote needs
-  // SSH byte transfer (v2). No auth beyond the loopback bind + Origin gate, matching the JSON API.
+  // body-limit (a post-parse size check cannot prevent the OOM). No auth beyond the loopback bind + Origin gate, matching the JSON API.
   app.post(
     "/api/envs/:env/uploads",
     bodyLimit({
@@ -658,9 +661,6 @@ export function createApi(opts: {
       }
       const env = opts.envs.find((e) => e.id === c.req.param("env"));
       if (!env) return c.json({ error: { code: "validation", message: "unknown env" } }, 400);
-      if (env.kind !== "local") {
-        return c.json({ error: { code: "remote_upload_unsupported", message: "file attach is available for local environments only" } }, 400);
-      }
       let body: Record<string, string | File>;
       try {
         body = await c.req.parseBody();
@@ -672,7 +672,14 @@ export function createApi(opts: {
         return c.json({ error: { code: "validation", message: "missing 'file' field" } }, 400);
       }
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const dest = await writeUploadFile({ root: uploadRoot, originalName: file.name, bytes });
+      let dest: string;
+      try {
+        dest = env.kind === "remote"
+          ? await writeRemote(env, { name: sanitizeUploadName(file.name), bytes })
+          : await writeUploadFile({ root: uploadRoot, originalName: file.name, bytes });
+      } catch (err) {
+        return c.json({ error: { code: "upload_failed", message: err instanceof Error ? err.message : String(err) } }, 502);
+      }
       // Audit (SEC-6 posture): record the write, never the contents.
       console.warn(`[upload] env=${env.id} bytes=${String(bytes.byteLength)} path=${dest}`);
       return c.json({ path: dest });
@@ -1440,10 +1447,9 @@ export function createApi(opts: {
       // unreachable in practice.
       return c.json({ error: { code: "name_unavailable", message: "no free session name left — choose a different name" } }, 409);
     }
-    // Brief/start-command delivery is local-only: the file is written on the corral host, and the
-    // `$(cat …)` substitution runs in the pane's shell — on a remote box that path would not exist.
-    // Mirrors the uploads restriction. Order is schema → mutual exclusion → env kind → byte cap →
-    // write, matching how the route already sequences its guards, so a refusal creates no file.
+    // Brief/start-command delivery: the `$(cat …)` substitution runs in the pane's own shell, so the
+    // file must exist on the TARGET machine — written locally, or streamed over ssh for a remote env.
+    // Order is schema → mutual exclusion → byte cap → write, so a refusal creates no file.
     const brief = parsed.data.brief;
     const startCommand = parsed.data.startCommand;
     if (brief !== undefined && startCommand !== undefined) {
@@ -1453,14 +1459,13 @@ export function createApi(opts: {
     const messageKind = brief !== undefined ? "brief" : "startCommand";
     let briefPath: string | undefined;
     if (firstMessage !== undefined) {
-      if (targetEnv.kind !== "local") {
-        return c.json({ error: { code: "remote_brief_unsupported", message: "a spawn brief is available for local environments only" } }, 400);
-      }
       if (briefByteLength(firstMessage) > BRIEF_MAX_BYTES) {
         return c.json({ error: { code: "too_large", message: `brief exceeds ${String(BRIEF_MAX_BYTES)} bytes` } }, 413);
       }
       try {
-        briefPath = await writeBrief(briefRoot, firstMessage);
+        briefPath = targetEnv.kind === "remote"
+          ? await writeRemote(targetEnv, { name: "brief.md", bytes: new TextEncoder().encode(firstMessage) })
+          : await writeBrief(briefRoot, firstMessage);
       } catch (err) {
         return c.json({ error: { code: "brief_write_failed", message: err instanceof Error ? err.message : String(err) } }, 500);
       }
@@ -1496,7 +1501,9 @@ export function createApi(opts: {
     // This is only the BACKSTOP: the launch command deletes the brief itself once it has read it
     // (server/spawn.ts), so this fires on a pane that never ran the command. The delay is deliberate
     // and generous; see config.ts BRIEF_CLEANUP_DELAY_MS.
-    if (briefPath !== undefined) {
+    // Local only: a remote brief lives in a private dir on the remote and is removed by the launch
+    // command that reads it (there is no corral-side handle on that filesystem to unlink from).
+    if (briefPath !== undefined && targetEnv.kind === "local") {
       const bp = briefPath;
       void spawnPromise.finally(() => {
         setTimeout(() => { void cleanupBrief(bp); }, briefCleanupDelayMs).unref();

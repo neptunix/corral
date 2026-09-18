@@ -743,7 +743,9 @@ The dirs you install into must match each environment's `claudeConfigDirs` in
   report/response sequences are all disabled, so hostile pane output can't inject synthetic
   keystrokes into a live agent.
 - **Upload endpoint** (`POST /api/envs/:env/uploads`, the drag-to-attach file surface) —
-  local environments only. The `Host` check above applies here too, but multipart is a
+  local environments write to a temp file on this machine; remote environments stream the
+  bytes over the shared ssh connection into a private (0700) `corral-upload.*` directory in the
+  remote's temp dir, which the remote OS clears (corral does not sweep it). The `Host` check above applies here too, but multipart is a
   CORS-simple content type, so it is not sufficient on its own: the route adds an Origin
   allowlist and a 25 MB body-size cap.
 - **All herdr/SSH calls use `execFile` with argument arrays** — no shell string
@@ -867,7 +869,7 @@ The server registers **no tools outside herdr** — launched with `HERDR_ENV`/`H
 it connects but declares no tool capability at all, so a non-herdr session sees no corral tools and
 pays nothing for the connection. (Because the capability is absent rather than empty, a `tools/list`
 sent anyway comes back `Method not found` — expected, not a fault.) Installing it at user scope is
-therefore safe for any non-herdr session too. A spawn brief is available for **local environments only**, and the audit
+therefore safe for any non-herdr session too. A spawn brief works for local and remote environments alike (a remote one is streamed over ssh into a private temp directory on that machine), and the audit
 trail it leaves records coordinates and size, never contents. Where the new session lands is the
 caller's to state: omit `repo` and it **joins the caller's own workspace** (a new tab beside it, so
 a worktree checkout stays visible); pass `repo` and it lands in **that repository's workspace**, at

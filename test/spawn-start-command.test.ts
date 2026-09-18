@@ -103,19 +103,6 @@ describe("POST spawn with a startCommand", () => {
     expect(seen[0]?.briefFallback).not.toContain("handoff");
   });
 
-  it("refuses a start command for a remote environment", async () => {
-    const a = app();
-    const tid = await makeBoardAndTask(a);
-    const res = await a.request(`/api/boards/test/tasks/${tid}/spawn`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ env: "work-remote", repo: "repo", startCommand: "/plan" }),
-    });
-    expect(res.status).toBe(400);
-    const err = await res.json() as { error: { code: string } };
-    expect(err.error.code).toBe("remote_brief_unsupported");
-    expect(seen).toHaveLength(0);
-  });
-
   it("rejects a whitespace-only start command and one beginning with a dash", async () => {
     const a = app();
     const tid = await makeBoardAndTask(a);

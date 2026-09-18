@@ -113,14 +113,48 @@ describe("POST spawn with a brief", () => {
     expect(seen).toHaveLength(1); // only the at-cap brief spawned — the cap charges the preamble too
   });
 
-  it("refuses a brief for a remote environment with 400 and does not spawn", async () => {
-    const a = app();
+  it("writes a remote brief over ssh and hands spawn the remote path", async () => {
+    const writes: { host: string; name: string; text: string }[] = [];
+    const a = createApi({
+      poller, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
+      briefRoot: path.join(tmpDir, "briefs"),
+      writeRemote: (env, o) => {
+        writes.push({ host: env.sshHost, name: o.name, text: new TextDecoder().decode(o.bytes) });
+        return Promise.resolve("/remote/tmp/corral-upload.abc/brief.md");
+      },
+      spawn: async (opts) => {
+        seen.push(opts);
+        return {
+          paneId: "w1:p2", tabId: "t2", workspaceId: "ws1", workspaceLabel: "repo",
+          tabLabel: "refactor-the-api-a", cwdSnapshot: "/repo", idempotent: false,
+        };
+      },
+    });
     const tid = await makeBoardAndTask(a);
     const res = await a.request(`/api/boards/test/tasks/${tid}/spawn`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ env: "work-remote", repo: "repo", brief: "hi" }),
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.name).toBe("brief.md");
+    expect(writes[0]?.text).toBe(composeBrief("hi"));
+    expect(seen[0]?.briefPath).toBe("/remote/tmp/corral-upload.abc/brief.md");
+    expect(existsSync(path.join(tmpDir, "briefs"))).toBe(false); // nothing written on this host
+  });
+
+  it("fails the spawn with 500 and does not spawn when the remote write fails", async () => {
+    const a = createApi({
+      poller, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
+      writeRemote: () => Promise.reject(new Error("remote write failed (ssh exit 255)")),
+      spawn: async (opts) => { seen.push(opts); throw new Error("must not spawn"); },
+    });
+    const tid = await makeBoardAndTask(a);
+    const res = await a.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-remote", repo: "repo", brief: "hi" }),
+    });
+    expect(res.status).toBe(500);
     expect(seen).toHaveLength(0);
   });
 

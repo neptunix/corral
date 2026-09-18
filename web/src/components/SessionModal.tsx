@@ -53,8 +53,7 @@ interface Props {
   readonly statusline?: StatuslineData | null;
   /** Claude's own name for the session, read live from its registry — not the herdr tab label. */
   readonly claudeName?: string | null;
-  // Enables drop-to-attach (upload + path injection). True for local envs only; remote needs SSH
-  // byte transfer (v2), so the drop affordance is hidden there (the server also refuses remote uploads).
+  // Enables drop-to-attach (upload + path injection) for any env corral knows about.
   readonly canAttachFiles?: boolean;
   // Required, not optional: SessionStateFields declares these non-undefined, and under
   // exactOptionalPropertyTypes a `?:` prop widens to `| undefined` and no longer satisfies it.
@@ -116,6 +115,8 @@ export function SessionModal({
   ctrlArmedRef.current = ctrlArmed;
   const [dragging, setDragging] = useState(false);
   const [dropError, setDropError] = useState<string | null>(null);
+  // Set while a drop is uploading; null otherwise.
+  const [dropProgress, setDropProgress] = useState<string | null>(null);
   // Open only when the clipboard could not be read directly — see handlePasteButton.
   const [pastePrompt, setPastePrompt] = useState(false);
 
@@ -512,8 +513,8 @@ export function SessionModal({
     };
   }, [env, paneId, attempt, awaitAgent]);
 
-  // Upload each dropped file to the local env, then inject the returned path(s) into the pane. Gated on
-  // `canAttachFiles` (local only) and a live session (so no orphan temp file is written for a drop that
+  // Upload each dropped file to the session's env, then inject the returned path(s) into the pane. Gated on
+  // `canAttachFiles` and a live session (so no orphan temp file is written for a drop that
   // can't be injected). Per-file requests: on a mid-batch failure we still inject whatever uploaded
   // successfully so far (those bytes are already on-host) and surface the error for the rest.
   // iOS has no paste menu to offer over the terminal (see KeyBar), so the bar's button reads the
@@ -544,7 +545,7 @@ export function SessionModal({
   async function handleDrop(e: React.DragEvent): Promise<void> {
     e.preventDefault();
     setDragging(false);
-    if (!canAttachFiles) { setDropError("file attach is available for local environments only"); return; }
+    if (!canAttachFiles) { setDropError("file attach is unavailable for this environment"); return; }
     if (!liveRef.current) { setDropError("session is not live — try again"); return; }
     const files = Array.from(e.dataTransfer.files);
     if (files.length === 0) return;
@@ -553,10 +554,18 @@ export function SessionModal({
     setDropError(null);
     const paths: string[] = [];
     try {
-      for (const f of files) paths.push(await uploadFile(env, f));
+      for (const f of files) {
+        setDropProgress(`uploading ${f.name}…`);
+        paths.push(await uploadFile(env, f, (fraction) => {
+          // The browser→corral leg is measurable; the corral→remote leg after it is not, so 100%
+          // switches to a plain "sending" label rather than a bar that sits full for the slow part.
+          setDropProgress(fraction < 1 ? `uploading ${f.name} ${String(Math.floor(fraction * 100))}%` : `sending ${f.name} to the session's host…`);
+        }));
+      }
     } catch (err) {
       setDropError(err instanceof Error ? err.message : String(err));
     } finally {
+      setDropProgress(null);
       if (paths.length > 0) sendInputRef.current?.(formatDropInjection(paths));
     }
   }
@@ -647,6 +656,9 @@ export function SessionModal({
             <span className="min-w-0 truncate text-xs text-warning" title={closeMessage(closeInfo.code, closeInfo.reason)}>
               · {closeMessage(closeInfo.code, closeInfo.reason)}
             </span>
+          )}
+          {dropProgress !== null && (
+            <span className="min-w-0 truncate text-xs text-muted-foreground" title={dropProgress}>· {dropProgress}</span>
           )}
           {dropError !== null && (
             <span className="min-w-0 truncate text-xs text-warning" title={dropError}>· {dropError}</span>
