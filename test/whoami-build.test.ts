@@ -340,4 +340,23 @@ describe("buildWhoami — spawnedBy", () => {
     );
     expect(result).toEqual({ name: "orchestrator", running: true, captured: true, account: "user@example.com" });
   });
+
+  it("prefers the sessionId-matching self link over a pane-only one, in either order", () => {
+    const base = { env: "work-local", paneId: "w1:p1", tabId: "tab1", tabLabel: "t", workspaceId: "ws1", workspaceLabel: "repo", name: "t", cwdSnapshot: "/repo" };
+    const paneOnly: SessionLink = { ...base, sessionId: null };
+    const bySid: SessionLink = { ...base, sessionId: SID, spawnedBy: "operator" };
+    for (const sessions of [[paneOnly, bySid], [bySid, paneOnly]]) {
+      const board: Board = { ...selfBoard(undefined), tasks: [{ ...selfBoard(undefined).tasks[0]!, sessions }] };
+      expect(resolve([board], { envs: {}, sessions: [me] })).toBe("operator");
+    }
+  });
+
+  it("card sessions carry the live row's account, and null when detached", () => {
+    const peer = row({ paneId: "w3:p1", sessionId: SID_B, statusline: { ...statusline, account: { uuid: "u2", email: "other@example.com", org: "Org", tier: "t" } }, statuslineStatus: "ok" });
+    const mk = (paneId: string, sessionId: string): SessionLink => ({ env: "work-local", paneId, tabId: "t", tabLabel: "t", workspaceId: "w", workspaceLabel: "w", name: paneId, cwdSnapshot: "/", sessionId });
+    const board: Board = { ...selfBoard(undefined), tasks: [{ ...selfBoard(undefined).tasks[0]!, sessions: [...selfBoard(undefined).tasks[0]!.sessions, mk("w3:p1", SID_B), mk("w4:p1", PARENT_SID)] }] };
+    const out = buildWhoami({ resolution: { ok: true, env: localEnv, row: me }, envs: ENVIRONMENTS, snapshot: { envs: {}, sessions: [me, peer] }, boards: [board] });
+    if (!out.resolved) throw new Error("expected resolved");
+    expect(out.task?.sessions.map((c) => c.account)).toEqual(["user@example.com", "other@example.com", null]);
+  });
 });

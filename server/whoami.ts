@@ -271,7 +271,6 @@ function cardSession(index: LiveIndex, link: SessionLink, selfRow: SessionRow): 
  *  pane-only one, since the pane can be a stale reuse. */
 function selectSelfLink(links: readonly SessionLink[], row: SessionRow): SessionLink | undefined {
   const matches = links.filter((l) => linkBindsSession(l, { env: row.env, paneId: row.paneId, liveSessionId: row.sessionId }));
-  if (matches.length <= 1) return matches[0];
   return matches.find((l) => l.sessionId !== null && l.sessionId === row.sessionId) ?? matches[0];
 }
 
@@ -288,10 +287,9 @@ function storedLinkName(boards: readonly Board[], env: string, sessionId: string
   return null;
 }
 
-function resolveSpawnedBy(spawnedBy: SessionLink["spawnedBy"], snapshot: Snapshot, boards: readonly Board[]): WhoamiSpawnedBy {
+function resolveSpawnedBy(spawnedBy: SessionLink["spawnedBy"], index: LiveIndex, boards: readonly Board[]): WhoamiSpawnedBy {
   if (spawnedBy === undefined) return null;
   if (spawnedBy === "operator") return "operator";
-  const index = buildLiveIndex(snapshot.sessions);
   const row = resolveLiveRow({ env: spawnedBy.env, paneId: spawnedBy.paneId, sessionId: spawnedBy.sessionId }, index);
   if (row !== undefined) {
     return {
@@ -322,7 +320,7 @@ function taskBlock(boards: readonly Board[], snapshot: Snapshot, row: SessionRow
     sessions: found.task.sessions.map((l) => cardSession(index, l, row)),
     logCount: found.task.log.length,
     lastLogAtMs: found.task.log.at(-1)?.atMs ?? null,
-    spawnedBy: resolveSpawnedBy(selfLink?.spawnedBy, snapshot, boards),
+    spawnedBy: resolveSpawnedBy(selfLink?.spawnedBy, index, boards),
   };
 }
 

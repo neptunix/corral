@@ -1520,18 +1520,16 @@ export function createApi(opts: {
       // A session value with a null sessionId (the spawner hadn't registered yet) is resolved by
       // env+paneId against the live snapshot — a pane alone is not trustworthy (herdr reuses pane
       // ids) — and dropped if that fails, rather than stored as a bare, unverifiable pane claim.
-      const resolvedSpawnedBy: SessionLink["spawnedBy"] = spawnedByInput === undefined
-        ? undefined
-        : spawnedByInput === "operator"
-          ? "operator"
-          : spawnedByInput.sessionId !== null
-            ? { sessionId: spawnedByInput.sessionId, env: spawnedByInput.env, paneId: spawnedByInput.paneId }
-            : (() => {
-                const row = opts.poller.getSnapshot().sessions.find((s) => s.env === spawnedByInput.env && s.paneId === spawnedByInput.paneId);
-                return row?.sessionId === null || row?.sessionId === undefined
-                  ? undefined
-                  : { sessionId: row.sessionId, env: spawnedByInput.env, paneId: spawnedByInput.paneId };
-              })();
+      const spawnerSid = spawnedByInput === undefined || spawnedByInput === "operator"
+        ? null
+        : spawnedByInput.sessionId
+          ?? opts.poller.getSnapshot().sessions.find((s) => s.env === spawnedByInput.env && s.paneId === spawnedByInput.paneId)?.sessionId
+          ?? null;
+      const resolvedSpawnedBy: SessionLink["spawnedBy"] = spawnedByInput === "operator"
+        ? "operator"
+        : spawnedByInput === undefined || spawnerSid === null
+          ? undefined
+          : { sessionId: spawnerSid, env: spawnedByInput.env, paneId: spawnedByInput.paneId };
       const link: SessionLink = {
         env: targetEnv.id, paneId: result.paneId,
         tabId: result.tabId, tabLabel: result.tabLabel,
