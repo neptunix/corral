@@ -14,6 +14,23 @@ describe("SessionLinkSchema", () => {
   it("keeps a provided sessionId (the stable Claude UUID)", () => {
     expect(SessionLinkSchema.parse({ ...LINK_BASE, sessionId: "uuid-1" }).sessionId).toBe("uuid-1");
   });
+
+  it("defaults spawnedBy to undefined when absent (legacy links heal on parse)", () => {
+    expect(SessionLinkSchema.parse(LINK_BASE).spawnedBy).toBeUndefined();
+  });
+
+  it("keeps a stored operator spawnedBy", () => {
+    expect(SessionLinkSchema.parse({ ...LINK_BASE, spawnedBy: "operator" }).spawnedBy).toBe("operator");
+  });
+
+  it("keeps a stored session spawnedBy", () => {
+    const spawnedBy = { sessionId: "uuid-1", env: "e", paneId: "p2" };
+    expect(SessionLinkSchema.parse({ ...LINK_BASE, spawnedBy }).spawnedBy).toEqual(spawnedBy);
+  });
+
+  it("heals an invalid stored spawnedBy to undefined rather than failing the whole board", () => {
+    expect(SessionLinkSchema.parse({ ...LINK_BASE, spawnedBy: { sessionId: 5 } }).spawnedBy).toBeUndefined();
+  });
 });
 
 describe("BoardSchema", () => {

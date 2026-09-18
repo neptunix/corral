@@ -34,6 +34,13 @@ export const SessionLinkSchema = z.object({
   // `.optional()`) so every link is uniformly `{ sessionId: string | null }` and legacy JSON heals on
   // parse — mirrors SessionRowSchema.sessionId.
   sessionId: z.string().nullable().default(null),
+  // Who spawned this session: another session's identity, or the operator. Deliberately lenient —
+  // no route constraints (UUID/env/pane shape) here, so a bad stored value only drops this one
+  // field on parse instead of failing the whole board.
+  spawnedBy: z.union([
+    z.object({ sessionId: z.string(), env: z.string(), paneId: z.string() }),
+    z.literal("operator"),
+  ]).optional().catch(undefined),
 });
 
 // Two families, and the split is load-bearing rather than cosmetic: `note` is the only kind a model
