@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 
 import {
   ATTENTION_MIN_WORK_MS, BOARD_DATA_DIR, BRIEF_ROOT, CHEAP_INTERVAL_MS, CORRAL_HOME,
@@ -68,6 +68,32 @@ describe("TAB_RENAME_ENABLED", () => {
 describe("FOCUS_TRANSLATION_ENABLED", () => {
   it("defaults to true when the env var is unset", () => {
     expect(FOCUS_TRANSLATION_ENABLED).toBe(true);
+  });
+});
+
+describe("AMBIENT_HERDR_SOCKET", () => {
+  // A session running this suite may itself sit inside a real herdr pane with HERDR_SOCKET_PATH
+  // set, so the module-level export can't be asserted directly — reimport with the var cleared.
+  const original = process.env.HERDR_SOCKET_PATH;
+  afterEach(() => {
+    if (original === undefined) delete process.env.HERDR_SOCKET_PATH;
+    else process.env.HERDR_SOCKET_PATH = original;
+  });
+
+  it("defaults to null when HERDR_SOCKET_PATH is unset", async () => {
+    delete process.env.HERDR_SOCKET_PATH;
+    vi.resetModules();
+    const fresh = await import("../config.ts");
+    // server/whoami.ts's effectiveSocket() relies on this default to refuse an unmatched socket
+    // hint rather than silently accepting one.
+    expect(fresh.AMBIENT_HERDR_SOCKET).toBeNull();
+  });
+
+  it("passes through a set HERDR_SOCKET_PATH", async () => {
+    process.env.HERDR_SOCKET_PATH = "/repo/path/to/herdr.sock";
+    vi.resetModules();
+    const fresh = await import("../config.ts");
+    expect(fresh.AMBIENT_HERDR_SOCKET).toBe("/repo/path/to/herdr.sock");
   });
 });
 

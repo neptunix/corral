@@ -1,8 +1,10 @@
 import type { SessionRow, Snapshot } from "@shared/schema";
 import { describe, expect, it } from "vitest";
 
+import type { HerdrEnv } from "../environments.ts";
 import { ENVIRONMENTS } from "../environments.ts";
-import { resolveSelf } from "../server/whoami.ts";
+import type { PaneIdentity } from "../server/whoami.ts";
+import { resolveSelf, resolveSelfViaPane } from "../server/whoami.ts";
 
 function row(env: string, paneId: string, cwd: string): SessionRow {
   return {
@@ -130,5 +132,48 @@ describe("resolveSelf", () => {
       socket: "/some/other/herdr/session.sock", ambientSocket: "/run/user/1000/herdr/default.sock",
     });
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("resolveSelfViaPane", () => {
+  const pane: PaneIdentity = {
+    paneId: "w1:p1", tabId: "tab1", tabLabel: "t", workspaceId: "ws1", workspaceLabel: "w", cwd: "/repo",
+  };
+
+  it("resolves a fresh socket-less pane against the ambient default socket", async () => {
+    const r = await resolveSelfViaPane({
+      envs: ENVIRONMENTS, paneId: "w1:p1",
+      socket: "/run/user/1000/herdr/default.sock", ambientSocket: "/run/user/1000/herdr/default.sock",
+      lookup: (env, id) => Promise.resolve(env.id === "work-local" ? { ...pane, paneId: id } : null),
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("expected ok");
+    expect(r.env.id).toBe("work-local");
+  });
+
+  // The security-relevant part of the fix: a fresh pane's own herdr lookup must never even be tried
+  // for an env whose effective socket does not match a supplied hint — the pane-id-only lookup is
+  // exactly what let a colliding remote pane resolve as the wrong local session.
+  it("never calls lookup for an env whose effective socket does not match the hint", async () => {
+    const calls: string[] = [];
+    const r = await resolveSelfViaPane({
+      envs: ENVIRONMENTS, paneId: "w1:p1",
+      socket: "/repo/path/to/a/different/herdr/session.sock", ambientSocket: null,
+      lookup: (env, id) => { calls.push(env.id); return Promise.resolve({ ...pane, paneId: id }); },
+    });
+    expect(r.ok).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it("still tries every local environment when no socket hint is supplied", async () => {
+    const calls: string[] = [];
+    const r = await resolveSelfViaPane({
+      envs: ENVIRONMENTS, paneId: "w1:p1", socket: null, ambientSocket: null,
+      lookup: (env: HerdrEnv, id) => { calls.push(env.id); return Promise.resolve(env.id === "personal-local" ? { ...pane, paneId: id } : null); },
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error("expected ok");
+    expect(r.env.id).toBe("personal-local");
+    expect(calls.length).toBeGreaterThan(1);
   });
 });
