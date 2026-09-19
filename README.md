@@ -459,7 +459,9 @@ Each entry describes one place corral can see and spawn sessions into:
 - `kind: "local"` — talks to a herdr socket on this machine. With no `socket` it inherits
   the ambient `HERDR_SOCKET_PATH` (launch corral from the right herdr context or set it).
 - `kind: "remote"` — talks to a box over SSH (`sshHost`, `socket`, `herdrBin` required).
-  An unreachable environment keeps its last-good snapshot and its cards stop changing. The 🛟 health
+  Every ssh call corral makes to a remote host — polling, reads, file writes and the live terminal
+  — shares one connection per host (ssh `ControlMaster`, socket in `$CORRAL_HOME/ssh/`), whatever
+  your own `~/.ssh/config` says. An unreachable environment keeps its last-good snapshot and its cards stop changing. The 🛟 health
   panel in the right-hand rail flags it — `env-reachable` turns amber there with the reason — and the
   server records it in the log as well; corral also names a missing `herdr`/`ssh` at startup.
 - `spawnCommand` — what corral runs to start a new agent session in this environment.
@@ -788,7 +790,8 @@ off entirely; `POST /api/diagnostics/refresh` still runs one on demand) · `DIAG
 (600000, floor 1000 — how long a herdr/Claude version probe is cached before the sweep re-runs it) ·
 `REMOTE_PROBE_ENABLED` (true — set to `false` to disable the outbound SSH probe of remote
 environments' install health; their remote rows then read `n/a` naming this switch) ·
-`UPDATE_CHECK_ENABLED` (true — set to `false` to stop corral asking GitHub whether a newer release
+`SSH_CONTROL_PERSIST_S` (600 — how long the shared ssh connection to a remote host stays open after its
+last use; `0` is ssh's "indefinitely") · `UPDATE_CHECK_ENABLED` (true — set to `false` to stop corral asking GitHub whether a newer release
 exists; the `update-check` row then reads `n/a` naming this switch, and no outbound HTTP request is
 made at all).
 It also reads `$CORRAL_HOME/config.json` for `hooks.ctxThresholds` and `hooks.cardSignal` — see
