@@ -35,7 +35,7 @@ export type Round2Planner = (facts: {
  * round's answers and records the first error message.
  */
 export async function runProbe(env: RemoteEnv, exec: ExecFn, planRound2: Round2Planner): Promise<ProbeFacts> {
-  const manifest = buildManifest(env.claudeConfigDirs);
+  const manifest = buildManifest(env.claudeConfigDirs, { mcp: env.mcpSocket !== undefined });
   const roundF = buildRoundF(env, manifest);
   const roundT = buildRoundT(env);
 

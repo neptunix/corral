@@ -4,6 +4,7 @@ import type { Storage } from "../storage.ts";
 import type { PaneIdentity } from "../whoami.ts";
 import { startEnvListener } from "./listener.ts";
 import type { SnapshotSource } from "./pinned-client.ts";
+import type { TunnelStatus } from "./status.ts";
 import { cancelTunnel, ensureTunnel } from "./tunnel.ts";
 
 type RemoteEnv = Extract<HerdrEnv, { readonly kind: "remote" }>;
@@ -19,13 +20,13 @@ export interface RemoteMcpOpts {
   readonly paneLookup: (env: HerdrEnv, paneId: string) => Promise<PaneIdentity | null>;
   readonly baseUrl: string;
   readonly intervalMs: number;
+  readonly status: TunnelStatus;
 }
 
 // An MCP surface for remote environments that opted in with `mcpSocket` (ADR 0009).
 export async function startRemoteMcp(opts: RemoteMcpOpts): Promise<() => Promise<void>> {
   const targets = opts.envs.filter(isForwardable);
   if (targets.length === 0) return () => Promise.resolve();
-
 
   let stopping = false;
   // Through a function, or TypeScript narrows the flag to false across the await between checks.
@@ -46,6 +47,7 @@ export async function startRemoteMcp(opts: RemoteMcpOpts): Promise<() => Promise
         const state = await ensureTunnel(env, local);
         if (isStopping()) return;
         const nowUp = state !== "unreachable";
+        opts.status.record(env.id, nowUp ? "up" : "down");
         if (nowUp !== up) {
           console.warn(
             nowUp
@@ -64,6 +66,7 @@ export async function startRemoteMcp(opts: RemoteMcpOpts): Promise<() => Promise
       });
       console.warn(`[remote-mcp] ${env.id}: serving ${local}`);
     } catch (err) {
+      opts.status.record(env.id, "no-listener");
       console.error(
         `[remote-mcp] ${env.id}: not serving — ${err instanceof Error ? err.message : String(err)}. ` +
         "Sessions on that environment will have no corral tools.",

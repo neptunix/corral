@@ -5,6 +5,7 @@ import { ctxHookChecks } from "../ctx-hook.ts";
 import { pathCandidates, resolveCommandPath } from "../deps.ts";
 import { DRIFT_FILES, driftCheck, themeCheck } from "../drift.ts";
 import { configDirExistsChecks, jqPresentCheck } from "../env.ts";
+import { mcpChecks, parseRegistration, registrationFiles, shimPathOf, SHIM_REPO_PATH } from "../mcp.ts";
 import { metricsChecks, SettingsSchema } from "../metrics.ts";
 import type { Settings } from "../metrics.ts";
 import { claudeCliVersionCheck, herdrVersionCheck, integrationCheckAt } from "../versions.ts";
@@ -14,6 +15,7 @@ import { createDepsRecorder, createRunRecorder, NEGATIVE_FACTS } from "./recorde
 import type { FactSource } from "./recorder.ts";
 import type { RemoteEnv, Round2Request } from "./script.ts";
 import { screenRound2Path } from "./script.ts";
+import type { ProbeAnswer } from "./wire.ts";
 
 export interface RemoteRowsOpts {
   readonly env: RemoteEnv;
@@ -54,6 +56,16 @@ export function parseSettingsText(text: string): Settings | null {
   }
 }
 
+function registeredShim(byPath: ReadonlyMap<string, ProbeAnswer>, dir: string): string | null {
+  for (const file of registrationFiles(dir)) {
+    const raw = byPath.get(file);
+    if (raw?.kind !== "content") continue;
+    const reg = parseRegistration(raw.bytes.toString("utf8"));
+    if (reg?.kind === "registered") return shimPathOf(reg.server);
+  }
+  return null;
+}
+
 /**
  * Round-2 requests for one remote environment: jq candidates off the login-shell PATH, plus each
  * config dir's statusline script (resolved from `settings.json`, which round F already fetched).
@@ -88,6 +100,14 @@ export function planRound2For(env: RemoteEnv): Round2Planner {
       else if (!screenRound2Path(p)) rejected.push({ path: p, reason: "failed the metacharacter screen" });
       else requests.push({ key: key(), kind: "file", path: p });
     }
+    if (env.mcpSocket !== undefined) {
+      for (const dir of env.claudeConfigDirs) {
+        const shim = registeredShim(facts.byPath, dir);
+        if (shim === null) continue;
+        if (screenRound2Path(shim)) requests.push({ key: key(), kind: "file", path: shim });
+        else rejected.push({ path: shim, reason: "MCP shim path failed the metacharacter screen" });
+      }
+    }
     return { requests, rejected };
   };
 }
@@ -109,7 +129,7 @@ export async function composeRemoteRows(opts: RemoteRowsOpts): Promise<readonly 
     ? NEGATIVE_FACTS
     : { lookup: (p) => probe.byPath.get(p), home: probe.home, pathEnv: probe.pathEnv };
 
-  const localHashPaths = new Set(DRIFT_FILES.map(([, repo]) => `${repoRoot}/${repo}`));
+  const localHashPaths = new Set([...DRIFT_FILES.map(([, repo]) => repo), SHIM_REPO_PATH].map((repo) => `${repoRoot}/${repo}`));
   const rec = createDepsRecorder(factSource, { repoRoot, nodeVersion, now, localHashPaths, localHash });
   const runRec = createRunRecorder(probe?.tools ?? new Map());
 
@@ -129,6 +149,7 @@ export async function composeRemoteRows(opts: RemoteRowsOpts): Promise<readonly 
     call(ctxHookChecks(rec.deps, env.id, dir));
     call(driftCheck(rec.deps, env.id, dir));
     call(themeCheck(rec.deps, env.id, dir));
+    call(mcpChecks(rec.deps, env, dir));
   }
 
   // Version leg — the exported producers over the recording RunTool (async). Sequential: three

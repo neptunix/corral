@@ -14,6 +14,7 @@ import type { DiagnosticsStore } from "../server/diagnostics-store.ts";
 import { createDiagnosticsStore } from "../server/diagnostics-store.ts";
 import { createDiagnosticsSweep, type SweepOpts } from "../server/diagnostics-sweep.ts";
 import type { ExecFn } from "../server/herdr.ts";
+import { createTunnelStatus } from "../server/remote-mcp/status.ts";
 
 const local = (id: string): HerdrEnv => ({
   id, label: id, kind: "local", claudeConfigDirs: ["/h/.claude"], spawnCommand: "claude", repos: {},
@@ -108,7 +109,7 @@ const inertUpdateIo: UpdateCheckIo = {
 const opts = (over: Partial<SweepOpts>): SweepOpts => ({
   store: createDiagnosticsStore({ selfVersion: "0.0.0" }),
   poller: { getSnapshot: () => snapshot({ work: { reachable: true } }) },
-  envs: [local("work")],
+  envs: [local("work")], tunnels: createTunnelStatus(),
   deps: createNodeDeps({ repoRoot: "/repo" }),
   corralHome: "/h/.corral",
   configLine: { level: "ok", text: "config: 1 environment(s) loaded from /cfg.json" },
@@ -545,3 +546,27 @@ describe("the network class", () => {
     expect(store.snapshot().answered.sort()).toEqual(["cheap", "network", "remote", "versions"]);
   });
 });
+
+describe("MCP tunnel rows", () => {
+  const withSocket = (id: string): HerdrEnv => ({ ...remoteEnvFixture(id), mcpSocket: "/far/mcp.sock" });
+  const tunnelRows = async (envs: HerdrEnv[], tunnels = createTunnelStatus()) => {
+    const store = createDiagnosticsStore({ selfVersion: null });
+    await createDiagnosticsSweep(opts({ store, envs, tunnels, remoteProbeEnabled: false })).tick();
+    return store.snapshot().checks.filter((c) => c.id === "mcp-tunnel");
+  };
+
+  it("publishes the live tunnel state, and n/a for an env without mcpSocket", async () => {
+    const tunnels = createTunnelStatus();
+    tunnels.record("on", "down");
+    const rows = await tunnelRows([withSocket("on"), remote("off")], tunnels);
+    expect(rows.map((c) => [c.scope, c.state])).toEqual([
+      [{ kind: "env", envId: "on" }, "problem"],
+      [{ kind: "env", envId: "off" }, "n/a"],
+    ]);
+  });
+
+  it("has no tunnel row for a local env", async () => {
+    expect(await tunnelRows([local("work")])).toEqual([]);
+  });
+});
+
