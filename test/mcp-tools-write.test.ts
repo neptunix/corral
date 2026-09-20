@@ -221,23 +221,23 @@ describe("updateHandler", () => {
 describe("spawnHandler", () => {
   it("spawns on the caller's own card and returns the new session's target key", async () => {
     const c = stub({});
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "continue" });
+    const out = await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "continue" });
     expect(out).toContain("work-local:w1:p2");
   });
 
   it("defaults to the caller's environment and honours an override", async () => {
     const seen: string[] = [];
     const c = stub({ spawn: async (a) => { seen.push(a.env); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; } });
-    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
-    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local", repo: "corral" });
+    await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b" });
+    await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b", env: "personal-local", repo: "corral" });
     expect(seen).toEqual(["work-local", "personal-local"]);
   });
 
   it("joins the caller's workspace same-env, and sends no workspace at all when a repo is named", async () => {
     const seen: (string | undefined)[] = [];
     const c = stub({ spawn: async (a) => { seen.push(a.targetWorkspaceId); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; } });
-    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
-    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local", repo: "corral" });
+    await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b" });
+    await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b", env: "personal-local", repo: "corral" });
     expect(seen).toEqual(["ws1", undefined]);
   });
 
@@ -248,11 +248,11 @@ describe("spawnHandler", () => {
       spawn: async (a) => { seen.push(a.remoteControl); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
     const on = c(true), off = c(false), unknown = c(null);
-    await spawnHandler({ client: on, identity: idOf(on) }, { brief: "b" });
-    await spawnHandler({ client: off, identity: idOf(off) }, { brief: "b" });
-    await spawnHandler({ client: unknown, identity: idOf(unknown) }, { brief: "b" });
-    await spawnHandler({ client: on, identity: idOf(on) }, { brief: "b", remoteControl: false });
-    await spawnHandler({ client: off, identity: idOf(off) }, { brief: "b", remoteControl: true });
+    await spawnHandler({ client: on, identity: idOf(on) , envScope: null }, { brief: "b" });
+    await spawnHandler({ client: off, identity: idOf(off) , envScope: null }, { brief: "b" });
+    await spawnHandler({ client: unknown, identity: idOf(unknown) , envScope: null }, { brief: "b" });
+    await spawnHandler({ client: on, identity: idOf(on) , envScope: null }, { brief: "b", remoteControl: false });
+    await spawnHandler({ client: off, identity: idOf(off) , envScope: null }, { brief: "b", remoteControl: true });
     expect(seen).toEqual([true, undefined, undefined, undefined, true]);
   });
 
@@ -261,7 +261,7 @@ describe("spawnHandler", () => {
   it("does not send targetWorkspaceId when a repo is named, even same-env", async () => {
     const seen: { targetWorkspaceId?: string | undefined; repo?: string | undefined }[] = [];
     const c = stub({ spawn: async (a) => { seen.push({ ...(a.targetWorkspaceId === undefined ? {} : { targetWorkspaceId: a.targetWorkspaceId }), ...(a.repo === undefined ? {} : { repo: a.repo }) }); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; } });
-    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", repo: "demo-api" });
+    await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b", repo: "demo-api" });
     expect(seen).toEqual([{ repo: "demo-api" }]);
   });
 
@@ -275,7 +275,7 @@ describe("spawnHandler", () => {
       whoami: async () => ({ ...bound, session: { ...bound.session, workspaceId: "" } }),
       spawn: async (a) => { calls.push(a); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
+    const out = await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b" });
     expect(calls).toHaveLength(0);
     expect(out).toContain("corral, demo-api");
   });
@@ -286,7 +286,7 @@ describe("spawnHandler", () => {
       whoami: async () => ({ ...bound, session: { ...bound.session, workspaceId: "" } }),
       spawn: async (a) => { seen.push(a.targetWorkspaceId); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
-    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", repo: "corral" });
+    await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b", repo: "corral" });
     expect(seen).toEqual([undefined]);
   });
 
@@ -295,13 +295,13 @@ describe("spawnHandler", () => {
     const c = stub({
       spawn: async (a) => { seen.push(a.spawnedBy); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
-    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
+    await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b" });
     expect(seen).toEqual([{ sessionId: SID, env: "work-local", paneId: "w1:p1" }]);
   });
 
   it("requires a brief", async () => {
     const c = stub({});
-    expect((await spawnHandler({ client: c, identity: idOf(c) }, { brief: "  " })).toLowerCase())
+    expect((await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "  " })).toLowerCase())
       .toContain("brief");
   });
 
@@ -311,7 +311,7 @@ describe("spawnHandler", () => {
   // refuses it as unknown_repo or hands the spawner a configured path.)
   it("surfaces a spawn failure from the machine verbatim", async () => {
     const c = stub({ spawn: async () => { throw new CorralError("spawn_error", "spawn: pane run failed: herdr: no such pane"); } });
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local", repo: "repo" });
+    const out = await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b", env: "personal-local", repo: "repo" });
     expect(out).toContain("pane run failed");
   });
 
@@ -321,7 +321,7 @@ describe("spawnHandler", () => {
       whoami: async () => ({ ...bound, envs: [...bound.envs, { id: "prod-remote", label: "Prod (remote)", kind: "remote", reachable: true }] }),
       spawn: async (a) => { calls.push(a.env); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
-    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "prod-remote", repo: "repo" });
+    await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b", env: "prod-remote", repo: "repo" });
     expect(calls).toEqual(["prod-remote"]);
   });
 
@@ -331,7 +331,7 @@ describe("spawnHandler", () => {
       whoami: async () => ({ ...bound, envs: [...bound.envs, { id: "personal-local", label: "Personal (local)", kind: "local", reachable: true }] }),
       spawn: async (a) => { calls.push(a.env); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", env: "personal-local", repo: "corral" });
+    const out = await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b", env: "personal-local", repo: "corral" });
     expect(calls).toEqual(["personal-local"]);
     expect(out).toContain("personal-local");
   });
@@ -341,14 +341,14 @@ describe("spawnHandler", () => {
     const c = stub({
       spawn: async (a) => { seen.push({ name: a.name, model: a.model, remoteControl: a.remoteControl }); return { env: a.env, paneId: "w1:p2", name: "t-rc", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
-    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", name: "rc toggle", model: "fable", remoteControl: true });
+    await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b", name: "rc toggle", model: "fable", remoteControl: true });
     expect(seen).toEqual([{ name: "rc toggle", model: "fable", remoteControl: true }]);
   });
 
   it("leaves all three absent when the caller supplies none", async () => {
     const seen: Record<string, unknown>[] = [];
     const c = stub({ spawn: async (a) => { seen.push({ ...a }); return { env: a.env, paneId: "w1:p2", name: "t-a", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; } });
-    await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b" });
+    await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b" });
     expect(seen).toHaveLength(1);
     expect(Object.hasOwn(seen[0] ?? {}, "name")).toBe(false);
     expect(Object.hasOwn(seen[0] ?? {}, "model")).toBe(false);
@@ -366,7 +366,7 @@ describe("spawnHandler — no target, and the refusal that names the repositorie
       spawnTargets: async () => ["corral", "demo-api"],
       spawn: async (a) => { calls.push(a); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, crossEnv);
+    const out = await spawnHandler({ client: c, identity: idOf(c), envScope: null }, crossEnv);
     expect(calls).toHaveLength(0);
     expect(out).toContain("corral, demo-api");
   });
@@ -374,13 +374,13 @@ describe("spawnHandler — no target, and the refusal that names the repositorie
   it("asks the TARGET environment for the names, not the caller's", async () => {
     const asked: string[] = [];
     const c = stub({ spawnTargets: async (env) => { asked.push(env); return ["corral"]; } });
-    await spawnHandler({ client: c, identity: idOf(c) }, crossEnv);
+    await spawnHandler({ client: c, identity: idOf(c), envScope: null }, crossEnv);
     expect(asked).toEqual(["personal-local"]);
   });
 
   it("says the environment has no repositories rather than listing nothing", async () => {
     const c = stub({ spawnTargets: async () => [] });
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, crossEnv);
+    const out = await spawnHandler({ client: c, identity: idOf(c), envScope: null }, crossEnv);
     expect(out).toContain("environments.json");
   });
 
@@ -390,7 +390,7 @@ describe("spawnHandler — no target, and the refusal that names the repositorie
       spawnTargets: async () => { throw new CorralError("unreachable", "corral is not reachable"); },
       spawn: async (a) => { calls.push(a); return { env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }; },
     });
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, crossEnv);
+    const out = await spawnHandler({ client: c, identity: idOf(c), envScope: null }, crossEnv);
     expect(calls).toHaveLength(0);
     expect(out).toContain("could not be read");
   });
@@ -401,7 +401,7 @@ describe("spawnHandler — no target, and the refusal that names the repositorie
     const c = stub({
       spawn: async () => { throw new CorralError("unknown_repo", 'no repository "corrall" is configured for env work-local'); },
     });
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", repo: "corrall" });
+    const out = await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b", repo: "corrall" });
     expect(out).toContain("corral, demo-api");
     expect(out).toContain("corrall");
   });
@@ -412,7 +412,7 @@ describe("spawnHandler — no target, and the refusal that names the repositorie
     const c = stub({
       spawn: async () => { throw new CorralError("validation", 'invalid "model"'); },
     });
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", repo: "corral", model: "bad model!" });
+    const out = await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b", repo: "corral", model: "bad model!" });
     expect(out).not.toContain("corral, demo-api");
     expect(out).toContain('invalid "model"');
   });
@@ -423,7 +423,7 @@ describe("spawnHandler — the reply says where the session landed", () => {
     const c = stub({
       spawn: async (a) => ({ env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "corral", cwdSnapshot: "/repos/corral", idempotent: false }),
     });
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", repo: "corral" });
+    const out = await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b", repo: "corral" });
     expect(out).toContain("corral");
     expect(out).toContain("/repos/corral");
   });
@@ -432,7 +432,7 @@ describe("spawnHandler — the reply says where the session landed", () => {
     const c = stub({
       spawn: async (a) => ({ env: a.env, paneId: "w1:p2", name: "t-b", workspaceLabel: "corral", cwdSnapshot: "/repos/corral", idempotent: true }),
     });
-    const out = await spawnHandler({ client: c, identity: idOf(c) }, { brief: "b", repo: "corral" });
+    const out = await spawnHandler({ client: c, identity: idOf(c), envScope: null }, { brief: "b", repo: "corral" });
     expect(out).not.toContain("It will read the brief");
     expect(out).toMatch(/did not receive this brief/i);
   });
@@ -442,7 +442,7 @@ describe("closeHandler", () => {
   it("closes self by default, deferring the pane kill past the response", async () => {
     const calls: { env: string; paneId: string; sessionId: string | null; deferred: boolean | undefined }[] = [];
     const c = stub({ closeSession: async (a) => { calls.push({ env: a.env, paneId: a.paneId, sessionId: a.sessionId, deferred: a.deferred }); } });
-    const out = await closeHandler({ client: c, identity: idOf(c) }, {});
+    const out = await closeHandler({ client: c, identity: idOf(c), envScope: null }, {});
     // sessionId: null here (not SID, the live session's id) because the fixture's card session list
     // is empty — cardSid resolves to null, same as the "unbackfilled link" regression below.
     expect(calls).toEqual([{ env: "work-local", paneId: "w1:p1", sessionId: null, deferred: true }]);
@@ -467,7 +467,7 @@ describe("closeHandler", () => {
       }),
       closeSession: async (a) => { calls.push(a.sessionId); },
     });
-    const out = await closeHandler({ client: c, identity: idOf(c) }, {});
+    const out = await closeHandler({ client: c, identity: idOf(c), envScope: null }, {});
     expect(calls).toEqual([null]);
     expect(out.toLowerCase()).toContain("resume");
   });
@@ -494,7 +494,7 @@ describe("closeHandler", () => {
       }),
       closeSession: async (a) => { calls.push(a.sessionId); },
     });
-    const out = await closeHandler({ client: c, identity: idOf(c) }, {});
+    const out = await closeHandler({ client: c, identity: idOf(c), envScope: null }, {});
     expect(calls).toEqual([SID]);
     expect(out.toLowerCase()).toContain("resume");
   });
@@ -511,7 +511,7 @@ describe("closeHandler", () => {
       }),
       closeSession: async (a) => { calls.push(`${a.env}:${a.paneId}`); },
     });
-    const out = await closeHandler({ client: c, identity: idOf(c) }, { target: "work-local:w1:p2" });
+    const out = await closeHandler({ client: c, identity: idOf(c), envScope: null }, { target: "work-local:w1:p2" });
     expect(calls).toEqual(["work-local:w1:p2"]);
     expect(out.toLowerCase()).not.toContain("refus");
   });
@@ -528,7 +528,7 @@ describe("closeHandler", () => {
       }),
       closeSession: async (a) => { sids.push(a.sessionId); },
     });
-    await closeHandler({ client: c, identity: idOf(c) }, { target: "work-local:w1:p2" });
+    await closeHandler({ client: c, identity: idOf(c), envScope: null }, { target: "work-local:w1:p2" });
     expect(sids).toEqual([SID_B]); // unknown at spawn time, known by close time — the card list carries it
   });
 
@@ -536,7 +536,7 @@ describe("closeHandler", () => {
     // The bound fixture's card list is empty, so any non-self target is off-card.
     const calls: string[] = [];
     const c = stub({ closeSession: async (a) => { calls.push(a.paneId); } });
-    const out = await closeHandler({ client: c, identity: idOf(c) }, { target: "work-local:w9:p9" });
+    const out = await closeHandler({ client: c, identity: idOf(c), envScope: null }, { target: "work-local:w9:p9" });
     expect(calls).toHaveLength(0);
     expect(out.toLowerCase()).toContain("refus");
     expect(out).toContain("card");
@@ -557,7 +557,7 @@ describe("closeHandler", () => {
       }),
       closeSession: async (a) => { calls.push(a.paneId); },
     });
-    const out = await closeHandler({ client: c, identity: idOf(c) }, { target: "work-local:w9:p9" });
+    const out = await closeHandler({ client: c, identity: idOf(c), envScope: null }, { target: "work-local:w9:p9" });
     expect(calls).toHaveLength(0);
     expect(out.toLowerCase()).toContain("refus");
     expect(out).toContain("card");
@@ -565,7 +565,7 @@ describe("closeHandler", () => {
 
   it("rejects a malformed target", async () => {
     const c = stub({});
-    expect((await closeHandler({ client: c, identity: idOf(c) }, { target: "nonsense" })).toLowerCase())
+    expect((await closeHandler({ client: c, identity: idOf(c), envScope: null }, { target: "nonsense" })).toLowerCase())
       .toContain("env:paneid");
   });
 });

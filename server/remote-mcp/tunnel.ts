@@ -14,7 +14,7 @@ const PROBE_TIMEOUT_MS = 15_000;
 const SETUP_TIMEOUT_MS = 20_000;
 
 export interface TunnelIo {
-  /** True when the forwarded socket is present on the remote. */
+  /** True when something ANSWERS on the forwarded socket. */
   probe(env: RemoteEnv, remoteSocket: string): Promise<boolean>;
   /** Create the parent directory and clear a stale socket file, in one remote shell. */
   prepare(env: RemoteEnv, remoteSocket: string): Promise<void>;
@@ -27,8 +27,25 @@ export interface TunnelIo {
 // `sh -c` with the path as a positional parameter, never spliced into the script — the same rule
 // server/remote-write.ts follows. The path comes from trusted startup config, so this is defence in
 // depth rather than the only barrier.
-const PROBE_SCRIPT = 'test -S "$1"';
-const PREPARE_SCRIPT = 'mkdir -p "$(dirname "$1")" && chmod 700 "$(dirname "$1")" && rm -f "$1"';
+
+// CONNECTS, rather than testing that a file is there. The two differ in exactly the case this loop
+// exists for: `ssh -O cancel`, and a master that dies, both leave the socket FILE on the remote while
+// nothing listens behind it any more. `test -S` calls that healthy forever, so the repair would never
+// run and the environment would stay dark until corral was restarted. Node is already this feature's
+// requirement on the remote — it is what runs the shim — so using it here adds no new dependency.
+export const PROBE_SCRIPT =
+  'node -e \'const s=require("net").connect(process.argv[1]);' +
+  's.on("connect",()=>{s.destroy();process.exit(0)});' +
+  's.on("error",()=>process.exit(1));' +
+  'setTimeout(()=>{s.destroy();process.exit(1)},3000)\' "$1"';
+
+// Only sets the mode on a directory it CREATES. An unconditional `chmod 700 "$(dirname "$1")"` acts
+// on whatever the operator's configured path happens to sit in: one level too shallow and it silently
+// locks down the remote home directory, or fails on a shared /tmp and takes the rest of the chain
+// down with it. The socket sshd creates is 0600 regardless — the directory mode is defence in depth,
+// not the control.
+const PREPARE_SCRIPT =
+  'd=$(dirname "$1"); if [ ! -d "$d" ]; then mkdir -p "$d" && chmod 700 "$d" || exit 1; fi; rm -f "$1"';
 
 function remoteSh(script: string, arg: string): string {
   return quote(["sh", "-c", script, "sh", arg]);
@@ -40,8 +57,8 @@ export const defaultTunnelIo: TunnelIo = {
       await run("ssh", [...sshFlags(), env.sshHost, remoteSh(PROBE_SCRIPT, remoteSocket)], { timeout: PROBE_TIMEOUT_MS });
       return true;
     } catch {
-      // A non-zero exit means "no socket there"; an ssh failure means the host is unreachable, and
-      // both answer the only question this asks — can a shim connect right now? No.
+      // A non-zero exit means nothing answered there; an ssh failure means the host is unreachable,
+      // and both answer the only question this asks — can a shim connect right now? No.
       return false;
     }
   },
@@ -89,7 +106,7 @@ export async function cancelTunnel(env: RemoteEnv, localSocket: string, io: Tunn
  * Bring one environment's reverse forward up, if it is not up already.
  *
  * Probe-then-act, rather than re-requesting the forward on every tick, because the repair is
- * DESTRUCTIVE: `ssh -O cancel` does not unlink the remote socket, and sshd refuses to bind a listen
+ * DESTRUCTIVE (and the probe therefore has to be a real connect — see PROBE_SCRIPT): `ssh -O cancel` does not unlink the remote socket, and sshd refuses to bind a listen
  * path whose file already exists (the client-side `StreamLocalBindUnlink` is not honoured for remote
  * forwards, and the server-side option of that name defaults to `no`). So the forward can only be
  * re-established by removing the file first — and removing it unconditionally would break every shim

@@ -10,13 +10,17 @@ export interface SessionDeps {
   readonly client: CorralClient;
   readonly identity: Identity;
   /**
-   * When set, this session may only act on the named environment: spawn lands there and nowhere
-   * else, and close refuses a target on any other environment. Set for a session reaching corral
-   * through a remote environment's own MCP socket (ADR 0009), where the environment is asserted by
-   * the transport and the corral host is the higher-trust side of the boundary. Absent for a local
-   * session, which keeps the fleet-wide behaviour.
+   * The environment this session may act on, or null for no restriction: spawn lands on the named
+   * environment and nowhere else, and close refuses a target on any other. Set for a session reaching
+   * corral through a remote environment's own MCP socket (ADR 0009), where the environment is
+   * asserted by the transport and the corral host is the higher-trust side of the boundary.
+   *
+   * REQUIRED, and null rather than optional on purpose: this is the one field standing between a
+   * remote session and the operator's own machine, and an optional field defaults to "no scope" for
+   * anyone who forgets it — silently, with the type system saying nothing. A caller has to write down
+   * which of the two it means.
    */
-  readonly envScope?: string | undefined;
+  readonly envScope: string | null;
 }
 
 // Optional members carry an explicit `| undefined` — see the FleetArgs note in mcp/tools/fleet.ts.
@@ -74,7 +78,7 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
     }
     const me = await deps.identity.load();
     const env = args.env ?? me.session.env;
-    if (deps.envScope !== undefined && env !== deps.envScope) {
+    if (deps.envScope !== null && env !== deps.envScope) {
       return `refusing to spawn into "${env}": this session may only start sessions on its own environment, "${deps.envScope}".`;
     }
     // Two modes, and `repo` picks between them. Omitted: continue where the caller is — the new tab
@@ -159,7 +163,7 @@ export function closeHandler(deps: SessionDeps, args: CloseArgs): Promise<string
     // Card membership is the general rule (see above), but a card can hold sessions on SEVERAL
     // environments — including panes on the corral host itself. A scoped session may not reach
     // across that boundary, so membership is necessary and no longer sufficient.
-    if (deps.envScope !== undefined && env !== deps.envScope) {
+    if (deps.envScope !== null && env !== deps.envScope) {
       return `refusing to close ${key}: it is on environment "${env}", and this session may only close sessions on its own environment, "${deps.envScope}".`;
     }
     const isSelf = key === selfKey;

@@ -65,7 +65,7 @@ function stub(over: Partial<CorralClient>): CorralClient {
   };
 }
 const ctx = { paneId: "w1:p1", socket: null, cwd: "/repo" };
-const deps = (c: CorralClient) => ({ client: c, identity: createIdentity(c, ctx) });
+const deps = (c: CorralClient) => ({ client: c, identity: createIdentity(c, ctx), envScope: null });
 
 // Fresh spies (not method references off a stub — that trips no-unbound-method), each returning the
 // same value the default stub would, so a test can assert how it was called.

@@ -138,6 +138,33 @@ describe("remote MCP listener", () => {
     expect(sock.destroyed).toBe(true);
   });
 
+  it("stays quiet when a peer connects and hangs up without speaking", async () => {
+    // corral's own tunnel probe does exactly this, every tick, to tell a live forward from a
+    // leftover socket file. Treating it as a fault would fill the log with one error per tick.
+    const listener = await startEnvListener(deps, "http://127.0.0.1:1");
+    started.push(listener);
+    const sock = net.createConnection(listener.socketPath);
+    await new Promise<void>((r) => sock.once("connect", () => { r(); }));
+    sock.destroy();
+    await new Promise<void>((r) => sock.once("close", () => { r(); }));
+    expect(sock.destroyed).toBe(true);
+  });
+
+  it("closes established sessions when the listener closes, instead of waiting for them", async () => {
+    // These connections are long-lived by design — one per Claude session — so a close that only
+    // stops accepting would never settle, and a shutdown would hang on the first live session.
+    const listener = await startEnvListener(deps, "http://127.0.0.1:1");
+    const sock = net.createConnection(listener.socketPath);
+    await new Promise<void>((r) => sock.once("connect", () => { r(); }));
+    sock.write(`${JSON.stringify({ v: 1, paneId: "w1:p1", cwd: "/repo" })}\n${JSON.stringify(INIT)}\n`);
+    await collect(sock, (m) => hasResultId(m, 1));
+
+    const closed = new Promise<void>((r) => sock.once("close", () => { r(); }));
+    await listener.close();
+    await closed;
+    expect(sock.destroyed).toBe(true);
+  });
+
   it("releases the connection when the peer goes away, and keeps serving the next one", async () => {
     const listener = await startEnvListener(deps, "http://127.0.0.1:1");
     started.push(listener);

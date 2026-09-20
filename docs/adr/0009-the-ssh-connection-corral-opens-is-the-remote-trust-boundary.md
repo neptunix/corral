@@ -54,7 +54,12 @@ and cwd from its own process — so anything running as the remote user can pres
 in that environment, and act as that session. That is the same-user boundary, and it is the one the
 socket's `0600` mode already draws: a process that can connect to the socket can already read that
 user's files, including the transcripts and config of every session it might impersonate. The
-environment is what could not be re-established after the fact, and it is what this fixes. Because
+The same boundary bounds what the probe can promise. corral checks that something answers at the
+configured path; it cannot prove that the something is sshd's end of its own forward. A process
+running as the remote user could hold a socket there first and see every session's traffic — but that
+is a principal who can already read the shim, the Claude config and the transcripts of the sessions
+it would be impersonating. The environment is what could not be re-established after the fact, and it
+is what this fixes. Because
 the environment is no longer in question, the socket hint is not read at all on this path — an inert
 caller-chosen string is an invitation to wire it back into a decision later.
 
@@ -150,12 +155,16 @@ alternative — asking operators to set `StreamLocalBindUnlink=yes` in `sshd_con
 change affecting every account on the machine, to fix a problem corral can fix for itself in one
 command.
 
-The forward is re-established by a periodic check that PROBES before it acts — it asks whether the
-remote socket is there, and only clears and re-forwards when it is not. The naive loop, clearing and
-re-forwarding every tick, would unlink a socket that was working and break every shim connected
-through it. One further precondition: `ssh -O forward` speaks to an existing connection and never
-establishes one, so a `ControlPersist` of 0 leaves it with no master to attach to and remote MCP
-cannot work at all. corral says so at startup rather than letting it present as silence.
+The forward is re-established by a periodic check that PROBES before it acts, and only clears and
+re-forwards when the probe fails. The naive loop, clearing and re-forwarding every tick, would unlink
+a socket that was working and break every shim connected through it.
+
+The probe has to CONNECT, not look for a file. That is not a refinement — it is the difference
+between a repair loop that works and one that cannot. Both failures this design creates leave the
+socket file in place while nothing listens behind it: `-O cancel` unlinks nothing, and a master that
+dies takes its listener without taking the file. A probe asking only "is there a socket file there?"
+answers yes to both forever, so the clear-and-re-forward path would never run and the environment
+would stay dark until corral was restarted.
 
 Network robustness beyond this is deliberately out of scope. The assumed network is stable broadband;
 detecting a dead master (`ssh -O check` loops, reconnect backoff, a push cache on the remote) is

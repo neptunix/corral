@@ -116,7 +116,7 @@ describe("environment scope on the remote surface", () => {
   });
 
   it("leaves an unscoped session alone", async () => {
-    const out = await spawnHandler(deps({ envScope: undefined }), { brief: "b", env: "local1", repo: "r" });
+    const out = await spawnHandler(deps({ envScope: null }), { brief: "b", env: "local1", repo: "r" });
     expect(out).not.toContain("refusing to spawn");
   });
 });

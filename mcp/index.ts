@@ -36,7 +36,7 @@ if (ctx === null) {
   const identity = createIdentity(client, ctx);
   registerSelfTool(server, identity);
   registerTaskTools(server, { client, identity });
-  registerSessionTools(server, { client, identity });
+  registerSessionTools(server, { client, identity, envScope: null });
   registerFleetTool(server, { client, identity });
 }
 

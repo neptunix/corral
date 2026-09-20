@@ -127,27 +127,6 @@ export interface PaneIdentity {
 export const STARTING_STATUS = "starting";
 
 /**
- * Fallback identity for a pane that herdr has not registered an agent on yet.
- *
- * `resolveSelf` above can only match panes present in the poller snapshot, which is built from
- * `herdr agent list` — so it is blind to a pane whose Claude is still booting. That is precisely the
- * moment a spawned session calls corral_whoami, because its brief tells it to do that first. Rather
- * than tell a live session it does not exist, ask herdr about the PANE directly and synthesize the
- * row from it.
- *
- * The synthesized row carries `sessionId: null` and no statusline, which the payload schema already
- * models (`formatWhoami` renders "session id: not registered yet") — so metrics simply appear on a
- * later call. Everything that does not depend on the agent works immediately, including the CARD:
- * `linkBindsSession` matches a session-less link on env + paneId, so a spawned session finds the card
- * it was spawned onto without waiting for herdr at all.
- *
- * When a socket hint is present it GATES the environments tried, the same rule `resolveSelf` applies:
- * a pane id can collide with one from another herdr server entirely (a remote env's pane, say), and
- * that pane hasn't even reached this snapshot yet — the fresh-pane case this function exists for — so
- * the socket is the only signal available. An env whose effective socket does not match is never even
- * asked about the pane. A null hint keeps the pre-hint behaviour of trying every local env.
- */
-/**
  * The SessionRow a pane lookup stands in for, for a pane herdr knows but no Claude agent has
  * registered on yet. Exported because the environment-pinned resolver (server/self-in-env.ts) needs
  * the identical row for the identical situation on a remote environment — two spellings of "starting"
@@ -181,6 +160,27 @@ export function synthesizeRow(env: HerdrEnv, pane: PaneIdentity): SessionRow {
   };
 }
 
+/**
+ * Fallback identity for a pane that herdr has not registered an agent on yet.
+ *
+ * `resolveSelf` above can only match panes present in the poller snapshot, which is built from
+ * `herdr agent list` — so it is blind to a pane whose Claude is still booting. That is precisely the
+ * moment a spawned session calls corral_whoami, because its brief tells it to do that first. Rather
+ * than tell a live session it does not exist, ask herdr about the PANE directly and synthesize the
+ * row from it.
+ *
+ * The synthesized row carries `sessionId: null` and no statusline, which the payload schema already
+ * models (`formatWhoami` renders "session id: not registered yet") — so metrics simply appear on a
+ * later call. Everything that does not depend on the agent works immediately, including the CARD:
+ * `linkBindsSession` matches a session-less link on env + paneId, so a spawned session finds the card
+ * it was spawned onto without waiting for herdr at all.
+ *
+ * When a socket hint is present it GATES the environments tried, the same rule `resolveSelf` applies:
+ * a pane id can collide with one from another herdr server entirely (a remote env's pane, say), and
+ * that pane hasn't even reached this snapshot yet — the fresh-pane case this function exists for — so
+ * the socket is the only signal available. An env whose effective socket does not match is never even
+ * asked about the pane. A null hint keeps the pre-hint behaviour of trying every local env.
+ */
 export async function resolveSelfViaPane(input: {
   readonly envs: readonly HerdrEnv[];
   readonly paneId: string;

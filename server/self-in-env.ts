@@ -16,12 +16,13 @@ import { synthesizeRow } from "./whoami.ts";
  * body, where a future edit could leak one into the other. Here the environment is not a parameter
  * a request carries at all — it is bound when the listener is created.
  *
- * For the same reason there is no socket hint in this file. The shim still sends one (it is the
- * caller's own `HERDR_SOCKET_PATH`), and it is deliberately ignored: within a pinned environment it
- * could only ever narrow a set already narrowed by the transport, and honouring it would mean a
- * remote caller could influence its own resolution by editing an environment variable. Pane id and
- * cwd remain hints, exactly as ADR 0002 decision 4 has them — one level down, inside an environment
- * that is now fixed.
+ * For the same reason there is no socket hint in this file, and none in the wire format either: the
+ * shim does not send `HERDR_SOCKET_PATH` at all, and the preamble schema is `.strict()`, so a future
+ * shim that started sending one would be REFUSED rather than quietly ignored. Within a pinned
+ * environment a socket hint could only narrow a set the transport has already narrowed, while
+ * offering a remote caller a way to influence its own resolution by editing an environment variable.
+ * Pane id and cwd remain hints, exactly as ADR 0002 decision 4 has them — one level down, inside an
+ * environment that is now fixed.
  */
 function pick(rows: readonly SessionRow[], env: HerdrEnv, paneId: string, cwd: string): SelfResolution {
   const only = rows[0];

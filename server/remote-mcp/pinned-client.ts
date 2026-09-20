@@ -6,6 +6,7 @@ import type { CorralClient } from "../../mcp/client.ts";
 import { createClient } from "../../mcp/client.ts";
 import { resolveSelfInEnv, resolveSelfInEnvViaPane } from "../self-in-env.ts";
 import type { Storage } from "../storage.ts";
+import { createTtlCache } from "../ttl-cache.ts";
 import type { PaneIdentity } from "../whoami.ts";
 import { buildWhoami } from "../whoami.ts";
 
@@ -43,8 +44,17 @@ export interface PinnedDeps {
  * is told to call this first, so an unresolved answer usually means corral has not caught up with a
  * pane created seconds ago, not that the pane is bogus.
  */
-export function createPinnedWhoami(deps: PinnedDeps): (paneId: string, cwd: string) => Promise<WhoamiResponse> {
+// How long a pane id that herdr could not find stays "not found" without asking again. The pane
+// lookup is THREE ssh commands per call (server/herdr.ts), and it is reached by any well-formed pane
+// id that resolves to nothing — so a peer on the far side of the trust boundary calling whoami in a
+// loop would otherwise spawn ssh children on the corral host as fast as it liked, congesting the same
+// shared connection the poller, the statusline sweep and the live terminal all ride. A miss is cheap
+// to re-ask a few seconds later; the fresh-pane case this lookup exists for resolves within one poll.
+const PANE_MISS_TTL_MS = 10_000;
+
+function createPinnedWhoami(deps: PinnedDeps): (paneId: string, cwd: string) => Promise<WhoamiResponse> {
   const { env, envs, poller, storage, paneLookup } = deps;
+  const paneMisses = createTtlCache<true>({ ttlMs: PANE_MISS_TTL_MS, maxEntries: 64 });
   return async (paneId, cwd) => {
     let snapshot = poller.getSnapshot();
     let resolution = resolveSelfInEnv({ snapshot, env, paneId, cwd });
@@ -55,8 +65,9 @@ export function createPinnedWhoami(deps: PinnedDeps): (paneId: string, cwd: stri
     }
     // Only a not_found escalates: an ambiguous match already found real rows, and replacing them
     // with a synthesized one would drop the caller's metrics AND hide the ambiguity.
-    if (!resolution.ok && resolution.code === "not_found") {
+    if (!resolution.ok && resolution.code === "not_found" && paneMisses.get(paneId) === undefined) {
       resolution = await resolveSelfInEnvViaPane({ env, paneId, lookup: paneLookup });
+      if (!resolution.ok) paneMisses.set(paneId, true);
     }
     return buildWhoami({
       resolution,

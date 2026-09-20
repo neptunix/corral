@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { HerdrEnv } from "../environments.ts";
 import type { TunnelIo } from "../server/remote-mcp/tunnel.ts";
-import { cancelTunnel, ensureTunnel } from "../server/remote-mcp/tunnel.ts";
+import { cancelTunnel, ensureTunnel, PROBE_SCRIPT } from "../server/remote-mcp/tunnel.ts";
 
 type RemoteEnv = Extract<HerdrEnv, { kind: "remote" }>;
 
@@ -34,14 +34,14 @@ function fakeIo(opts: { present: boolean; forwardFails?: boolean }): FakeIo {
 }
 
 describe("ensureTunnel", () => {
-  it("leaves a live forward alone — it never unlinks a socket that is working", async () => {
+  it("leaves a live forward alone — it never unlinks a socket that is answering", async () => {
     const io = fakeIo({ present: true });
     expect(await ensureTunnel(remoteEnv("/home/u/.corral/mcp.sock"), "/local.sock", io)).toBe("already-present");
     // The repair is destructive (rm -f before re-forwarding), so probing first is the whole point.
     expect(io.calls).toEqual(["probe"]);
   });
 
-  it("clears the stale socket file before forwarding when none is present", async () => {
+  it("clears the stale socket file before forwarding when nothing answers", async () => {
     const io = fakeIo({ present: false });
     expect(await ensureTunnel(remoteEnv("/home/u/.corral/mcp.sock"), "/local.sock", io)).toBe("forwarded");
     expect(io.calls).toEqual(["probe", "prepare", "forward"]);
@@ -74,5 +74,45 @@ describe("cancelTunnel", () => {
       cancel: () => Promise.reject(new Error("control socket gone")),
     };
     await expect(cancelTunnel(remoteEnv("/home/u/.corral/mcp.sock"), "/local.sock", io)).resolves.toBeUndefined();
+  });
+});
+
+describe("the remote probe script", () => {
+  // Runs the EXACT script corral sends, against a real unix socket — the distinction it has to draw
+  // (something answers vs. a socket file nobody is behind) is the whole basis of the repair loop, and
+  // it cannot be asserted against a fake.
+  const run = async (target: string): Promise<number> => {
+    const { execFile } = await import("node:child_process");
+    return new Promise((resolve) => {
+      execFile("sh", ["-c", PROBE_SCRIPT, "sh", target], (err) => {
+        resolve(err === null ? 0 : 1);
+      });
+    });
+  };
+
+  it("succeeds on a socket that answers, and fails on a leftover file or an absent path", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const net = await import("node:net");
+
+    const dir = mkdtempSync(path.join(os.tmpdir(), "corral-probe-"));
+    const live = path.join(dir, "live.sock");
+    const stale = path.join(dir, "stale.sock");
+    const absent = path.join(dir, "absent.sock");
+
+    const srv = net.createServer(() => undefined);
+    await new Promise<void>((r) => srv.listen(live, () => { r(); }));
+    writeFileSync(stale, "");
+
+    try {
+      expect(await run(live)).toBe(0);
+      // `test -S` would call this healthy forever and the forward would never be repaired.
+      expect(await run(stale)).toBe(1);
+      expect(await run(absent)).toBe(1);
+    } finally {
+      await new Promise<void>((r) => srv.close(() => { r(); }));
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

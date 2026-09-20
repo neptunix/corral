@@ -47,8 +47,14 @@ function serveConnection(conn: net.Socket, deps: PinnedDeps, baseUrl: string): v
     conn.destroy();
   };
 
+  let sawBytes = false;
   const timer = setTimeout(() => {
-    if (!started) fail("no preamble within the deadline");
+    // Silent when the peer never said anything: corral's own tunnel probe connects and hangs up at
+    // once to tell a live forward from a leftover socket file, and that is not a fault to report
+    // every tick. A peer that sent a partial line and then stalled is worth a line.
+    if (started) return;
+    if (sawBytes) fail("no preamble within the deadline");
+    else conn.destroy();
   }, PREAMBLE_TIMEOUT_MS);
   timer.unref();
 
@@ -71,6 +77,10 @@ function serveConnection(conn: net.Socket, deps: PinnedDeps, baseUrl: string): v
       // Never a hint here: this connection's environment is already asserted by the listener.
       socket: null,
     });
+    // The one record that a remote session used these tools. ADR 0009 accepts that anything running
+    // as the remote user can present itself as any pane in that environment; this is what makes that
+    // visible on the higher-trust host rather than silent.
+    console.warn(`[remote-mcp] ${deps.env.id}: session opened for pane ${parsed.preamble.paneId}`);
     const server = new McpServer({ name: "corral", version: "0.1.0" }, { instructions: ORIENTATION });
     registerSelfTool(server, identity);
     registerTaskTools(server, { client, identity });
@@ -105,6 +115,7 @@ function serveConnection(conn: net.Socket, deps: PinnedDeps, baseUrl: string): v
   };
 
   const onData = (chunk: Buffer): void => {
+    sawBytes = true;
     buf = Buffer.concat([buf, chunk]);
     const nl = buf.indexOf(0x0a);
     if (nl === -1) {
@@ -146,9 +157,17 @@ export async function startEnvListener(deps: PinnedDeps, baseUrl: string): Promi
   const socketPath = localSocketPath(deps.env.id);
   rmSync(socketPath, { force: true });
 
-  const server = net.createServer({ allowHalfOpen: false });
+  const server = net.createServer();
   server.maxConnections = MAX_CONNECTIONS;
-  server.on("connection", (conn) => { serveConnection(conn, deps, baseUrl); });
+  // `net.Server.close()` stops ACCEPTING and then waits for existing connections to end on their own.
+  // These connections are long-lived by design — one per Claude session — so without this the close
+  // promise never settles and every still-open session's MCP server stays alive through a shutdown.
+  const live = new Set<net.Socket>();
+  server.on("connection", (conn) => {
+    live.add(conn);
+    conn.on("close", () => live.delete(conn));
+    serveConnection(conn, deps, baseUrl);
+  });
   server.on("error", (err) => {
     console.error(`[remote-mcp] ${deps.env.id}: listener error — ${err.message}`);
   });
@@ -164,6 +183,10 @@ export async function startEnvListener(deps: PinnedDeps, baseUrl: string): Promi
 
   return {
     socketPath,
-    close: () => new Promise<void>((resolve) => { server.close(() => { resolve(); }); }),
+    close: () => new Promise<void>((resolve) => {
+      server.close(() => { resolve(); });
+      for (const conn of live) conn.destroy();
+      live.clear();
+    }),
   };
 }

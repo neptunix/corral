@@ -37,6 +37,10 @@ import { startZombieReaper } from "./zombie-reaper.ts";
 
 assertLoopback(HOST);
 
+// How long a shutdown waits for the remote MCP teardown (one `ssh -O cancel` per remote) before
+// exiting anyway. An unreachable host must not hold Ctrl-C open.
+const SHUTDOWN_GRACE_MS = 5000;
+
 const { report, envs: ENVS, configLine: preflightConfigLine } = await runPreflight();
 console.error(formatReport(report.lines));
 if (report.fatal || ENVS === null) {
@@ -155,8 +159,12 @@ void (async () => {
   });
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => {
-      stopRemoteMcp();
-      process.exit(0);
+      // AWAITED, then exit. Dropping the reverse forward is an ssh round trip: exiting in the same
+      // tick would leave the forward registered on every remote, which is the state the teardown
+      // exists to avoid. Bounded, because a shutdown must not hang on an unreachable host.
+      const done = stopRemoteMcp().catch(() => undefined);
+      const deadline = new Promise((r) => setTimeout(r, SHUTDOWN_GRACE_MS));
+      void Promise.race([done, deadline]).then(() => { process.exit(0); });
     });
   }
 })();
