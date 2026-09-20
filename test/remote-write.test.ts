@@ -136,8 +136,7 @@ describe("writeRemoteFile", () => {
   });
 });
 
-// Runs the REAL remote command under a local `sh` (the last ssh argument is exactly what the remote
-// login shell would receive), so the script itself is exercised, not just its argv.
+// Runs the real remote command under a local sh.
 describe("writeRemoteFile remote script (run under a local sh)", () => {
   function runLocally(tmp: string): SpawnSsh {
     return (_file, args) => spawn("sh", ["-c", args.at(-1) ?? ""], { env: { ...process.env, TMPDIR: tmp } });

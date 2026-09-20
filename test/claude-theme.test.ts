@@ -93,8 +93,7 @@ describe("syncClaudeThemeBase", () => {
   });
 });
 
-// The real remote scripts, run under a local `sh`: the last ssh argument is exactly what the remote
-// login shell would receive.
+// Runs the real remote command under a local sh.
 const runLocally: SpawnSsh = (_file, args) => spawn("sh", ["-c", args.at(-1) ?? ""]);
 function remoteEnv(dirs: readonly string[]): Extract<HerdrEnv, { kind: "remote" }> {
   return { id: "e", label: "E", kind: "remote", sshHost: "host1", socket: "~/s.sock", herdrBin: "~/herdr", claudeConfigDirs: dirs, spawnCommand: "claude", repos: {} };
@@ -165,8 +164,7 @@ describe("syncRemoteClaudeThemeBase", () => {
 
   it("serializes overlapping syncs per env so the last request wins", async () => {
     const file = await writeTheme(root, { base: "dark" });
-    // First request's write is slow; without per-env queuing the second one would read the stale
-    // "dark", skip its write as a no-op, and the slow write would land last.
+    // The first write is slow: without queuing, the second sync reads the stale value and skips its write.
     const slowWrite: SpawnSsh = (_f, args) => {
       const cmd = args.at(-1) ?? "";
       return spawn("sh", ["-c", cmd.includes("mv -f") ? `sleep 0.3; ${cmd}` : cmd]);

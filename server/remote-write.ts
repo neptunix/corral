@@ -7,18 +7,12 @@ import { sshFlags } from "./ssh-flags.ts";
 
 type RemoteEnv = Extract<HerdrEnv, { readonly kind: "remote" }>;
 
-// Runs under `sh -c` on the remote so it does not depend on the login shell's syntax, with the file
-// name passed as a positional parameter ($1) rather than spliced into the script. mktemp -d makes a
-// 0700 directory (and umask 077 the file), so a file dropped into a shared /tmp is readable by the
-// remote user only. When `cat` fails the directory is removed again; a client killed by the timeout
-// is best-effort only, and whatever it leaves is left to the remote OS's temp cleaning.
+// mktemp -d plus umask 077 keep the file private to the remote user in a shared /tmp.
 const REMOTE_SCRIPT =
   'umask 077; d=$(mktemp -d "${TMPDIR:-/tmp}/corral-upload.XXXXXX") || exit 1; ' +
   'if cat > "$d/$1"; then printf %s "$d/$1"; else rm -rf "$d"; exit 1; fi';
 
-// The whole transfer is bounded, not just the connect: ConnectTimeout does not apply to a client
-// attaching to an already-running shared master, so a stalled link would otherwise hang forever.
-// The budget grows with the payload so a 25 MB file on a slow link is not cut off at a fixed limit.
+// ConnectTimeout does not apply to a client attaching to a running master, so the whole transfer needs its own bound.
 const BASE_TIMEOUT_MS = 30_000;
 const PER_MB_TIMEOUT_MS = 20_000;
 const MAX_CAPTURE_BYTES = 256 * 1024;
@@ -41,12 +35,6 @@ export function remoteWriteTimeoutMs(byteLength: number): number {
   return BASE_TIMEOUT_MS + Math.ceil(byteLength / (1024 * 1024)) * PER_MB_TIMEOUT_MS;
 }
 
-/**
- * Run `sh -c <script> sh ...args` on a remote env over the shared ssh connection, feeding `stdin`,
- * and resolve with its stdout (ssh's own noise lines stripped, otherwise verbatim). Args travel as
- * positional parameters, never inside the script. Bounded by `timeoutMs` overall; rejects on a
- * non-zero exit, and on output longer than the capture cap rather than returning it truncated.
- */
 export function runRemoteScript(
   env: RemoteEnv,
   opts: {
@@ -63,8 +51,7 @@ export function runRemoteScript(
 
   return new Promise<string>((resolve, reject) => {
     let settled = false;
-    // Buffers, decoded once on close: decoding per chunk would turn a multibyte character split across
-    // two chunks into replacement characters, which the theme sync would then write back to disk.
+    // Decoded once on close: per-chunk decoding corrupts a multibyte character split across chunks.
     const out: Buffer[] = [];
     let outBytes = 0;
     let stderr = "";
@@ -103,12 +90,7 @@ export function runRemoteScript(
   });
 }
 
-/**
- * Write `bytes` to `<remote tmp>/corral-upload.<random>/<name>` on a remote env over the shared ssh
- * connection and return the file's absolute remote path. `name` must already be a single safe
- * basename (sanitizeUploadName). The caller owns lifetime: the private directory is left in the
- * remote's temp dir, which the OS clears; a brief file is removed by the launch command that reads it.
- */
+/** `name` must already be a safe basename (sanitizeUploadName); the caller owns the private dir's lifetime. */
 export async function writeRemoteFile(
   env: RemoteEnv,
   opts: { readonly name: string; readonly bytes: Uint8Array; readonly timeoutMs?: number; readonly spawnFn?: SpawnSsh },

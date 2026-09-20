@@ -382,10 +382,7 @@ export function createApi(opts: {
 
   app.get("/api/health", (c) => c.json({ ok: true }));
 
-  // Web theme toggle → flip the `base` of `themes/corral.json` in each env's Claude config dirs, so a
-  // session that selected `custom:corral` follows the dashboard's light/dark. Local dirs are edited
-  // directly; a remote env's over the shared ssh connection. A remote that cannot be reached is
-  // logged and skipped — it never fails the toggle or delays it beyond the per-call ssh timeout.
+  // A remote that cannot be reached is logged and skipped so it never fails the toggle.
   app.post("/api/theme", async (c) => {
     let body: unknown;
     try { body = await c.req.json(); } catch { return c.json({ error: { code: "validation", message: "invalid JSON" } }, 400); }
