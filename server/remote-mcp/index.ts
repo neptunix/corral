@@ -21,14 +21,12 @@ export interface RemoteMcpOpts {
   readonly baseUrl: string;
   readonly intervalMs: number;
   readonly status: TunnelStatus;
-  readonly now?: () => number;
 }
 
 // An MCP surface for remote environments that opted in with `mcpSocket` (ADR 0009).
 export async function startRemoteMcp(opts: RemoteMcpOpts): Promise<() => Promise<void>> {
   const targets = opts.envs.filter(isForwardable);
   if (targets.length === 0) return () => Promise.resolve();
-  const now = opts.now ?? Date.now;
 
   let stopping = false;
   // Through a function, or TypeScript narrows the flag to false across the await between checks.
@@ -49,7 +47,7 @@ export async function startRemoteMcp(opts: RemoteMcpOpts): Promise<() => Promise
         const state = await ensureTunnel(env, local);
         if (isStopping()) return;
         const nowUp = state !== "unreachable";
-        opts.status.record(env.id, { up: nowUp, at: now() });
+        opts.status.record(env.id, nowUp ? "up" : "down");
         if (nowUp !== up) {
           console.warn(
             nowUp
@@ -68,7 +66,7 @@ export async function startRemoteMcp(opts: RemoteMcpOpts): Promise<() => Promise
       });
       console.warn(`[remote-mcp] ${env.id}: serving ${local}`);
     } catch (err) {
-      opts.status.record(env.id, { up: false, at: now() });
+      opts.status.record(env.id, "no-listener");
       console.error(
         `[remote-mcp] ${env.id}: not serving — ${err instanceof Error ? err.message : String(err)}. ` +
         "Sessions on that environment will have no corral tools.",

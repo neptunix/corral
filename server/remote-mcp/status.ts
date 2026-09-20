@@ -1,7 +1,4 @@
-export interface TunnelReading {
-  readonly up: boolean;
-  readonly at: number;
-}
+export type TunnelReading = "up" | "down" | "no-listener";
 
 export interface TunnelStatus {
   record(envId: string, reading: TunnelReading): void;

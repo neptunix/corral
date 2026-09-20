@@ -557,7 +557,7 @@ describe("MCP tunnel rows", () => {
 
   it("publishes the live tunnel state, and n/a for an env without mcpSocket", async () => {
     const tunnels = createTunnelStatus();
-    tunnels.record("on", { up: false, at: 1 });
+    tunnels.record("on", "down");
     const rows = await tunnelRows([withSocket("on"), remote("off")], tunnels);
     expect(rows.map((c) => [c.scope, c.state])).toEqual([
       [{ kind: "env", envId: "on" }, "problem"],

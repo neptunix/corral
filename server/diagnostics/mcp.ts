@@ -151,7 +151,13 @@ export function mcpTunnelCheck(env: RemoteEnv, tunnels: TunnelStatus, now: numbe
   if (reading === undefined) {
     return { ...base, title: `MCP tunnel to "${env.id}" not attempted yet`, state: "pending", detail: "" };
   }
-  if (!reading.up) {
+  if (reading === "no-listener") {
+    return {
+      ...base, title: `MCP listener for "${env.id}" is not serving`, state: "problem",
+      detail: "corral could not open its local socket for this environment at startup, so no tunnel was tried — the server log has the error.",
+    };
+  }
+  if (reading === "down") {
     return {
       ...base, title: `MCP tunnel to "${env.id}" is down`, state: "problem",
       detail: "Sessions there have no corral_* tools. If it never comes up, the key in the remote's authorized_keys probably lacks `port-forwarding` — see README → \"MCP on a remote environment\"; the server log has the ssh error.",

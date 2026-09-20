@@ -100,7 +100,6 @@ describe("mcpChecks", () => {
 });
 
 describe("mcpTunnelCheck", () => {
-  const at = { at: 5 };
   it("is n/a — not a problem — for an env that opted out", () => {
     const row = mcpTunnelCheck(remoteEnv(), createTunnelStatus(), 9);
     expect(row.state).toBe("n/a");
@@ -111,11 +110,15 @@ describe("mcpTunnelCheck", () => {
     const status = createTunnelStatus();
     const env = remoteEnv(SOCK);
     expect(mcpTunnelCheck(env, status, 9).state).toBe("pending");
-    status.record("far", { up: true, ...at });
+    status.record("far", "up");
     expect(mcpTunnelCheck(env, status, 9).state).toBe("ok");
-    status.record("far", { up: false, ...at });
+    status.record("far", "down");
     const down = mcpTunnelCheck(env, status, 9);
     expect(down).toMatchObject({ state: "problem", severity: "warning" });
     expect(down.detail).toContain("port-forwarding");
+    status.record("far", "no-listener");
+    const noListener = mcpTunnelCheck(env, status, 9);
+    expect(noListener.state).toBe("problem");
+    expect(noListener.detail).not.toContain("port-forwarding");
   });
 });

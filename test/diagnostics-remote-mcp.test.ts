@@ -72,3 +72,27 @@ describe("remote MCP rows", () => {
     expect(rows).toEqual([]);
   });
 });
+
+describe("remote MCP rows on a partial or failed probe", () => {
+  it("go n/a together when the shim path never arrived — registered is not asserted alone", async () => {
+    const facts = probe({ "/far/.claude.json": content(registration) });
+    const rows = await rowsFor(env(SOCK), facts);
+    expect(rows.map((c) => c.state)).toEqual(["n/a", "n/a"]);
+    expect(rows[0]?.title).toContain("did not arrive");
+  });
+
+  it("are never a problem when the whole probe failed, and absent for an opted-out env", async () => {
+    const failed: ProbeFacts = { ...probe({}), arrived: 0, error: "ssh: timed out" };
+    expect((await rowsFor(env(SOCK), failed)).map((c) => c.state)).toEqual(["n/a", "n/a"]);
+    expect(await rowsFor(env(), failed)).toEqual([]);
+  });
+
+  it("do not request a shim whose path fails the metacharacter screen", () => {
+    const hostile = JSON.stringify({ mcpServers: { corral: { args: ["/far/$(x).mjs"] } } });
+    const facts = { byPath: probe({ "/far/.claude.json": content(hostile) }).byPath, home: "/far", pathEnv: null };
+    const plan = planRound2For(env(SOCK))(facts);
+    expect(plan.requests).toEqual([]);
+    expect(plan.rejected).toHaveLength(1);
+  });
+});
+
