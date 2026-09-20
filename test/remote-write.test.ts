@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { HerdrEnv } from "../environments.ts";
 import type { RemoteChild, SpawnSsh } from "../server/remote-write.ts";
-import { remoteWriteTimeoutMs, writeRemoteFile } from "../server/remote-write.ts";
+import { remoteWriteTimeoutMs, runRemoteScript, writeRemoteFile } from "../server/remote-write.ts";
 
 const env: Extract<HerdrEnv, { kind: "remote" }> = {
   id: "e", label: "E", kind: "remote", sshHost: "host1", socket: "~/s.sock", herdrBin: "~/herdr",
@@ -110,6 +110,25 @@ describe("writeRemoteFile", () => {
     const p = writeRemoteFile(env, { name: "f", bytes: new Uint8Array(), spawnFn: f.spawnFn });
     f.child.emit("error", new Error("spawn ssh ENOENT"));
     await expect(p).rejects.toThrow("ENOENT");
+  });
+
+  it("rejects output beyond the capture cap instead of returning it truncated", async () => {
+    const f = fake();
+    const p = runRemoteScript(env, { script: "x", args: [], stdin: new Uint8Array(), timeoutMs: 1000, what: "probe", spawnFn: f.spawnFn });
+    f.out.emit("data", Buffer.alloc(200 * 1024, 65));
+    f.out.emit("data", Buffer.alloc(100 * 1024, 65));
+    f.child.emit("close", 0);
+    await expect(p).rejects.toThrow("more output than expected");
+  });
+
+  it("decodes a multibyte character split across chunks intact", async () => {
+    const f = fake();
+    const p = runRemoteScript(env, { script: "x", args: [], stdin: new Uint8Array(), timeoutMs: 1000, what: "probe", spawnFn: f.spawnFn });
+    const bytes = Buffer.from("Caf\u00e9", "utf8"); // the two bytes of the accented letter go out in separate chunks
+    f.out.emit("data", bytes.subarray(0, bytes.length - 1));
+    f.out.emit("data", bytes.subarray(bytes.length - 1));
+    f.child.emit("close", 0);
+    expect(await p).toBe("Caf\u00e9");
   });
 
   it("scales the timeout with payload size", () => {

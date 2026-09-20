@@ -66,7 +66,23 @@ const REMOTE_THEME_TIMEOUT_MS = 10_000;
 // indistinguishable from a failed ssh. $1 is the fixed-name file inside a configured config dir.
 const READ_THEME_SCRIPT = 'if [ -f "$1" ]; then cat "$1"; fi';
 // Write to a sibling temp file and rename, so Claude Code's hot-reload never reads a half-written theme.
-const WRITE_THEME_SCRIPT = 'umask 077; t="$1.corral-tmp.$$"; if cat > "$t"; then mv -f "$t" "$1"; else rm -f "$t"; exit 1; fi';
+// A symlinked corral.json is resolved first and the TARGET replaced, matching the local sync (a plain
+// writeFile follows the link); renaming over the link itself would silently turn it into a regular file.
+const WRITE_THEME_SCRIPT =
+  'f=$(readlink -f -- "$1" 2>/dev/null) || f=""; [ -n "$f" ] || f="$1"; umask 077; t="$f.corral-tmp.$$"; ' +
+  'if cat > "$t"; then mv -f "$t" "$f"; else rm -f "$t"; exit 1; fi';
+
+// One sync at a time per remote env. The read, the "already in sync" decision and the write are separate
+// ssh calls, so two overlapping toggles could otherwise interleave: the later request reads the stale
+// value, skips its write as a no-op, and the earlier request's write lands last. Queued in arrival order,
+// every sync reads what the previous one wrote, so the last request always wins.
+const remoteSyncTail = new Map<string, Promise<unknown>>();
+function serializedPerEnv<T>(envId: string, run: () => Promise<T>): Promise<T> {
+  const prev = remoteSyncTail.get(envId) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(run);
+  remoteSyncTail.set(envId, next);
+  return next;
+}
 
 /**
  * The remote counterpart of `syncClaudeThemeBase`, for one remote environment: same rules (config-dir
@@ -76,20 +92,27 @@ const WRITE_THEME_SCRIPT = 'umask 077; t="$1.corral-tmp.$$"; if cat > "$t"; then
  * config load), so the paths are used as given. One dir failing does not stop the others; the first
  * error is thrown after every dir was tried.
  */
-export async function syncRemoteClaudeThemeBase(
+export function syncRemoteClaudeThemeBase(
   env: Extract<HerdrEnv, { readonly kind: "remote" }>,
   mode: ThemeMode,
   spawnFn?: SpawnSsh,
 ): Promise<number> {
+  return serializedPerEnv(env.id, () => syncRemoteDirs(env, mode, spawnFn));
+}
+
+async function syncRemoteDirs(
+  env: Extract<HerdrEnv, { readonly kind: "remote" }>,
+  mode: ThemeMode,
+  spawnFn: SpawnSsh | undefined,
+): Promise<number> {
   let updated = 0;
   let firstError: Error | null = null;
   for (const dir of env.claudeConfigDirs) {
-    const file = `${dir.replace(/\/+$/, "")}/themes/${THEME_FILE}`;
+    const file = `${dir}/themes/${THEME_FILE}`;
     const base = { args: [file], timeoutMs: REMOTE_THEME_TIMEOUT_MS, ...(spawnFn === undefined ? {} : { spawnFn }) };
     try {
       const raw = await runRemoteScript(env, { ...base, script: READ_THEME_SCRIPT, stdin: new Uint8Array(), what: "remote theme read" });
-      if (raw.trim() === "") continue; // no corral theme in this dir
-      const next = flippedTheme(raw, mode);
+      const next = flippedTheme(raw, mode); // an empty read (no theme in this dir) is not JSON: null
       if (next === null) continue;
       await runRemoteScript(env, { ...base, script: WRITE_THEME_SCRIPT, stdin: new TextEncoder().encode(next), what: "remote theme write" });
       updated++;

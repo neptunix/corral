@@ -149,4 +149,31 @@ describe("syncRemoteClaudeThemeBase", () => {
     await expect(syncRemoteClaudeThemeBase(remoteEnv([path.join(root, "bad"), good]), "dark", failing)).rejects.toThrow("ssh exit 255");
     expect(JSON.parse(await fs.readFile(path.join(good, "themes", "corral.json"), "utf8"))).toEqual({ base: "dark" });
   });
+
+  it("replaces the target of a symlinked theme file, keeping the link", async () => {
+    const target = path.join(root, "shared.json");
+    await fs.writeFile(target, JSON.stringify({ base: "dark" }), "utf8");
+    await fs.mkdir(path.join(root, "themes"));
+    const link = path.join(root, "themes", "corral.json");
+    await fs.symlink(target, link);
+
+    expect(await syncRemoteClaudeThemeBase(remoteEnv([root]), "light", runLocally)).toBe(1);
+
+    expect((await fs.lstat(link)).isSymbolicLink()).toBe(true);
+    expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ base: "light" });
+  });
+
+  it("serializes overlapping syncs per env so the last request wins", async () => {
+    const file = await writeTheme(root, { base: "dark" });
+    // First request's write is slow; without per-env queuing the second one would read the stale
+    // "dark", skip its write as a no-op, and the slow write would land last.
+    const slowWrite: SpawnSsh = (_f, args) => {
+      const cmd = args.at(-1) ?? "";
+      return spawn("sh", ["-c", cmd.includes("mv -f") ? `sleep 0.3; ${cmd}` : cmd]);
+    };
+    const first = syncRemoteClaudeThemeBase(remoteEnv([root]), "light", slowWrite);
+    const second = syncRemoteClaudeThemeBase(remoteEnv([root]), "dark", runLocally);
+    await Promise.all([first, second]);
+    expect(JSON.parse(await fs.readFile(file, "utf8"))).toEqual({ base: "dark" });
+  });
 });

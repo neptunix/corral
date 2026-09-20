@@ -21,7 +21,8 @@ const REMOTE_SCRIPT =
 // The budget grows with the payload so a 25 MB file on a slow link is not cut off at a fixed limit.
 const BASE_TIMEOUT_MS = 30_000;
 const PER_MB_TIMEOUT_MS = 20_000;
-const MAX_CAPTURE_CHARS = 256 * 1024;
+const MAX_CAPTURE_BYTES = 256 * 1024;
+const MAX_STDERR_CHARS = 64 * 1024;
 const REMOTE_PATH_RE = /^\/.+$/;
 
 export interface RemoteChild {
@@ -62,7 +63,10 @@ export function runRemoteScript(
 
   return new Promise<string>((resolve, reject) => {
     let settled = false;
-    let stdout = "";
+    // Buffers, decoded once on close: decoding per chunk would turn a multibyte character split across
+    // two chunks into replacement characters, which the theme sync would then write back to disk.
+    const out: Buffer[] = [];
+    let outBytes = 0;
     let stderr = "";
     let overflow = false;
     const timer = setTimeout(() => {
@@ -78,9 +82,10 @@ export function runRemoteScript(
     }
 
     child.stdout.on("data", (chunk) => {
-      if (stdout.length < MAX_CAPTURE_CHARS) stdout += chunk.toString("utf8"); else overflow = true;
+      outBytes += chunk.length;
+      if (outBytes > MAX_CAPTURE_BYTES) overflow = true; else out.push(chunk);
     });
-    child.stderr.on("data", (chunk) => { if (stderr.length < MAX_CAPTURE_CHARS) stderr += chunk.toString("utf8"); });
+    child.stderr.on("data", (chunk) => { if (stderr.length < MAX_STDERR_CHARS) stderr += chunk.toString("utf8"); });
     // EPIPE when ssh exits before reading everything; the exit code below carries the real failure.
     child.stdin.on("error", () => undefined);
     child.on("error", (err) => { finish(new Error(`ssh failed to start: ${err.message}`, { cause: err })); });
@@ -91,7 +96,7 @@ export function runRemoteScript(
       } else if (overflow) {
         finish(new Error(`${opts.what} returned more output than expected`));
       } else {
-        finish(null, stdout.replace(SSH_NOISE, ""));
+        finish(null, Buffer.concat(out).toString("utf8").replace(SSH_NOISE, ""));
       }
     });
     child.stdin.end(opts.stdin);
