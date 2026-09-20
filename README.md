@@ -478,6 +478,11 @@ Each entry describes one place corral can see and spawn sessions into:
   forward its arguments**. The `exec … claude "$@"` wrapper shown under *Multiple Claude accounts* below
   already does. One that hard-codes its arguments drops the flags: the session starts, but with Claude's
   auto-generated name, the last-used model and no Remote Control.
+- `mcpSocket` (remote only, optional) — an absolute path on the REMOTE box where corral forwards an
+  MCP socket, so sessions over there get the `corral_*` tools. Absent means they do not. Each remote
+  environment needs its own path — two sharing one is refused at startup, because a session would
+  then resolve to the other environment's cards. See [MCP on a remote
+  environment](#mcp-on-a-remote-environment).
 - `claudeConfigDirs` — which `~/.claude*` dirs corral scans on this box for recap and the
   statusline metrics (local defaults to `~/.claude`; set it for profile-split or remote — see
   the statusline section).
@@ -824,9 +829,9 @@ tools — no error, just nothing there. If you run the split-account setup above
 CLAUDE_CONFIG_DIR=~/.claude-work claude mcp add --scope user corral -- /path/to/corral/node_modules/.bin/tsx /path/to/corral/mcp/index.ts
 ```
 
-Register it only in config dirs **on the machine running corral**. The MCP process talks to the
-corral server over that machine's loopback, so a session on a remote environment has nothing to
-reach — its tools would report `unreachable`.
+Register it that way only in config dirs **on the machine running corral**. That MCP process talks to
+the corral server over that machine's loopback, which a remote box cannot reach. Remote environments
+get the tools a different way — see [MCP on a remote environment](#mcp-on-a-remote-environment).
 
 **The Claude integration is a prerequisite here, not just for recaps.** corral discovers sessions by
 running `herdr agent list`, which comes in two halves. herdr itself reports each pane's coordinates
@@ -886,6 +891,60 @@ all, and that pane is always brand-new. `corral_spawn` and `corral_session_close
 `corral_task_read` carry `readOnlyHint`. Those are hints for the harness, not enforcement — nothing in the server
 requires confirmation. The actual control is the operator's Claude Code permission configuration:
 simply don't allowlist the two destructive tools, same as any other destructive tool call.
+
+### MCP on a remote environment
+
+A session on a `kind: "remote"` environment can have the same tools, over the SSH connection corral
+already holds to that box. corral reverse-forwards a unix socket onto the remote and serves MCP on
+it, from the corral host; on the remote, a small shim pipes Claude's stdio into that socket. Nothing
+listens on a TCP port, corral's HTTP port is never forwarded, and there is no corral checkout on the
+remote to keep in step with the server. [ADR
+0009](docs/adr/0009-the-ssh-connection-corral-opens-is-the-remote-trust-boundary.md) is the full
+reasoning; this is the setup.
+
+**1. Let corral's key forward.** A key pinned with `restrict` refuses forwarding, which is usually
+the right default and has to be relaxed on purpose, for this one key. On the remote, in
+`~/.ssh/authorized_keys`, add `port-forwarding` to corral's line:
+
+```
+restrict,port-forwarding,pty,from="<corral host>" ssh-ed25519 AAAA… corral@<corral host>
+```
+
+That is enough — `AllowStreamLocalForwarding` already defaults to `yes`, so `sshd_config` needs no
+change. corral will not edit `authorized_keys` for you: relaxing your own hardening is your call.
+
+**2. Name the socket in the environment's config.** An absolute path on the remote, its own per
+environment:
+
+```json
+{ "id": "<env>", "kind": "remote", "sshHost": "<host>", "socket": "…", "herdrBin": "…",
+  "mcpSocket": "/home/<remote user>/.corral/mcp.sock" }
+```
+
+corral creates the parent directory (mode 700) and manages the socket itself. Restart corral to pick
+the config up — it is read once at startup.
+
+**3. Install the shim on the remote, per config dir.** Copy `scripts/corral-mcp-shim.mjs` over (it is
+dependency-free and needs only Node 18+, no corral checkout), then register it in each Claude config
+dir on that box, pointing it at the **same path** you configured above:
+
+```bash
+scp scripts/corral-mcp-shim.mjs <host>:~/.corral/mcp-shim.mjs
+ssh <host> 'claude mcp add --scope user corral \
+  --env CORRAL_MCP_SOCKET=/home/<remote user>/.corral/mcp.sock \
+  -- node /home/<remote user>/.corral/mcp-shim.mjs'
+```
+
+The path is given once here rather than defaulted in the shim, so there is a single source of truth:
+a shim pointed at a path corral does not serve fails with a connect error naming neither side.
+
+**What a remote session gets, and what it does not.** The card tools behave exactly as they do
+locally — the board is shared. What is scoped is the corral *host*: `corral_spawn` starts sessions
+only on the session's own environment, `corral_session_close` closes only sessions there (a card can
+hold sessions on several environments, including panes on your own machine), and `corral_fleet` is
+not offered at all. When corral is down or the tunnel is not up, the shim exits with "corral is not
+connected" and the session simply has no corral tools — it never serves a stale card. The
+context-pressure and card-empty hook signals stay local-only.
 
 ### Teaching a session what corral is
 

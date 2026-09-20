@@ -147,6 +147,40 @@ export const STARTING_STATUS = "starting";
  * the socket is the only signal available. An env whose effective socket does not match is never even
  * asked about the pane. A null hint keeps the pre-hint behaviour of trying every local env.
  */
+/**
+ * The SessionRow a pane lookup stands in for, for a pane herdr knows but no Claude agent has
+ * registered on yet. Exported because the environment-pinned resolver (server/self-in-env.ts) needs
+ * the identical row for the identical situation on a remote environment — two spellings of "starting"
+ * would diverge the moment either grew a field.
+ */
+export function synthesizeRow(env: HerdrEnv, pane: PaneIdentity): SessionRow {
+  return {
+    env: env.id,
+    paneId: pane.paneId,
+    status: STARTING_STATUS,
+    agent: "claude",
+    cwd: pane.cwd,
+    tab: pane.tabLabel,
+    workspace: pane.workspaceLabel,
+    tabId: pane.tabId,
+    workspaceId: pane.workspaceId,
+    sessionId: null,
+    recap: null,
+    recapAt: null,
+    recapStatus: null,
+    recapSource: null,
+    statusline: null,
+    statuslineStatus: null,
+    claudeStatus: null,
+    waitingFor: null,
+    remoteControl: null,
+    registryStatus: null,
+    // Synthesized from a pane lookup, with no registry read behind it.
+    claudeName: null,
+    claudeNameUserSet: null,
+  };
+}
+
 export async function resolveSelfViaPane(input: {
   readonly envs: readonly HerdrEnv[];
   readonly paneId: string;
@@ -175,35 +209,7 @@ export async function resolveSelfViaPane(input: {
   for (const env of pool) {
     const pane = await lookup(env, paneId);
     if (pane === null) continue;
-    return {
-      ok: true,
-      env,
-      row: {
-        env: env.id,
-        paneId: pane.paneId,
-        status: STARTING_STATUS,
-        agent: "claude",
-        cwd: pane.cwd,
-        tab: pane.tabLabel,
-        workspace: pane.workspaceLabel,
-        tabId: pane.tabId,
-        workspaceId: pane.workspaceId,
-        sessionId: null,
-        recap: null,
-        recapAt: null,
-        recapStatus: null,
-        recapSource: null,
-        statusline: null,
-        statuslineStatus: null,
-        claudeStatus: null,
-        waitingFor: null,
-        remoteControl: null,
-        registryStatus: null,
-        // Synthesized from a pane lookup, with no registry read behind it.
-        claudeName: null,
-        claudeNameUserSet: null,
-      },
-    };
+    return { ok: true, env, row: synthesizeRow(env, pane) };
   }
   return {
     ok: false,

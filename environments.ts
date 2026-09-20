@@ -12,6 +12,9 @@ const SafeToken = z.string().regex(/^[A-Za-z0-9~/._:@-]+$/, "must not contain sp
 // FIRST colon — a colon inside the id would silently land the split inside the id.
 const EnvIdToken = z.string().regex(/^[A-Za-z0-9._-]+$/, "env id must use only letters, digits, '.', '_', '-' (it is a URL segment and the 'env:paneId' key prefix)");
 
+// The tighter of the two OS limits (104 on macOS/BSD, 108 on Linux), less a byte of margin.
+const REMOTE_SOCKET_PATH_MAX = 100;
+
 const RemoteReposValue = SafeToken.refine((s) => !s.startsWith("~"), {
   message: "remote repos paths must be absolute — ~ is not expanded on the remote shell",
 });
@@ -28,6 +31,22 @@ const RawLocalEnvSchema = z.object({
 const RawRemoteEnvSchema = z.object({
   id: EnvIdToken, label: z.string(), kind: z.literal("remote"),
   sshHost: SafeToken, socket: SafeToken, herdrBin: SafeToken,
+  // Opt-in, and the ONLY switch for the remote MCP tunnel: absent means this environment's sessions
+  // get no corral tools. Absolute because sshd does not expand `~` in a forwarded listen path, and
+  // because corral creates its parent directory over ssh (ADR 0009).
+  mcpSocket: SafeToken
+    .refine((s) => s.startsWith("/"), {
+      message: "mcpSocket must be an absolute path on the remote host — ~ is not expanded by sshd",
+    })
+    // `ssh -R <remote path>:<local path>` is colon-delimited, so a colon inside the path silently
+    // splits the forward spec somewhere other than where it was meant to.
+    .refine((s) => !s.includes(":"), { message: "mcpSocket must not contain ':' — it would split the ssh forward spec" })
+    // A unix-domain socket path is capped at 104 bytes on macOS/BSD and 108 on Linux; over it, the
+    // forward fails with an error that names neither the limit nor the path.
+    .refine((s) => s.length <= REMOTE_SOCKET_PATH_MAX, {
+      message: `mcpSocket must be at most ${String(REMOTE_SOCKET_PATH_MAX)} characters — a unix-domain socket path is capped by the OS`,
+    })
+    .optional(),
   claudeConfigDirs: z.array(
     SafeToken.refine((s) => !s.startsWith("~"), {
       message: "remote claudeConfigDirs must be absolute — ~ is not expanded on the remote shell",
@@ -39,11 +58,29 @@ const RawRemoteEnvSchema = z.object({
 const RawHerdrEnvSchema = z.discriminatedUnion("kind", [RawLocalEnvSchema, RawRemoteEnvSchema]);
 type RawHerdrEnv = z.infer<typeof RawHerdrEnvSchema>;
 
-const EnvConfigSchema = z.object({ environments: z.array(RawHerdrEnvSchema).min(1) });
+const EnvConfigSchema = z.object({ environments: z.array(RawHerdrEnvSchema).min(1) })
+  // Which listener a connection arrives on is the WHOLE of a remote session's environment identity
+  // (ADR 0009), and which listener it reaches is decided by this path. Two environments sharing one
+  // — easily done when both are accounts on the same host — would silently pin every session of one
+  // to the other's cards. Refused at load, where the operator can still see why.
+  .superRefine((cfg, ctx) => {
+    const seen = new Map<string, string>();
+    for (const env of cfg.environments) {
+      if (env.kind !== "remote" || env.mcpSocket === undefined) continue;
+      const other = seen.get(env.mcpSocket);
+      if (other !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `environments "${other}" and "${env.id}" share one mcpSocket path — each remote environment needs its own, or their sessions resolve to the wrong environment's cards`,
+        });
+      }
+      seen.set(env.mcpSocket, env.id);
+    }
+  });
 
 export type HerdrEnv =
   | { readonly id: string; readonly label: string; readonly kind: "local"; readonly socket?: string; readonly claudeConfigDirs: readonly string[]; readonly spawnCommand: string; readonly repos: Readonly<Record<string, string>> }
-  | { readonly id: string; readonly label: string; readonly kind: "remote"; readonly sshHost: string; readonly socket: string; readonly herdrBin: string; readonly claudeConfigDirs: readonly string[]; readonly spawnCommand: string; readonly repos: Readonly<Record<string, string>> };
+  | { readonly id: string; readonly label: string; readonly kind: "remote"; readonly sshHost: string; readonly socket: string; readonly herdrBin: string; readonly mcpSocket?: string; readonly claudeConfigDirs: readonly string[]; readonly spawnCommand: string; readonly repos: Readonly<Record<string, string>> };
 
 const LOCAL_DEFAULT_DIRS = ["~/.claude"] as const;
 
@@ -68,12 +105,15 @@ function postProcess(raw: RawHerdrEnv): HerdrEnv {
     const base = { id: raw.id, label: raw.label, kind: "local" as const, claudeConfigDirs: dirs, spawnCommand, repos };
     return raw.socket !== undefined ? { ...base, socket: raw.socket } : base;
   }
-  return {
+  const remote = {
     id: raw.id, label: raw.label, kind: "remote" as const,
     sshHost: raw.sshHost, socket: raw.socket, herdrBin: raw.herdrBin,
     claudeConfigDirs: raw.claudeConfigDirs ?? [],
     spawnCommand, repos: expandRepos(raw.repos, false),
   };
+  // Spread-on-present rather than `mcpSocket: raw.mcpSocket`: `exactOptionalPropertyTypes` makes an
+  // explicit `undefined` a different thing from an absent key, and absent is what "no remote MCP" is.
+  return raw.mcpSocket === undefined ? remote : { ...remote, mcpSocket: raw.mcpSocket };
 }
 
 // Trusted operator config, loaded ONCE at startup — same trust level as source code (whoever runs

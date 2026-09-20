@@ -29,7 +29,7 @@ const QUOTED_CONTROL_PATH = `"${CONTROL_PATH}"`;
 // handshake each time. This is reuse, not liveness: detecting a master gone stale under a dropped
 // network (`ssh -O check`) is explicit YAGNI per the operator's stable-broadband assumption — a hung
 // master still surfaces as the per-command timeout firing, exactly as an unshared connection would.
-const SSH_CONTROL_PERSIST_S = intFromEnv("SSH_CONTROL_PERSIST_S", 600, { min: 0 });
+export const SSH_CONTROL_PERSIST_S = intFromEnv("SSH_CONTROL_PERSIST_S", 600, { min: 0 });
 
 // %C always expands to a fixed 40-character hex hash, so ONLY the directory prefix can push the full
 // path over the unix-domain-socket limit (104 bytes on macOS/BSD, 108 on Linux). 100 leaves margin on

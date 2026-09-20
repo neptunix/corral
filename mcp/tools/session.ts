@@ -9,6 +9,14 @@ import { runTool, toolText } from "./reply.ts";
 export interface SessionDeps {
   readonly client: CorralClient;
   readonly identity: Identity;
+  /**
+   * When set, this session may only act on the named environment: spawn lands there and nowhere
+   * else, and close refuses a target on any other environment. Set for a session reaching corral
+   * through a remote environment's own MCP socket (ADR 0009), where the environment is asserted by
+   * the transport and the corral host is the higher-trust side of the boundary. Absent for a local
+   * session, which keeps the fleet-wide behaviour.
+   */
+  readonly envScope?: string | undefined;
 }
 
 // Optional members carry an explicit `| undefined` — see the FleetArgs note in mcp/tools/fleet.ts.
@@ -66,6 +74,9 @@ export function spawnHandler(deps: SessionDeps, args: SpawnArgs): Promise<string
     }
     const me = await deps.identity.load();
     const env = args.env ?? me.session.env;
+    if (deps.envScope !== undefined && env !== deps.envScope) {
+      return `refusing to spawn into "${env}": this session may only start sessions on its own environment, "${deps.envScope}".`;
+    }
     // Two modes, and `repo` picks between them. Omitted: continue where the caller is — the new tab
     // joins the caller's own workspace, so a worktree checkout stays visible and the idempotent
     // rejoin applies. Given: work in that project, which is the route's resolve-by-repo shape.
@@ -145,6 +156,12 @@ export function closeHandler(deps: SessionDeps, args: CloseArgs): Promise<string
     const cut = key.indexOf(":");
     const env = key.slice(0, cut);
     const paneId = key.slice(cut + 1);
+    // Card membership is the general rule (see above), but a card can hold sessions on SEVERAL
+    // environments — including panes on the corral host itself. A scoped session may not reach
+    // across that boundary, so membership is necessary and no longer sufficient.
+    if (deps.envScope !== undefined && env !== deps.envScope) {
+      return `refusing to close ${key}: it is on environment "${env}", and this session may only close sessions on its own environment, "${deps.envScope}".`;
+    }
     const isSelf = key === selfKey;
     // A spawned target's UUID was unknown at spawn time (Claude registers after launch), but by now
     // the card list carries it — pass it as sid so the server resolves the exact link, not just the

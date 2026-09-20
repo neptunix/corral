@@ -20,11 +20,12 @@ import { runLocalTool } from "./exec-tool.ts";
 import { createFleetMirror, ensureMirrorGitignore, mirrorPath } from "./fleet-mirror.ts";
 import { createFleetRestore } from "./fleet-restore.ts";
 import { createGit } from "./git.ts";
-import { closePane, defaultExec, listAllPanes, listWorkspaces, listWorkspacesStrict, readPane, workspaceClose } from "./herdr.ts";
+import { closePane, defaultExec, listAllPanes, listWorkspaces, listWorkspacesStrict, paneIdentity, readPane, workspaceClose } from "./herdr.ts";
 import { assertLoopback } from "./host-guard.ts";
 import { createPoller } from "./poller.ts";
 import { formatReport, resolveReapGrace, runPreflight } from "./preflight.ts";
 import { startReconciler } from "./reconcile.ts";
+import { startRemoteMcp } from "./remote-mcp/index.ts";
 import { readSelfVersion } from "./self-version.ts";
 import { spawnSession, type SpawnOpts, type SpawnResult } from "./spawn.ts";
 import { createStorage } from "./storage.ts";
@@ -142,4 +143,20 @@ void (async () => {
   // Live-terminal WS attach rides the same loopback-only http server (assertLoopback above). SEC-1
   // Origin allowlist + SEC-2 rate/cap + SEC-3 reaping are all enforced inside attachWebSocketServer.
   attachWebSocketServer(server, { envs: ENVS, allowedOrigins: WS_ALLOWED_ORIGINS });
+
+  // MCP for sessions on remote environments that opted in with an `mcpSocket` (ADR 0009). AFTER the
+  // http server is listening, because a shim's very first call resolves its identity through the
+  // same loopback address a local MCP client uses. A remote environment without `mcpSocket` — and an
+  // install with no remote environments at all — starts nothing here.
+  const stopRemoteMcp = await startRemoteMcp({
+    envs: ENVS, poller, storage, paneLookup: paneIdentity,
+    baseUrl: `http://127.0.0.1:${String(PORT)}`,
+    intervalMs: CHEAP_INTERVAL_MS,
+  });
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => {
+      stopRemoteMcp();
+      process.exit(0);
+    });
+  }
 })();
