@@ -37,8 +37,7 @@ import { startZombieReaper } from "./zombie-reaper.ts";
 
 assertLoopback(HOST);
 
-// How long a shutdown waits for the remote MCP teardown (one `ssh -O cancel` per remote) before
-// exiting anyway. An unreachable host must not hold Ctrl-C open.
+// An unreachable host must not hold Ctrl-C open while the teardown's ssh calls run.
 const SHUTDOWN_GRACE_MS = 5000;
 
 const { report, envs: ENVS, configLine: preflightConfigLine } = await runPreflight();
@@ -148,10 +147,7 @@ void (async () => {
   // Origin allowlist + SEC-2 rate/cap + SEC-3 reaping are all enforced inside attachWebSocketServer.
   attachWebSocketServer(server, { envs: ENVS, allowedOrigins: WS_ALLOWED_ORIGINS });
 
-  // MCP for sessions on remote environments that opted in with an `mcpSocket` (ADR 0009). AFTER the
-  // http server is listening, because a shim's very first call resolves its identity through the
-  // same loopback address a local MCP client uses. A remote environment without `mcpSocket` — and an
-  // install with no remote environments at all — starts nothing here.
+  // After the http server is listening: a shim's first call resolves identity over that loopback.
   const stopRemoteMcp = await startRemoteMcp({
     envs: ENVS, poller, storage, paneLookup: paneIdentity,
     baseUrl: `http://127.0.0.1:${String(PORT)}`,
@@ -159,9 +155,7 @@ void (async () => {
   });
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => {
-      // AWAITED, then exit. Dropping the reverse forward is an ssh round trip: exiting in the same
-      // tick would leave the forward registered on every remote, which is the state the teardown
-      // exists to avoid. Bounded, because a shutdown must not hang on an unreachable host.
+      // Awaited: the teardown is an ssh round trip, and exiting in the same tick would skip it.
       const done = stopRemoteMcp().catch(() => undefined);
       const deadline = new Promise((r) => setTimeout(r, SHUTDOWN_GRACE_MS));
       void Promise.race([done, deadline]).then(() => { process.exit(0); });

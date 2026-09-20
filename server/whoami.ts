@@ -126,12 +126,7 @@ export interface PaneIdentity {
 /** Status reported for a pane that exists but has no Claude agent registered on it yet. */
 export const STARTING_STATUS = "starting";
 
-/**
- * The SessionRow a pane lookup stands in for, for a pane herdr knows but no Claude agent has
- * registered on yet. Exported because the environment-pinned resolver (server/self-in-env.ts) needs
- * the identical row for the identical situation on a remote environment — two spellings of "starting"
- * would diverge the moment either grew a field.
- */
+// Shared with the environment-pinned resolver (server/self-in-env.ts) so the two cannot diverge.
 export function synthesizeRow(env: HerdrEnv, pane: PaneIdentity): SessionRow {
   return {
     env: env.id,

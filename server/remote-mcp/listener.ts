@@ -14,45 +14,31 @@ import { registerSelfTool } from "../../mcp/tools/self.ts";
 import { registerSessionTools } from "../../mcp/tools/session.ts";
 import { registerTaskTools } from "../../mcp/tools/task.ts";
 
-/** Where the per-environment listeners live. 0700, so only the account running corral can connect —
- *  the local half of the same per-user rule sshd enforces on the remote end of the forward. */
+// 0700: the local half of the per-user rule sshd enforces on the remote end of the forward.
 export const MCP_SOCKET_DIR = path.join(CORRAL_HOME, "mcp");
 
 export function localSocketPath(envId: string): string {
   return path.join(MCP_SOCKET_DIR, `${envId}.sock`);
 }
 
-/** A peer that connects and then says nothing holds a socket and a buffer. Drop it. */
 const PREAMBLE_TIMEOUT_MS = 15_000;
-/** Claude opens one connection per session, so this is far above any honest load; it exists so a
- *  looping peer cannot exhaust file descriptors for the whole corral process. */
+// Far above honest load (one connection per session); it bounds fd use against a looping peer.
 const MAX_CONNECTIONS = 64;
 
-/**
- * One MCP server per accepted connection, with its environment fixed by WHICH listener accepted it.
- *
- * The tool set is reduced on purpose (ADR 0009): `corral_fleet` is absent, because it is a
- * fleet-wide view of every session including panes on the corral host, and a remote session's
- * business is its own card. The tools that DO act — spawn and close — are pinned to this
- * environment, so the higher-trust side of the boundary is never a target.
- */
+// One MCP server per connection, its environment fixed by which listener accepted it (ADR 0009).
 function serveConnection(conn: net.Socket, deps: PinnedDeps, baseUrl: string): void {
   let buf = Buffer.alloc(0);
   let started = false;
 
   const fail = (reason: string): void => {
-    // The peer is a pipe into Claude's stdio, so there is no protocol-level way to explain this that
-    // Claude would render; the line is for the operator reading corral's own stderr.
     console.error(`[remote-mcp] ${deps.env.id}: dropping connection — ${reason}`);
     conn.destroy();
   };
 
   let sawBytes = false;
   const timer = setTimeout(() => {
-    // Silent when the peer never said anything: corral's own tunnel probe connects and hangs up at
-    // once to tell a live forward from a leftover socket file, and that is not a fault to report
-    // every tick. A peer that sent a partial line and then stalled is worth a line.
     if (started) return;
+    // Silent when nothing was said at all: corral's own tunnel probe connects and hangs up each tick.
     if (sawBytes) fail("no preamble within the deadline");
     else conn.destroy();
   }, PREAMBLE_TIMEOUT_MS);
@@ -64,8 +50,7 @@ function serveConnection(conn: net.Socket, deps: PinnedDeps, baseUrl: string): v
       fail(parsed.reason);
       return;
     }
-    // The transport reads from `through`, not from the socket, so bytes that arrived in the SAME
-    // chunk as the preamble are not lost — they are pushed ahead of the pipe.
+    // Bytes sharing the preamble's chunk are pushed ahead of the pipe rather than lost.
     const through = new PassThrough();
     if (rest.length > 0) through.write(rest);
     conn.pipe(through);
@@ -74,12 +59,9 @@ function serveConnection(conn: net.Socket, deps: PinnedDeps, baseUrl: string): v
     const identity = createIdentity(client, {
       paneId: parsed.preamble.paneId,
       cwd: parsed.preamble.cwd,
-      // Never a hint here: this connection's environment is already asserted by the listener.
       socket: null,
     });
-    // The one record that a remote session used these tools. ADR 0009 accepts that anything running
-    // as the remote user can present itself as any pane in that environment; this is what makes that
-    // visible on the higher-trust host rather than silent.
+    // The one record that a remote session used these tools; ADR 0009 allows same-user impersonation.
     console.warn(`[remote-mcp] ${deps.env.id}: session opened for pane ${parsed.preamble.paneId}`);
     const server = new McpServer({ name: "corral", version: "0.1.0" }, { instructions: ORIENTATION });
     registerSelfTool(server, identity);
@@ -87,12 +69,7 @@ function serveConnection(conn: net.Socket, deps: PinnedDeps, baseUrl: string): v
     registerSessionTools(server, { client, identity, envScope: deps.env.id });
 
     const transport = new StdioServerTransport(through, conn);
-    // The SDK's stdio transport was written for a process's own stdin/stdout, which never close while
-    // the process lives: it listens for "data" and "error" only, and its own close() merely pauses the
-    // reader. Wired to a SOCKET that is a peer on the other side of a trust boundary, that means a
-    // peer disconnecting — every /exit, every restart, every dropped tunnel — would leave this
-    // server, its tools and their closures reachable from the listener forever, in a process that is
-    // meant to run for weeks. So the socket's lifecycle drives the server's, explicitly and once.
+    // The SDK's transport never closes itself, so on a socket the peer's disconnect must release it.
     let released = false;
     const release = (): void => {
       if (released) return;
@@ -122,8 +99,7 @@ function serveConnection(conn: net.Socket, deps: PinnedDeps, baseUrl: string): v
       if (buf.length > PREAMBLE_MAX_BYTES) fail("preamble exceeded its size limit with no newline");
       return;
     }
-    // Both synchronous, and inside the handler: node emits no further "data" before this returns,
-    // so nothing is read twice and nothing is dropped between the two transports.
+    // Both synchronous and inside the handler, so no chunk is read twice or dropped in between.
     conn.off("data", onData);
     conn.pause();
     started = true;
@@ -134,8 +110,7 @@ function serveConnection(conn: net.Socket, deps: PinnedDeps, baseUrl: string): v
   conn.on("data", onData);
   conn.on("error", (err) => {
     console.error(`[remote-mcp] ${deps.env.id}: connection error — ${err.message}`);
-    // Before the preamble there is no server to release; after it, `release` is also bound to
-    // "error" and destroys the socket. Destroying here covers the pre-preamble half.
+    // After the preamble `release` handles this; this covers the pre-preamble half.
     if (!started) conn.destroy();
   });
 }
@@ -145,23 +120,17 @@ export interface RemoteMcpListener {
   close(): Promise<void>;
 }
 
-/**
- * Bind one environment's listener. The socket is unlinked first: a unix socket file outlives the
- * process that made it, so a corral that was killed rather than shut down leaves one behind and the
- * next bind would fail with EADDRINUSE.
- */
+// Unlinks first: a corral that was killed leaves its socket file behind and the bind would EADDRINUSE.
 export async function startEnvListener(deps: PinnedDeps, baseUrl: string): Promise<RemoteMcpListener> {
   mkdirSync(MCP_SOCKET_DIR, { recursive: true, mode: 0o700 });
-  // Explicit, because mkdir's mode goes through the process umask and cannot be relied on.
-  chmodSync(MCP_SOCKET_DIR, 0o700);
+  chmodSync(MCP_SOCKET_DIR, 0o700); // mkdir's mode goes through the umask
+
   const socketPath = localSocketPath(deps.env.id);
   rmSync(socketPath, { force: true });
 
   const server = net.createServer();
   server.maxConnections = MAX_CONNECTIONS;
-  // `net.Server.close()` stops ACCEPTING and then waits for existing connections to end on their own.
-  // These connections are long-lived by design — one per Claude session — so without this the close
-  // promise never settles and every still-open session's MCP server stays alive through a shutdown.
+  // close() only stops accepting; these connections are long-lived, so it would never settle.
   const live = new Set<net.Socket>();
   server.on("connection", (conn) => {
     live.add(conn);

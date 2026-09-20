@@ -22,8 +22,8 @@ function fakeIo(opts: { present: boolean; forwardFails?: boolean }): FakeIo {
   const calls: string[] = [];
   return {
     calls,
-    probe: async () => { calls.push("probe"); return Promise.resolve(opts.present); },
-    prepare: async () => { calls.push("prepare"); return Promise.resolve(); },
+    answersOnRemoteSocket: async () => { calls.push("probe"); return Promise.resolve(opts.present); },
+    clearRemoteSocket: async () => { calls.push("clear"); return Promise.resolve(); },
     forward: async () => {
       calls.push("forward");
       if (opts.forwardFails === true) throw new Error("no control socket");
@@ -37,14 +37,13 @@ describe("ensureTunnel", () => {
   it("leaves a live forward alone — it never unlinks a socket that is answering", async () => {
     const io = fakeIo({ present: true });
     expect(await ensureTunnel(remoteEnv("/home/u/.corral/mcp.sock"), "/local.sock", io)).toBe("already-present");
-    // The repair is destructive (rm -f before re-forwarding), so probing first is the whole point.
     expect(io.calls).toEqual(["probe"]);
   });
 
   it("clears the stale socket file before forwarding when nothing answers", async () => {
     const io = fakeIo({ present: false });
     expect(await ensureTunnel(remoteEnv("/home/u/.corral/mcp.sock"), "/local.sock", io)).toBe("forwarded");
-    expect(io.calls).toEqual(["probe", "prepare", "forward"]);
+    expect(io.calls).toEqual(["probe", "clear", "forward"]);
   });
 
   it("reports unreachable rather than throwing when the forward is refused", async () => {
@@ -68,8 +67,8 @@ describe("cancelTunnel", () => {
 
   it("swallows a failure — the master may already be gone with the process", async () => {
     const io: TunnelIo = {
-      probe: () => Promise.resolve(false),
-      prepare: () => Promise.resolve(),
+      answersOnRemoteSocket: () => Promise.resolve(false),
+      clearRemoteSocket: () => Promise.resolve(),
       forward: () => Promise.resolve(),
       cancel: () => Promise.reject(new Error("control socket gone")),
     };
@@ -78,9 +77,7 @@ describe("cancelTunnel", () => {
 });
 
 describe("the remote probe script", () => {
-  // Runs the EXACT script corral sends, against a real unix socket — the distinction it has to draw
-  // (something answers vs. a socket file nobody is behind) is the whole basis of the repair loop, and
-  // it cannot be asserted against a fake.
+  // The exact script corral sends, against a real socket — a fake cannot assert this distinction.
   const run = async (target: string): Promise<number> => {
     const { execFile } = await import("node:child_process");
     return new Promise((resolve) => {
@@ -107,7 +104,6 @@ describe("the remote probe script", () => {
 
     try {
       expect(await run(live)).toBe(0);
-      // `test -S` would call this healthy forever and the forward would never be repaired.
       expect(await run(stale)).toBe(1);
       expect(await run(absent)).toBe(1);
     } finally {

@@ -5,8 +5,7 @@ import type { HerdrEnv } from "../environments.ts";
 import { startEnvListener } from "../server/remote-mcp/listener.ts";
 import type { PinnedDeps } from "../server/remote-mcp/pinned-client.ts";
 
-// The listener binds under CORRAL_HOME, which test/setup.ts already points at a temp directory —
-// so these tests never touch a real corral home, and never collide with a running server.
+// test/setup.ts points CORRAL_HOME at a temp dir, so these never touch a real corral home.
 const env: Extract<HerdrEnv, { kind: "remote" }> = {
   id: "envA", label: "Env A", kind: "remote", sshHost: "host1", socket: "/s.sock", herdrBin: "/herdr",
   mcpSocket: "/home/u/.corral/mcp.sock", claudeConfigDirs: [], spawnCommand: "claude", repos: {},
@@ -27,7 +26,6 @@ const INIT = {
   params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } },
 };
 
-/** Read whole JSON-RPC lines off the socket until one satisfies `want`, or the socket closes. */
 function collect(sock: net.Socket, want: (msg: unknown) => boolean, timeoutMs = 4000): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let buf = "";
@@ -69,9 +67,7 @@ describe("remote MCP listener", () => {
     const sock = net.createConnection(listener.socketPath);
     await new Promise<void>((r) => sock.once("connect", () => { r(); }));
 
-    // The hazard: a shim writes its preamble and immediately pipes, so these almost always share a
-    // TCP segment. A reader that consumes past the newline swallows `initialize` and the handshake
-    // hangs with no error anywhere.
+    // A reader that consumes past the newline swallows `initialize` and the handshake hangs silently.
     sock.write(`${JSON.stringify({ v: 1, paneId: "w1:p1", cwd: "/repo" })}\n${JSON.stringify(INIT)}\n`);
 
     const reply = await collect(sock, (m) => hasResultId(m, 1));
@@ -111,8 +107,6 @@ describe("remote MCP listener", () => {
     const names = JSON.stringify(reply);
     expect(names).toContain("corral_whoami");
     expect(names).toContain("corral_spawn");
-    // A fleet-wide view of every session — including panes on the corral host — is not a remote
-    // session's business (ADR 0009).
     expect(names).not.toContain("corral_fleet");
     sock.destroy();
   });
@@ -132,15 +126,13 @@ describe("remote MCP listener", () => {
     started.push(listener);
     const sock = net.createConnection(listener.socketPath);
     await new Promise<void>((r) => sock.once("connect", () => { r(); }));
-    // Unbounded buffering here would be reachable from the other side of the trust boundary.
     sock.write("x".repeat(9000));
     await new Promise<void>((r) => sock.once("close", () => { r(); }));
     expect(sock.destroyed).toBe(true);
   });
 
   it("stays quiet when a peer connects and hangs up without speaking", async () => {
-    // corral's own tunnel probe does exactly this, every tick, to tell a live forward from a
-    // leftover socket file. Treating it as a fault would fill the log with one error per tick.
+    // corral's own tunnel probe does this every tick; treating it as a fault would flood the log.
     const listener = await startEnvListener(deps, "http://127.0.0.1:1");
     started.push(listener);
     const sock = net.createConnection(listener.socketPath);
@@ -151,8 +143,7 @@ describe("remote MCP listener", () => {
   });
 
   it("closes established sessions when the listener closes, instead of waiting for them", async () => {
-    // These connections are long-lived by design — one per Claude session — so a close that only
-    // stops accepting would never settle, and a shutdown would hang on the first live session.
+    // Long-lived by design, so a close that only stops accepting would hang the shutdown.
     const listener = await startEnvListener(deps, "http://127.0.0.1:1");
     const sock = net.createConnection(listener.socketPath);
     await new Promise<void>((r) => sock.once("connect", () => { r(); }));

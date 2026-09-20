@@ -21,6 +21,17 @@ Convention, not enforced by tooling:
 
 Tests are Vitest, `test/<name>.test.ts`.
 
+## Comments
+- **One line is the cap for every comment**, doc comments included. No exceptions per declaration.
+- Comment only a non-obvious WHY the code cannot carry: a workaround, a gotcha, a spec or ticket
+  link, a business rule. Never restate the line below it.
+- Design rationale, rejected alternatives and trade-offs go in the commit message, the PR body or an
+  ADR — never beside the code.
+- If a comment feels necessary, rename or extract first, then see if it still is.
+- No banner comments, no commented-out code.
+- Applies to code you ADD or CHANGE. Existing long comments stay until their line is edited —
+  do not sweep the repo.
+
 ## Critical herdr-integration rules
 - **`pane run` only** to send commands (appends Enter). Never `agent send` (staged-text garble).
 - **corral's own `execFile` calls in `server/herdr.ts` route via `HERDR_SOCKET_PATH` only** — no

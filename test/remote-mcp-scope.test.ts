@@ -74,7 +74,6 @@ describe("preamble", () => {
   it("refuses a malformed pane id, an unknown version, and extra fields", () => {
     expect(parsePreamble(JSON.stringify({ v: 1, paneId: "-x", cwd: "/r" })).ok).toBe(false);
     expect(parsePreamble(JSON.stringify({ v: 2, paneId: "w1:p1", cwd: "/r" })).ok).toBe(false);
-    // A `socket` field would be an environment hint, and the environment is not the caller's to say.
     expect(parsePreamble(JSON.stringify({ v: 1, paneId: "w1:p1", cwd: "/r", socket: "/x" })).ok).toBe(false);
     expect(parsePreamble("nonsense").ok).toBe(false);
   });
@@ -89,12 +88,10 @@ function deps(over: Partial<SessionDeps> = {}): SessionDeps {
     task: { ...card, sessions: [{ key: "local1:w2:p2", self: false, sessionId: null }] },
   };
   const identity: Identity = {
-    // The handlers read only `session` and `task`; the cast-free way to say that is a local shape.
-    load: () => Promise.resolve(JSON.parse(JSON.stringify(me))),
+      load: () => Promise.resolve(JSON.parse(JSON.stringify(me))),
     requireCard: () => Promise.resolve(JSON.parse(JSON.stringify(me.task))),
   };
-  // Every method rejects: these tests assert the handlers REFUSE before any call reaches corral, so
-  // a reached call is a failed test rather than a mock to maintain.
+  // Every method rejects: a call that reaches corral is a failed test.
   const nope = () => Promise.reject(new Error("must not be called"));
   const client: CorralClient = {
     whoami: nope, attention: nope, state: nope, boards: nope, board: nope, appendLog: nope,

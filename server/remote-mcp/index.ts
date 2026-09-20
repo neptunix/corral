@@ -21,26 +21,14 @@ export interface RemoteMcpOpts {
   readonly intervalMs: number;
 }
 
-/**
- * Give every remote environment that opted in (`mcpSocket` in the trusted startup config) an MCP
- * surface: a local unix listener the environment's sessions reach through a reverse forward corral
- * holds on its shared ssh connection. See ADR 0009 — the connection is the trust boundary, and which
- * listener a connection arrives on is the whole of the environment's identity.
- *
- * Returns an AWAITABLE stop function — dropping the forward is an ssh round trip, so a caller that
- * fires it and exits in the same tick never drops anything. An environment whose listener cannot be bound is skipped with a warning
- * rather than taking the server down: the rest of corral works without it, and the operator-visible
- * symptom is confined to that environment's sessions having no corral tools.
- */
+// An MCP surface for remote environments that opted in with `mcpSocket` (ADR 0009).
 export async function startRemoteMcp(opts: RemoteMcpOpts): Promise<() => Promise<void>> {
   const targets = opts.envs.filter(isForwardable);
   if (targets.length === 0) return () => Promise.resolve();
 
 
   let stopping = false;
-  // Read through a function: after `if (stopping) return`, TypeScript narrows the flag to false for
-  // the rest of the block and flags the second check as dead — it cannot see that the `await` between
-  // them is exactly when shutdown lands.
+  // Through a function, or TypeScript narrows the flag to false across the await between checks.
   const isStopping = (): boolean => stopping;
   const shutdowns: (() => Promise<void>)[] = [];
   for (const env of targets) {
@@ -50,15 +38,10 @@ export async function startRemoteMcp(opts: RemoteMcpOpts): Promise<() => Promise
         opts.baseUrl,
       );
       const local = listener.socketPath;
-      // `up` starts unknown, so the FIRST outcome is always announced. After that only changes are:
-      // a tick every 30s that says the same thing is noise an operator learns to scroll past, and the
-      // transition is the whole signal — this is the only place corral reports that an environment's
-      // sessions have lost (or regained) their tools.
+      // Null so the first outcome is announced; after that only transitions are.
       let up: boolean | null = null;
       const tick = async (): Promise<void> => {
-        // The tick is guarded against overlapping ITSELF, not against shutdown: one already in flight
-        // when the server stops would otherwise re-forward onto a listener that is closing, leaving a
-        // registered forward pointing at nothing.
+        // guardedInterval guards against overlap, not against shutdown landing mid-tick.
         if (isStopping()) return;
         const state = await ensureTunnel(env, local);
         if (isStopping()) return;
@@ -75,9 +58,7 @@ export async function startRemoteMcp(opts: RemoteMcpOpts): Promise<() => Promise
       const stopTick = guardedInterval(tick, opts.intervalMs);
       shutdowns.push(async () => {
         stopTick();
-        // Cancel before closing the listener: a forward left registered would point at a socket that
-        // no longer exists, so a shim would connect through the tunnel and then be refused, instead
-        // of being told plainly that corral is not connected.
+        // Before closing: a forward left registered answers and then refuses, instead of being absent.
         await cancelTunnel(env, local);
         await listener.close();
       });

@@ -4,26 +4,7 @@ import type { HerdrEnv } from "../environments.ts";
 import type { PaneIdentity, SelfResolution } from "./whoami.ts";
 import { synthesizeRow } from "./whoami.ts";
 
-/**
- * Identity resolution for a caller whose ENVIRONMENT was asserted by the transport it arrived on,
- * rather than inferred from anything the caller said — today, a session on a remote environment
- * reaching corral through that environment's own reverse-forwarded MCP socket (ADR 0009).
- *
- * This is deliberately a separate function from `resolveSelf`, not a flag on it. `resolveSelf`
- * considers LOCAL environments only, and that is a security property rather than a convenience: it
- * is what stops a caller that can reach the loopback API from naming a remote environment and
- * writing to its cards. Widening it with a "pinned env" parameter would put the two rules in one
- * body, where a future edit could leak one into the other. Here the environment is not a parameter
- * a request carries at all — it is bound when the listener is created.
- *
- * For the same reason there is no socket hint in this file, and none in the wire format either: the
- * shim does not send `HERDR_SOCKET_PATH` at all, and the preamble schema is `.strict()`, so a future
- * shim that started sending one would be REFUSED rather than quietly ignored. Within a pinned
- * environment a socket hint could only narrow a set the transport has already narrowed, while
- * offering a remote caller a way to influence its own resolution by editing an environment variable.
- * Pane id and cwd remain hints, exactly as ADR 0002 decision 4 has them — one level down, inside an
- * environment that is now fixed.
- */
+// Separate from resolveSelf, which considers local environments only (ADR 0009).
 function pick(rows: readonly SessionRow[], env: HerdrEnv, paneId: string, cwd: string): SelfResolution {
   const only = rows[0];
   if (only !== undefined && rows.length === 1) return { ok: true, env, row: only };
@@ -34,9 +15,7 @@ function pick(rows: readonly SessionRow[], env: HerdrEnv, paneId: string, cwd: s
       reason: `no registered Claude agent at pane ${paneId} in environment "${env.id}"`,
     };
   }
-  // Two panes of one herdr server cannot share an id, so this is a stale snapshot holding both a
-  // dead row and its replacement rather than a genuine collision. cwd breaks the tie when it can;
-  // when it cannot, answering "ambiguous" is the safe half of fail-unresolved-never-resolve-wrong.
+  // One herdr server cannot reuse a pane id, so this is a stale row beside its replacement.
   const byCwd = rows.filter((r) => r.cwd === cwd);
   const soleByCwd = byCwd[0];
   if (soleByCwd !== undefined && byCwd.length === 1) return { ok: true, env, row: soleByCwd };
@@ -47,7 +26,7 @@ function pick(rows: readonly SessionRow[], env: HerdrEnv, paneId: string, cwd: s
   };
 }
 
-/** Resolve the caller against the poller snapshot, within one already-asserted environment. */
+// No socket hint on this path: the transport asserts the environment, and the preamble is strict.
 export function resolveSelfInEnv(input: {
   readonly snapshot: Snapshot;
   readonly env: HerdrEnv;
@@ -59,11 +38,7 @@ export function resolveSelfInEnv(input: {
   return pick(rows, env, paneId, cwd);
 }
 
-/**
- * The pane-level fallback, for a pane whose Claude has not registered an agent yet — the moment a
- * freshly spawned session calls `corral_whoami`, which its brief tells it to do first. Same role as
- * `resolveSelfViaPane`, over one environment instead of a socket-gated pool.
- */
+// For a pane whose Claude has not registered an agent yet — a freshly spawned session's first call.
 export async function resolveSelfInEnvViaPane(input: {
   readonly env: HerdrEnv;
   readonly paneId: string;
