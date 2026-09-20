@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
-import { quote } from "shell-quote";
 
 import type { HerdrEnv } from "../../environments.ts";
+import { runRemoteScript } from "../remote-write.ts";
 import { sshFlags } from "../ssh-flags.ts";
 
 const run = promisify(execFile);
+const NO_STDIN = new Uint8Array(0);
 
 type RemoteEnv = Extract<HerdrEnv, { readonly kind: "remote" }>;
 
@@ -31,22 +32,23 @@ export const PROBE_SCRIPT =
 const CLEAR_SCRIPT =
   'd=$(dirname "$1"); if [ ! -d "$d" ]; then mkdir -p "$d" && chmod 700 "$d" || exit 1; fi; rm -f "$1"';
 
-// Path passed as a positional parameter, never spliced into the script (as server/remote-write.ts does).
-function remoteSh(script: string, arg: string): string {
-  return quote(["sh", "-c", script, "sh", arg]);
-}
-
 export const defaultTunnelIo: TunnelIo = {
   answersOnRemoteSocket: async (env, remoteSocket) => {
     try {
-      await run("ssh", [...sshFlags(), env.sshHost, remoteSh(PROBE_SCRIPT, remoteSocket)], { timeout: PROBE_TIMEOUT_MS });
+      await runRemoteScript(env, {
+        script: PROBE_SCRIPT, args: [remoteSocket], stdin: NO_STDIN,
+        timeoutMs: PROBE_TIMEOUT_MS, what: "remote mcp probe",
+      });
       return true;
     } catch {
       return false;
     }
   },
   clearRemoteSocket: async (env, remoteSocket) => {
-    await run("ssh", [...sshFlags(), env.sshHost, remoteSh(CLEAR_SCRIPT, remoteSocket)], { timeout: SETUP_TIMEOUT_MS });
+    await runRemoteScript(env, {
+      script: CLEAR_SCRIPT, args: [remoteSocket], stdin: NO_STDIN,
+      timeoutMs: SETUP_TIMEOUT_MS, what: "remote mcp socket clear",
+    });
   },
   forward: async (env, remoteSocket, localSocket) => {
     await run(
