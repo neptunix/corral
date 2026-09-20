@@ -585,8 +585,9 @@ Pro/Max accounts, after the first API response.
 
 corral can live-flip the light/dark **base** of a Claude custom theme from the web theme
 toggle — it rewrites only the `base` field of `<configDir>/themes/corral.json`, and Claude Code
-hot-reloads it so the TUI follows. It never creates that file, and the toggle syncs **local**
-config dirs only (a remote box keeps whatever base is in its own copy). Once the file is in
+hot-reloads it so the TUI follows. It never creates that file. Remote environments follow too: corral
+reads and rewrites the file over the shared ssh connection, for each of the environment's
+`claudeConfigDirs` that has one (a remote that cannot be reached is skipped). Once the file is in
 place, set `"theme": "custom:corral"` in that dir's `settings.json` (or run `/theme` and pick
 `corral`). Edit `overrides` in the preset to taste; only `base` is machine-managed.
 

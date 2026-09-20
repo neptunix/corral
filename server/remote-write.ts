@@ -21,7 +21,7 @@ const REMOTE_SCRIPT =
 // The budget grows with the payload so a 25 MB file on a slow link is not cut off at a fixed limit.
 const BASE_TIMEOUT_MS = 30_000;
 const PER_MB_TIMEOUT_MS = 20_000;
-const MAX_CAPTURE_CHARS = 64 * 1024;
+const MAX_CAPTURE_CHARS = 256 * 1024;
 const REMOTE_PATH_RE = /^\/.+$/;
 
 export interface RemoteChild {
@@ -41,27 +41,34 @@ export function remoteWriteTimeoutMs(byteLength: number): number {
 }
 
 /**
- * Write `bytes` to `<remote tmp>/corral-upload.<random>/<name>` on a remote env over the shared ssh
- * connection and return the file's absolute remote path. `name` must already be a single safe
- * basename (sanitizeUploadName). The caller owns lifetime: the private directory is left in the
- * remote's temp dir, which the OS clears; a brief file is removed by the launch command that reads it.
+ * Run `sh -c <script> sh ...args` on a remote env over the shared ssh connection, feeding `stdin`,
+ * and resolve with its stdout (ssh's own noise lines stripped, otherwise verbatim). Args travel as
+ * positional parameters, never inside the script. Bounded by `timeoutMs` overall; rejects on a
+ * non-zero exit, and on output longer than the capture cap rather than returning it truncated.
  */
-export function writeRemoteFile(
+export function runRemoteScript(
   env: RemoteEnv,
-  opts: { readonly name: string; readonly bytes: Uint8Array; readonly timeoutMs?: number; readonly spawnFn?: SpawnSsh },
+  opts: {
+    readonly script: string;
+    readonly args: readonly string[];
+    readonly stdin: Uint8Array;
+    readonly timeoutMs: number;
+    readonly what: string;
+    readonly spawnFn?: SpawnSsh;
+  },
 ): Promise<string> {
-  const timeoutMs = opts.timeoutMs ?? remoteWriteTimeoutMs(opts.bytes.byteLength);
-  const remoteCmd = quote(["sh", "-c", REMOTE_SCRIPT, "sh", opts.name]);
+  const remoteCmd = quote(["sh", "-c", opts.script, "sh", ...opts.args]);
   const child = (opts.spawnFn ?? defaultSpawn)("ssh", [...sshFlags(), env.sshHost, remoteCmd]);
 
   return new Promise<string>((resolve, reject) => {
     let settled = false;
     let stdout = "";
     let stderr = "";
+    let overflow = false;
     const timer = setTimeout(() => {
       child.kill();
-      finish(new Error(`upload to remote timed out after ${String(Math.round(timeoutMs / 1000))}s`));
-    }, timeoutMs);
+      finish(new Error(`${opts.what} timed out after ${String(Math.round(opts.timeoutMs / 1000))}s`));
+    }, opts.timeoutMs);
     timer.unref();
     function finish(err: Error | null, value = ""): void {
       if (settled) return;
@@ -70,7 +77,9 @@ export function writeRemoteFile(
       if (err === null) resolve(value); else reject(err);
     }
 
-    child.stdout.on("data", (chunk) => { if (stdout.length < MAX_CAPTURE_CHARS) stdout += chunk.toString("utf8"); });
+    child.stdout.on("data", (chunk) => {
+      if (stdout.length < MAX_CAPTURE_CHARS) stdout += chunk.toString("utf8"); else overflow = true;
+    });
     child.stderr.on("data", (chunk) => { if (stderr.length < MAX_CAPTURE_CHARS) stderr += chunk.toString("utf8"); });
     // EPIPE when ssh exits before reading everything; the exit code below carries the real failure.
     child.stdin.on("error", () => undefined);
@@ -78,13 +87,36 @@ export function writeRemoteFile(
     child.on("close", (code) => {
       if (code !== 0) {
         const detail = stderr.replace(SSH_NOISE, "").trim().split("\n").pop() ?? "";
-        finish(new Error(`remote write failed (ssh exit ${String(code)})${detail === "" ? "" : `: ${detail}`}`));
-        return;
+        finish(new Error(`${opts.what} failed (ssh exit ${String(code)})${detail === "" ? "" : `: ${detail}`}`));
+      } else if (overflow) {
+        finish(new Error(`${opts.what} returned more output than expected`));
+      } else {
+        finish(null, stdout.replace(SSH_NOISE, ""));
       }
-      const out = stdout.replace(SSH_NOISE, "").trim().split("\n").pop() ?? "";
-      if (REMOTE_PATH_RE.test(out)) finish(null, out);
-      else finish(new Error("remote write returned no usable path"));
     });
-    child.stdin.end(opts.bytes);
+    child.stdin.end(opts.stdin);
   });
+}
+
+/**
+ * Write `bytes` to `<remote tmp>/corral-upload.<random>/<name>` on a remote env over the shared ssh
+ * connection and return the file's absolute remote path. `name` must already be a single safe
+ * basename (sanitizeUploadName). The caller owns lifetime: the private directory is left in the
+ * remote's temp dir, which the OS clears; a brief file is removed by the launch command that reads it.
+ */
+export async function writeRemoteFile(
+  env: RemoteEnv,
+  opts: { readonly name: string; readonly bytes: Uint8Array; readonly timeoutMs?: number; readonly spawnFn?: SpawnSsh },
+): Promise<string> {
+  const stdout = await runRemoteScript(env, {
+    script: REMOTE_SCRIPT,
+    args: [opts.name],
+    stdin: opts.bytes,
+    timeoutMs: opts.timeoutMs ?? remoteWriteTimeoutMs(opts.bytes.byteLength),
+    what: "remote write",
+    ...(opts.spawnFn === undefined ? {} : { spawnFn: opts.spawnFn }),
+  });
+  const out = stdout.trim().split("\n").pop() ?? "";
+  if (!REMOTE_PATH_RE.test(out)) throw new Error("remote write returned no usable path");
+  return out;
 }

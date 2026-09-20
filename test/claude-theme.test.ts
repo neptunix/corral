@@ -1,9 +1,12 @@
+import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { syncClaudeThemeBase } from "../server/claude-theme";
+import type { HerdrEnv } from "../environments.ts";
+import { syncClaudeThemeBase, syncRemoteClaudeThemeBase } from "../server/claude-theme";
+import type { SpawnSsh } from "../server/remote-write.ts";
 
 let root: string;
 
@@ -87,5 +90,63 @@ describe("syncClaudeThemeBase", () => {
 
     expect(updated).toBe(0);
     expect(JSON.parse(await fs.readFile(file, "utf8"))).toEqual(["array", "not", "object"]);
+  });
+});
+
+// The real remote scripts, run under a local `sh`: the last ssh argument is exactly what the remote
+// login shell would receive.
+const runLocally: SpawnSsh = (_file, args) => spawn("sh", ["-c", args.at(-1) ?? ""]);
+function remoteEnv(dirs: readonly string[]): Extract<HerdrEnv, { kind: "remote" }> {
+  return { id: "e", label: "E", kind: "remote", sshHost: "host1", socket: "~/s.sock", herdrBin: "~/herdr", claudeConfigDirs: dirs, spawnCommand: "claude", repos: {} };
+}
+
+describe("syncRemoteClaudeThemeBase", () => {
+  it("flips base through the remote scripts and preserves other fields", async () => {
+    const file = await writeTheme(root, { name: "Corral", base: "dark", overrides: { claude: "#8257e5" } });
+
+    const updated = await syncRemoteClaudeThemeBase(remoteEnv([root]), "light", runLocally);
+
+    expect(updated).toBe(1);
+    expect(JSON.parse(await fs.readFile(file, "utf8"))).toEqual({ name: "Corral", base: "light", overrides: { claude: "#8257e5" } });
+    expect((await fs.readdir(path.join(root, "themes")))).toEqual(["corral.json"]); // no temp file left
+  });
+
+  it("leaves a file that already matches untouched", async () => {
+    const file = await writeTheme(root, { base: "dark" });
+    const before = await fs.stat(file);
+    expect(await syncRemoteClaudeThemeBase(remoteEnv([root]), "dark", runLocally)).toBe(0);
+    expect((await fs.stat(file)).mtimeMs).toBe(before.mtimeMs);
+  });
+
+  it("skips a dir with no theme and never creates one", async () => {
+    expect(await syncRemoteClaudeThemeBase(remoteEnv([root]), "light", runLocally)).toBe(0);
+    await expect(fs.access(path.join(root, "themes"))).rejects.toThrow();
+  });
+
+  it("skips a corrupt file without clobbering it", async () => {
+    const themesDir = path.join(root, "themes");
+    await fs.mkdir(themesDir, { recursive: true });
+    await fs.writeFile(path.join(themesDir, "corral.json"), "{ nope", "utf8");
+    expect(await syncRemoteClaudeThemeBase(remoteEnv([root]), "dark", runLocally)).toBe(0);
+    expect(await fs.readFile(path.join(themesDir, "corral.json"), "utf8")).toBe("{ nope");
+  });
+
+  it("handles a config dir containing a space and updates every dir", async () => {
+    const a = path.join(root, "dir with space");
+    const b = path.join(root, "b");
+    await writeTheme(a, { base: "light" });
+    await writeTheme(b, { base: "light" });
+    expect(await syncRemoteClaudeThemeBase(remoteEnv([a, b]), "dark", runLocally)).toBe(2);
+  });
+
+  it("keeps going after one dir fails, then reports the error", async () => {
+    const good = path.join(root, "good");
+    await writeTheme(good, { base: "light" });
+    const failing: SpawnSsh = (file, args) => {
+      const cmd = args.at(-1) ?? "";
+      return cmd.includes("bad") ? spawn("sh", ["-c", "exit 255"]) : runLocally(file, args);
+    };
+    await expect(syncRemoteClaudeThemeBase(remoteEnv([path.join(root, "bad"), good]), "dark", failing)).rejects.toThrow("ssh exit 255");
+    expect(JSON.parse(await fs.readFile(path.join(good, "themes", "corral.json"), "utf8"))).toEqual({ base: "dark" });
   });
 });

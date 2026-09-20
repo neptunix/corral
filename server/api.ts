@@ -30,7 +30,7 @@ import {
 import type { HerdrEnv } from "../environments.ts";
 import { briefByteLength, cleanupBrief, composeBrief, START_COMMAND_FALLBACK, writeBrief } from "./brief.ts";
 import { cardSignal } from "./card-signal.ts";
-import { syncClaudeThemeBase, ThemeModeSchema } from "./claude-theme.ts";
+import { syncClaudeThemeBase, syncRemoteClaudeThemeBase, ThemeModeSchema } from "./claude-theme.ts";
 import type { DiagnosticsStore } from "./diagnostics-store.ts";
 import type { FleetRestore } from "./fleet-restore.ts";
 import { closePane, listWorkspaces, paneIdentity, readPane, type ReadFn, UUID_RE } from "./herdr.ts";
@@ -329,6 +329,7 @@ export function createApi(opts: {
   closeDeferMs?: number; // injectable so the deferred-close ordering is testable without real waits
   spawnTimeoutMs?: number; // injectable so the timeout-cleanup path is testable without a 60s wait
   allowedOrigins?: readonly string[]; // Origin allowlist for the file-upload route (default WS_ALLOWED_ORIGINS)
+  syncRemoteTheme?: typeof syncRemoteClaudeThemeBase; // remote theme sync over ssh (injectable so tests need no ssh)
   writeRemote?: typeof writeRemoteFile; // remote file write over ssh (injectable so tests need no ssh)
   uploadRoot?: string; // drop-upload temp root (injectable so tests write to a scratch dir)
   briefRoot?: string; // spawn-brief root (injectable so tests write to a scratch dir)
@@ -351,6 +352,7 @@ export function createApi(opts: {
   const allowedOrigins = opts.allowedOrigins ?? WS_ALLOWED_ORIGINS;
   const uploadRoot = opts.uploadRoot ?? UPLOAD_ROOT;
   const writeRemote = opts.writeRemote ?? writeRemoteFile;
+  const syncRemoteTheme = opts.syncRemoteTheme ?? syncRemoteClaudeThemeBase;
   const briefRoot = opts.briefRoot ?? BRIEF_ROOT;
   const briefCleanupDelayMs = opts.briefCleanupDelayMs ?? BRIEF_CLEANUP_DELAY_MS;
   // Last-active timestamps (transcript-derived); caches `null` too (no transcript). Bounded + TTL'd.
@@ -380,17 +382,25 @@ export function createApi(opts: {
 
   app.get("/api/health", (c) => c.json({ ok: true }));
 
-  // Web theme toggle → flip the `base` of `themes/corral.json` in each LOCAL env's Claude config dir,
-  // so a session that selected `custom:corral` follows the dashboard's light/dark. Local only: remote
-  // dirs live on another host and would need an SSH write — out of scope, theme sync stays local FS.
+  // Web theme toggle → flip the `base` of `themes/corral.json` in each env's Claude config dirs, so a
+  // session that selected `custom:corral` follows the dashboard's light/dark. Local dirs are edited
+  // directly; a remote env's over the shared ssh connection. A remote that cannot be reached is
+  // logged and skipped — it never fails the toggle or delays it beyond the per-call ssh timeout.
   app.post("/api/theme", async (c) => {
     let body: unknown;
     try { body = await c.req.json(); } catch { return c.json({ error: { code: "validation", message: "invalid JSON" } }, 400); }
     const parsed = z.object({ mode: ThemeModeSchema }).safeParse(body);
     if (!parsed.success) return c.json({ error: { code: "validation", message: "mode must be 'light' or 'dark'" } }, 400);
     const dirs = [...new Set(opts.envs.filter((e) => e.kind === "local").flatMap((e) => [...e.claudeConfigDirs]))];
-    const updated = await syncClaudeThemeBase(dirs, parsed.data.mode);
-    return c.json({ ok: true, updated });
+    const remotes = opts.envs.filter((e) => e.kind === "remote");
+    const counts = await Promise.all([
+      syncClaudeThemeBase(dirs, parsed.data.mode),
+      ...remotes.map((e) => syncRemoteTheme(e, parsed.data.mode).catch((err: unknown) => {
+        console.warn(`[theme] env=${e.id} sync failed: ${err instanceof Error ? err.message : String(err)}`);
+        return 0;
+      })),
+    ]);
+    return c.json({ ok: true, updated: counts.reduce((a, b) => a + b, 0) });
   });
 
   app.get("/api/state", (c) => {
