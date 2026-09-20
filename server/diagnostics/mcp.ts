@@ -13,6 +13,7 @@ const SERVER_NAME = "corral";
 export const SHIM_REPO_PATH = "scripts/corral-mcp-shim.mjs";
 
 const ServerSchema = z.object({
+  command: z.string().optional(),
   args: z.array(z.string()).optional(),
   env: z.record(z.string(), z.string()).optional(),
 });
@@ -62,7 +63,7 @@ export function readRegistration(deps: CheckDeps, dir: string): Registration {
 }
 
 export function shimPathOf(server: Server): string | null {
-  return server.args?.find((a) => a.startsWith("/") && a.endsWith(".mjs")) ?? null;
+  return [server.command, ...(server.args ?? [])].find((a) => a?.startsWith("/") === true && a.endsWith(".mjs")) ?? null;
 }
 
 interface Row { readonly title: string; readonly state: Check["state"]; readonly severity: Check["severity"]; readonly detail: string }

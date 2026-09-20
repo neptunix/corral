@@ -99,6 +99,14 @@ describe("mcpChecks", () => {
   });
 });
 
+describe("mcpChecks — a shim launched directly", () => {
+  it("finds the shim path in `command` when args are empty", () => {
+    const direct = JSON.stringify({ mcpServers: { corral: { command: SHIM, args: [], env: { CORRAL_MCP_SOCKET: SOCK } } } });
+    const rows = mcpChecks(deps({ "/h/.claude.json": direct, [SHIM]: "x" }), remoteEnv(SOCK), DIR);
+    expect(byId(rows, "mcp-shim-installed")?.state).toBe("ok");
+  });
+});
+
 describe("mcpTunnelCheck", () => {
   it("is n/a — not a problem — for an env that opted out", () => {
     const row = mcpTunnelCheck(remoteEnv(), createTunnelStatus(), 9);
