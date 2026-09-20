@@ -1,4 +1,5 @@
 import { STANDARD_BIN_DIRS } from "../deps.ts";
+import { registrationFiles } from "../mcp.ts";
 
 export type SubjectKind = "file" | "dir" | "exec" | "value";
 export interface ManifestEntry { readonly key: string; readonly kind: SubjectKind; readonly path: string; }
@@ -22,7 +23,8 @@ export const PER_DIR_FILES: readonly string[] = [
   "themes/corral.json",
 ];
 
-export function buildManifest(configDirs: readonly string[]): ProbeManifest {
+// Only for an env with `mcpSocket`: a `.claude.json` can be a megabyte, and an opted-out env has no use for it.
+export function buildManifest(configDirs: readonly string[], opts: { readonly mcp: boolean } = { mcp: false }): ProbeManifest {
   const entries: ManifestEntry[] = [];
   let n = 0;
   const push = (kind: SubjectKind, path: string): string => {
@@ -36,6 +38,7 @@ export function buildManifest(configDirs: readonly string[]): ProbeManifest {
   for (const dir of configDirs) {
     push("dir", dir);
     for (const rel of PER_DIR_FILES) push("file", `${dir}/${rel}`);
+    if (opts.mcp) for (const file of registrationFiles(dir)) push("file", file);
   }
   for (const d of STANDARD_BIN_DIRS) push("exec", `${d}/jq`);
   return { entries, homeKey, pathKey };

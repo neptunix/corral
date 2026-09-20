@@ -946,6 +946,11 @@ not offered at all. When corral is down or the tunnel is not up, the shim exits 
 connected" and the session simply has no corral tools — it never serves a stale card. The
 context-pressure and card-empty hook signals stay local-only.
 
+The 🛟 health panel checks this surface: `mcp-tunnel` per environment (up or down, read from the
+tunnel loop), and `mcp-registered` / `mcp-shim-installed` per config dir. An environment without
+`mcpSocket` reads "not configured", never a fault. `mcp-registered` also runs on local config
+dirs, as an `info` recommendation.
+
 ### Teaching a session what corral is
 
 A tool description explains its own tool. None of them can carry the vocabulary they all assume —

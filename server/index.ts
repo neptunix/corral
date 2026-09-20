@@ -26,6 +26,7 @@ import { createPoller } from "./poller.ts";
 import { formatReport, resolveReapGrace, runPreflight } from "./preflight.ts";
 import { startReconciler } from "./reconcile.ts";
 import { startRemoteMcp } from "./remote-mcp/index.ts";
+import { createTunnelStatus } from "./remote-mcp/status.ts";
 import { readSelfVersion } from "./self-version.ts";
 import { spawnSession, type SpawnOpts, type SpawnResult } from "./spawn.ts";
 import { createStorage } from "./storage.ts";
@@ -72,8 +73,9 @@ void (async () => {
   // poller.start() because the sweep reads the poller's snapshot for reachability and session state.
   const selfVersion = readSelfVersion();
   const diagnostics = createDiagnosticsStore({ selfVersion });
+  const tunnelStatus = createTunnelStatus();
   const diagnosticsSweep = createDiagnosticsSweep({
-    store: diagnostics, poller, envs: ENVS,
+    store: diagnostics, poller, envs: ENVS, tunnels: tunnelStatus,
     deps: createNodeDeps({ repoRoot: path.join(import.meta.dirname, "..") }),
     corralHome: CORRAL_HOME,
     // The config line this process actually booted with, handed over from runPreflight. Loading
@@ -151,7 +153,7 @@ void (async () => {
   const stopRemoteMcp = await startRemoteMcp({
     envs: ENVS, poller, storage, paneLookup: paneIdentity,
     baseUrl: `http://127.0.0.1:${String(PORT)}`,
-    intervalMs: CHEAP_INTERVAL_MS,
+    intervalMs: CHEAP_INTERVAL_MS, status: tunnelStatus,
   });
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => {

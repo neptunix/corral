@@ -8,6 +8,7 @@ import type { CheckDeps } from "./diagnostics/deps.ts";
 import { resolveOnPath } from "./diagnostics/deps.ts";
 import { driftCheck, themeCheck } from "./diagnostics/drift.ts";
 import { envChecks, nodeVersionCheck } from "./diagnostics/env.ts";
+import { mcpChecks, mcpTunnelCheck } from "./diagnostics/mcp.ts";
 import { metricsChecks } from "./diagnostics/metrics.ts";
 import { composeRemoteRows, planRound2For } from "./diagnostics/remote/adapter.ts";
 import type { RemoteRowsOpts } from "./diagnostics/remote/adapter.ts";
@@ -22,12 +23,15 @@ import { versionChecks } from "./diagnostics/versions.ts";
 import type { DiagnosticsStore } from "./diagnostics-store.ts";
 import type { RunTool } from "./exec-tool.ts";
 import type { ExecFn } from "./herdr.ts";
+import { createTunnelStatus } from "./remote-mcp/status.ts";
+import type { TunnelStatus } from "./remote-mcp/status.ts";
 import { runGuarded } from "./scheduler.ts";
 
 export interface SweepOpts {
   readonly store: DiagnosticsStore;
   readonly poller: { getSnapshot: () => Snapshot };
   readonly envs: readonly HerdrEnv[];
+  readonly tunnels: TunnelStatus;
   readonly deps: CheckDeps;
   readonly corralHome: string;
   /**
@@ -114,6 +118,7 @@ interface ComposeInput {
   readonly snapshot: Snapshot;
   readonly configLine: ReportLine;
   readonly corralHome: string;
+  readonly tunnels: TunnelStatus;
 }
 
 /**
@@ -132,13 +137,17 @@ function cheapChecks(input: ComposeInput): Check[] {
     ...envChecks(deps, envs, input.snapshot.sessions),
   ];
   for (const env of envs) {
-    if (env.kind === "remote") continue; // the remote class owns these rows (adapter, Task 12)
+    if (env.kind === "remote") {
+      checks.push(mcpTunnelCheck(env, input.tunnels, now)); // per-config-dir rows: the remote class owns those
+      continue;
+    }
     for (const dir of env.claudeConfigDirs) {
       checks.push(
         ...metricsChecks(deps, env.id, dir),
         ...ctxHookChecks(deps, env.id, dir),
         driftCheck(deps, env.id, dir),
         themeCheck(deps, env.id, dir),
+        ...mcpChecks(deps, env, dir),
       );
     }
   }
@@ -290,7 +299,7 @@ export function createDiagnosticsSweep(opts: SweepOpts): DiagnosticsSweep {
       const snapshot = opts.poller.getSnapshot();
       const input: ComposeInput = {
         deps: opts.deps, envs: opts.envs, snapshot,
-        configLine: opts.configLine, corralHome: opts.corralHome,
+        configLine: opts.configLine, corralHome: opts.corralHome, tunnels: opts.tunnels,
       };
       const cheap = cheapChecks(input);
       const stale = versionsAt === null || now - versionsAt >= opts.versionTtlMs;
@@ -393,7 +402,7 @@ const INERT_UPDATE_IO: UpdateCheckIo = {
 
 const ENUMERATE_ENVS: readonly HerdrEnv[] = [
   { id: "local", label: "local", kind: "local", claudeConfigDirs: ["/cfg"], spawnCommand: "claude", repos: {} },
-  { id: "remote", label: "remote", kind: "remote", sshHost: "host", socket: "/sock", herdrBin: "herdr", claudeConfigDirs: ["/cfg"], spawnCommand: "claude", repos: {} },
+  { id: "remote", label: "remote", kind: "remote", sshHost: "host", socket: "/sock", herdrBin: "herdr", mcpSocket: "/mcp.sock", claudeConfigDirs: ["/cfg"], spawnCommand: "claude", repos: {} },
   // A third, UNREACHABLE environment: `env-unrunnable` is a producer too, and it exists only once
   // some check has been suppressed. Its version rows are the ones suppressed, and both of those ids
   // still appear via the two environments above, so nothing is lost from the enumeration.
@@ -420,7 +429,7 @@ export async function enumerateChecks(): Promise<Check[]> {
   const cheap = cheapChecks({
     deps: INERT_DEPS, envs: ENUMERATE_ENVS, snapshot,
     configLine: { level: "ok", text: "config: 3 environment(s) loaded" },
-    corralHome: "/corral-home",
+    corralHome: "/corral-home", tunnels: createTunnelStatus(),
   });
   const versions = await versionChecks({
     envs: ENUMERATE_ENVS, run: () => Promise.resolve(null), ccVersionByEnv: {}, now: () => 0,

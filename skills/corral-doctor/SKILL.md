@@ -38,6 +38,10 @@ on its own once that box is reachable again — say so rather than chasing it.
   metrics, installed once per `~/.claude*` dir. See README → *Installing the Claude helper files
   (per config dir)*. `helper-drift` rows report the installed copy **differs** from this checkout,
   not which direction is stale — read the row's detail before re-copying.
+- **MCP registration** — `mcp-registered` / `mcp-shim-installed` per config dir, `mcp-tunnel` per
+  remote environment. A remote env without `mcpSocket` has opted out: never "fix" it into one. A
+  down tunnel whose ssh error mentions forwarding usually means the key lacks `port-forwarding`. See
+  README → *MCP on a remote environment*.
 - **Env vars** — `DIAGNOSTICS_INTERVAL_MS`, `REMOTE_PROBE_ENABLED`, `UPDATE_CHECK_ENABLED`, and the
   rest are process-level, set where `npm start` runs. See README → *Configuration (env vars)*.
 - **Upgrading** — `npm install` + a version bump, see README → *Upgrading*. `helper-drift` and the
