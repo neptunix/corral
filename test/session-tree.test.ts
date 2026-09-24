@@ -5,14 +5,14 @@ import type { SessionItem, TreeLink } from "../web/src/lib/session-tree";
 
 interface L extends TreeLink { readonly name: string }
 
-function mk(name: string, opts: { closed?: boolean; sid?: string | null; pane?: string; by?: L | "operator" | { sessionId: string; env: string; paneId: string } } = {}): L {
+function mk(name: string, opts: { closed?: boolean; closing?: boolean; sid?: string | null; pane?: string; env?: string; by?: L | "operator" | { sessionId: string; env: string; paneId: string } } = {}): L {
   const by = opts.by;
   return {
     name,
-    env: "e1",
+    env: opts.env ?? "e1",
     paneId: opts.pane ?? `p-${name}`,
     sessionId: opts.sid === undefined ? `sid-${name}` : opts.sid,
-    live: { detached: opts.closed === true },
+    live: { detached: opts.closed === true || opts.closing === true, status: opts.closing === true ? "closing" : "idle" },
     ...(by === undefined ? {} : {
       spawnedBy: by === "operator" || !("name" in by) ? by : { sessionId: by.sessionId ?? "", env: by.env, paneId: by.paneId },
     }),
@@ -44,6 +44,12 @@ describe("sessionItems — tree", () => {
     const parent = mk("parent", { sid: null, pane: "p9" });
     const child = mk("child", { by: { sessionId: "not-yet-known", env: "e1", paneId: "p9" } });
     expect(shape(sessionItems([parent, child], false))).toEqual([["parent", ["child"]]]);
+  });
+
+  it("the paneId fallback does not cross environments", () => {
+    const parent = mk("parent", { sid: null, pane: "p9", env: "e2" });
+    const child = mk("child", { by: { sessionId: "not-yet-known", env: "e1", paneId: "p9" } });
+    expect(shape(sessionItems([parent, child], false))).toEqual(["parent", "child"]);
   });
 
   it("does not match a reused pane whose link carries a different sessionId", () => {
@@ -116,6 +122,18 @@ describe("sessionItems — folding closed sessions", () => {
     const kid = mk("kid", { by: p });
     const cs = closed(FOLD_MIN_CLOSED);
     expect(shape(sessionItems([p, kid, ...cs], true))).toEqual([["p", ["kid"]], `~${cs.map((c) => c.name).join(",")}`]);
+  });
+
+  it("folds closed children under a live parent at their own level", () => {
+    const orch = mk("orch");
+    const cs = closed(FOLD_MIN_CLOSED, orch);
+    expect(shape(sessionItems([orch, ...cs], true))).toEqual([["orch", [`~${cs.map((c) => c.name).join(",")}`]]]);
+  });
+
+  it("never folds a session whose close is still in flight", () => {
+    const cs = closed(FOLD_MIN_CLOSED);
+    const closing = mk("closing", { closing: true });
+    expect(shape(sessionItems([closing, ...cs], true))).toEqual(["closing", `~${cs.map((c) => c.name).join(",")}`]);
   });
 
   it("folds nothing when fold is off", () => {

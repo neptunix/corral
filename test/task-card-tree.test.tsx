@@ -55,6 +55,24 @@ describe("TaskCard — session tree and folded closed sessions", () => {
     expect(screen.queryByTitle(/Claude session sid-old-0/)).toBeNull();
   });
 
+  it("caps the strip at seven rings and counts the rest", () => {
+    const nine = Array.from({ length: 9 }, (_, i) => link(`n-${String(i)}`, true));
+    renderCard([link("live", false), ...nine]);
+    const strip = screen.getByTitle("9 closed — click to show");
+    expect(strip.querySelectorAll("span.rounded-full")).toHaveLength(7);
+    expect(screen.getByText("+2")).toBeTruthy();
+  });
+
+  it("expands a strip nested under a live parent", () => {
+    const orch = link("orch", false);
+    const kids = Array.from({ length: FOLD_MIN_CLOSED }, (_, i) =>
+      link(`k-${String(i)}`, true, { sessionId: "sid-orch", env: "e1", paneId: "p-orch" }));
+    renderCard([orch, ...kids]);
+    expect(screen.queryByTitle(/Claude session sid-k-0/)).toBeNull();
+    fireEvent.click(screen.getByTitle(/closed — click to show/));
+    expect(screen.getByTitle(/Claude session sid-k-0/)).toBeTruthy();
+  });
+
   it("shows no warning sign on a closed row", () => {
     renderCard([link("gone", true)]);
     expect(screen.queryByText(/⚠/)).toBeNull();

@@ -1,11 +1,13 @@
 import type { SessionLink } from "@shared/board-schema";
 
+import { CLOSING_STATUS } from "./optimistic";
+
 export interface TreeLink {
   readonly env: string;
   readonly paneId: string;
   readonly sessionId: string | null;
   readonly spawnedBy?: SessionLink["spawnedBy"];
-  readonly live: { readonly detached: boolean } | null;
+  readonly live: { readonly detached: boolean; readonly status: string } | null;
 }
 
 export type SessionItem<T extends TreeLink> =
@@ -17,7 +19,8 @@ const MAX_DEPTH = 3;
 
 interface Node<T> { readonly link: T; readonly children: Node<T>[] }
 
-const isClosed = (l: TreeLink): boolean => l.live?.detached === true;
+// A close still in flight stays unfolded: its row hosts the modal that reports a failed close.
+const isClosed = (l: TreeLink): boolean => l.live?.detached === true && l.live.status !== CLOSING_STATUS;
 
 function parentIndex(links: readonly TreeLink[], child: TreeLink): number {
   const by = child.spawnedBy;
