@@ -98,7 +98,7 @@ describe("UI wiring — every surface renders session state through sessionState
   // weaker form stays green if the tone is computed and then dropped on the floor.
   it("colours TaskCard's dot from the tone, not from the raw herdr status", () => {
     const src = read("components/TaskCard.tsx");
-    expect(src).toContain('${detached ? "bg-slate-600" : TONE_DOT[sessionStateTone(s.live)]}');
+    expect(src).toContain('detached ? RING : `w-2 h-2 rounded-full shrink-0 ${TONE_DOT[sessionStateTone(s.live)]}`');
     expect(src).not.toContain("STATUS_DOT[s.live?.status");
   });
 
