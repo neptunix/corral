@@ -1,12 +1,13 @@
 export function makeGuarded(task: () => Promise<void>): () => Promise<void> {
-  let pending = false;
+  let running: Promise<void> | null = null;
   return async () => {
-    if (pending) return;
-    pending = true;
+    // A mid-run caller (whoami's re-poll) needs the fresh snapshot, so it waits instead of returning early.
+    if (running !== null) return running.catch(() => undefined);
+    running = task();
     try {
-      await task();
+      await running;
     } finally {
-      pending = false;
+      running = null;
     }
   };
 }
