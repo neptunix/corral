@@ -1,5 +1,5 @@
 import type { BoardFrame } from "@shared/board-schema";
-import type { AttentionMap, AttentionRecord } from "@shared/schema";
+import type { AttentionMap, AttentionRecord, AttentionState } from "@shared/schema";
 
 // Client-side per-board attention attribution. The client already holds every board's bindings
 // (`api.boards.list()` → `board.tasks[].sessions[]`) and the full attention map on each SSE frame, so
@@ -32,14 +32,36 @@ export function buildMembershipIndex(boards: readonly BoardFrame[]): Map<string,
   return index;
 }
 
-/** Per-board attention count for the switcher badges. Records bound to no task are excluded. */
-export function attentionCountsByBoard(attention: AttentionMap, boards: readonly BoardFrame[]): Map<string, number> {
+export interface AttentionCounts { readonly blocked: number; readonly finished: number }
+export const ZERO_COUNTS: AttentionCounts = { blocked: 0, finished: 0 };
+
+function add(c: AttentionCounts, state: AttentionState): AttentionCounts {
+  return state === "blocked" ? { ...c, blocked: c.blocked + 1 } : { ...c, finished: c.finished + 1 };
+}
+
+/** Tallies a set of records by state — the shared reducer behind every badge/title in the UI. */
+export function countStates(records: readonly AttentionRecord[]): AttentionCounts {
+  return records.reduce((c, r) => add(c, r.state), ZERO_COUNTS);
+}
+
+/** Keys of every session finished but not yet viewed — drives the per-row ✓ mark. */
+export function finishedKeys(attention: AttentionMap): ReadonlySet<string> {
+  return new Set(Object.entries(attention).filter(([, r]) => r.state === "finished").map(([k]) => k));
+}
+
+/** "(N) corral" when N blocked sessions need the operator, else the plain app name. */
+export function documentTitle(blocked: number): string {
+  return blocked > 0 ? `(${String(blocked)}) corral` : "corral";
+}
+
+/** Per-board attention counts, split by state, for the switcher badges. Unbound records are excluded. */
+export function attentionCountsByBoard(attention: AttentionMap, boards: readonly BoardFrame[]): Map<string, AttentionCounts> {
   const index = buildMembershipIndex(boards);
-  const counts = new Map<string, number>();
-  for (const key of Object.keys(attention)) {
+  const counts = new Map<string, AttentionCounts>();
+  for (const [key, record] of Object.entries(attention)) {
     const m = index.get(key);
     if (m === undefined) continue; // unassigned — surfaces via the Unassigned tab, not a board badge
-    counts.set(m.boardId, (counts.get(m.boardId) ?? 0) + 1);
+    counts.set(m.boardId, add(counts.get(m.boardId) ?? ZERO_COUNTS, record.state));
   }
   return counts;
 }
@@ -68,12 +90,12 @@ export function boardAttention(
   return entries;
 }
 
-/** Count of attention records whose session is bound to no task — the "Unassigned sessions" badge. */
-export function unassignedAttentionCount(attention: AttentionMap, boards: readonly BoardFrame[]): number {
+/** Attention counts, split by state, for sessions bound to no task — the "Unassigned sessions" badge. */
+export function unassignedAttentionCount(attention: AttentionMap, boards: readonly BoardFrame[]): AttentionCounts {
   const index = buildMembershipIndex(boards);
-  let count = 0;
-  for (const key of Object.keys(attention)) {
-    if (!index.has(key)) count += 1;
+  let counts = ZERO_COUNTS;
+  for (const [key, record] of Object.entries(attention)) {
+    if (!index.has(key)) counts = add(counts, record.state);
   }
-  return count;
+  return counts;
 }

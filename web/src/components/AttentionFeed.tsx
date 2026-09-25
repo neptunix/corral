@@ -1,8 +1,9 @@
 import type { EnvState } from "@shared/schema";
 import type { JSX } from "react";
 
+import { AttentionBadges } from "./AttentionMarks";
 import { SessionCard } from "./SessionCard";
-import type { BoardAttentionEntry } from "../lib/attention";
+import { countStates, type BoardAttentionEntry } from "../lib/attention";
 import { envLabel } from "../lib/env";
 import { parseKey } from "../lib/protocol";
 
@@ -25,14 +26,15 @@ interface Props {
 // two independent open flags would let both panels show at once and there is room for one.
 export function AttentionFeed({ entries, envs, onOpen, onClose }: Props): JSX.Element {
   const count = entries.length;
+  const counts = countStates(entries.map((e) => e.record));
 
   return (
     <aside id="attention-panel" className="shrink-0 w-80 border-l border-border flex flex-col overflow-hidden bg-card">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
         <span className="text-foreground text-sm font-semibold">Attention</span>
-        <span className={`text-xs px-1.5 py-0.5 rounded-full ${count > 0 ? "bg-destructive text-destructive-foreground" : "bg-muted text-muted-foreground"}`}>
-          {count}
-        </span>
+        {counts.blocked + counts.finished === 0
+          ? <span className="text-xs px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">0</span>
+          : <AttentionBadges counts={counts} scope="" />}
         <button
           type="button"
           onClick={onClose}

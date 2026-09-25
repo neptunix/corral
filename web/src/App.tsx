@@ -2,6 +2,7 @@ import { StreamFrameSchema, type BoardFrame, type BoardState, type SpawnPreset }
 import type { RecapSource, RecapStatus, RegistryStatus, SessionRow, StatuslineData } from "@shared/schema";
 import { useState, useEffect, useCallback, useMemo, type JSX } from "react";
 
+import { FinishedKeysContext } from "./components/AttentionMarks";
 import { Board as BoardView } from "./components/Board";
 import { BoardSettingsModal } from "./components/BoardSettingsModal";
 import { BoardSwitcher } from "./components/BoardSwitcher";
@@ -11,7 +12,9 @@ import { SideRail } from "./components/SideRail";
 import { UnassignedView } from "./components/UnassignedView";
 import { UsageFooter } from "./components/UsageFooter";
 import { api } from "./lib/api";
-import { attentionCountsByBoard, unassignedAttentionCount } from "./lib/attention";
+import {
+  attentionCountsByBoard, countStates, documentTitle, finishedKeys, unassignedAttentionCount,
+} from "./lib/attention";
 import { pickBoardState, pickGlobalState } from "./lib/board-precedence";
 import { envLabel } from "./lib/env";
 import { applyOptimisticState, type OptimisticState } from "./lib/optimistic";
@@ -138,7 +141,8 @@ export function App(): JSX.Element {
   // Memoized so the derived-attention useMemos below get a stable dependency (the `?? {}` fallback
   // would otherwise mint a new object every render).
   const attention = useMemo(() => globalState?.attention ?? {}, [globalState]);
-  const attentionCount = Object.keys(attention).length;
+  const blockedCount = useMemo(() => countStates(Object.values(attention)).blocked, [attention]);
+  const finished = useMemo(() => finishedKeys(attention), [attention]);
   const accounts = useMemo(() => (globalState !== null && "accounts" in globalState ? globalState.accounts : []), [globalState]);
   // Recap/statusline lookup for the live-terminal header's second line, keyed by `env:paneId` — covers
   // both unassigned rows and every task's enriched session link (`live` is null for a detached link).
@@ -177,11 +181,11 @@ export function App(): JSX.Element {
   const attentionCounts = useMemo(() => attentionCountsByBoard(attention, boards), [attention, boards]);
   const unassignedAttnCount = useMemo(() => unassignedAttentionCount(attention, boards), [attention, boards]);
 
-  // Tab title carries the GLOBAL count (all boards + unassigned) so a blocked/finished session is
-  // visible from any board even when the app isn't focused — the one intentionally-global signal.
+  // Tab title carries the GLOBAL blocked count (all boards + unassigned) so a session needing the
+  // operator is visible from any board even when the app isn't focused — finished sessions don't page.
   useEffect(() => {
-    document.title = attentionCount > 0 ? `(${String(attentionCount)}) corral` : "corral";
-  }, [attentionCount]);
+    document.title = documentTitle(blockedCount);
+  }, [blockedCount]);
 
   async function handleNewBoard(): Promise<void> {
     const label = window.prompt("Board name:");
@@ -263,6 +267,7 @@ export function App(): JSX.Element {
   }
 
   return (
+    <FinishedKeysContext.Provider value={finished}>
     <div className="h-screen flex flex-col bg-background text-foreground">
       <BoardSwitcher
         boards={boards}
@@ -389,5 +394,6 @@ export function App(): JSX.Element {
 
       <UsageFooter accounts={accounts} />
     </div>
+    </FinishedKeysContext.Provider>
   );
 }

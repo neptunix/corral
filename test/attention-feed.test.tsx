@@ -14,6 +14,11 @@ const entry: BoardAttentionEntry = {
   record: { state: "blocked", since: Date.now(), lastLines: "waiting", captured: false, sessionName: "worker" },
   taskTitle: "Ship the rail",
 };
+const finishedEntry: BoardAttentionEntry = {
+  key: "e1:p2",
+  record: { state: "finished", since: Date.now(), lastLines: "", captured: false, sessionName: "worker" },
+  taskTitle: "Ship the rail",
+};
 
 describe("AttentionFeed", () => {
   it("renders the entries it is handed rather than computing its own", () => {
@@ -24,6 +29,22 @@ describe("AttentionFeed", () => {
   it("says so plainly when the board is quiet", () => {
     render(<AttentionFeed entries={[]} envs={{}} onOpen={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByText("Nothing needs you on this board.")).toBeTruthy();
+  });
+
+  it("shows a red blocked badge in the header", () => {
+    render(<AttentionFeed entries={[entry]} envs={{}} onOpen={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.getByTitle("1 blocked")).toBeTruthy();
+  });
+
+  it("shows a green finished badge, not a red one, for a finished-only entry", () => {
+    const { container } = render(<AttentionFeed entries={[finishedEntry]} envs={{}} onOpen={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.getByText("✓1")).toBeTruthy();
+    expect(container.querySelector(".bg-destructive")).toBeNull();
+  });
+
+  it("shows the muted 0 pill with no entries", () => {
+    render(<AttentionFeed entries={[]} envs={{}} onOpen={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.getByText("0").className).toContain("bg-muted");
   });
 
   it("hands the close decision upward — the rail owns which panel is open", () => {

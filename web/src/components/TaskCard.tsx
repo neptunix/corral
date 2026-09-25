@@ -3,6 +3,7 @@ import type { EnrichedSessionLink, EnrichedTask } from "@shared/board-schema";
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 
+import { FinishedMark } from "./AttentionMarks";
 import { CloseSessionModal } from "./CloseSessionModal";
 import { RestoreSessionModal } from "./RestoreSessionModal";
 import { api } from "../lib/api";
@@ -281,6 +282,7 @@ function SessionRow({ s, title, onOpenSession, onCloseSession, onResumeSession, 
             </>
           )}
         </span>
+        {!detached && <FinishedMark sessionKey={`${s.env}:${s.paneId}`} />}
       </button>
       {shortId !== null && (
         <button

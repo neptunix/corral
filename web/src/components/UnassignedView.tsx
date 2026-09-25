@@ -4,6 +4,7 @@ import type { JSX } from "react";
 import { useEffect, useState } from "react";
 
 import { AssignToTaskModal } from "./AssignToTaskModal";
+import { FinishedMark } from "./AttentionMarks";
 import { CreateTaskModal } from "./CreateTaskModal";
 import { SessionCard } from "./SessionCard";
 import { api } from "../lib/api";
@@ -61,7 +62,7 @@ function UnassignedCard({ session, envLabelText, onOpen, onCreate, onAssign }: C
   return (
     <SessionCard
       onOpen={() => { onOpen(env, paneId, false, label); }}
-      indicator={<span className={TONE_TEXT[sessionStateTone(session)]} aria-hidden>●</span>}
+      indicator={<><span className={TONE_TEXT[sessionStateTone(session)]} aria-hidden>●</span><FinishedMark sessionKey={`${session.env}:${session.paneId}`} /></>}
       title={displayTitle}
       subtitle={`${sessionStateLabel(session)} · ${session.workspace} / ${session.tab} · ${envLabelText}`}
       meta={((): string => {

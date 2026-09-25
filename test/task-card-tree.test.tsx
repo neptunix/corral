@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { EnrichedSessionLink, EnrichedTask } from "../shared/board-schema";
+import { FinishedKeysContext } from "../web/src/components/AttentionMarks";
 import { TaskCard } from "../web/src/components/TaskCard";
 import { FOLD_MIN_CLOSED } from "../web/src/lib/session-tree";
 
@@ -17,14 +19,19 @@ function link(name: string, detached: boolean, spawnedBy?: EnrichedSessionLink["
   };
 }
 
-function renderCard(sessions: EnrichedSessionLink[]): void {
+function renderCard(sessions: EnrichedSessionLink[], finished: ReadonlySet<string> = new Set()): void {
   const task: EnrichedTask = {
     id: "t1", title: "T", description: "", status: "todo", priority: null,
     createdAt: 0, updatedAt: 0, logCount: 0, noteCount: 0, lastLogAtMs: null, sessions,
   };
+  const wrap = (children: ReactNode): ReactNode => (
+    <FinishedKeysContext.Provider value={finished}>{children}</FinishedKeysContext.Provider>
+  );
   render(
-    <TaskCard task={task} boardId="b1" onOpenLog={vi.fn()} onEdit={vi.fn()} onOpenSession={vi.fn()}
-      onDetachSession={vi.fn()} onCloseSession={vi.fn()} onResumeSession={vi.fn()} />,
+    wrap(
+      <TaskCard task={task} boardId="b1" onOpenLog={vi.fn()} onEdit={vi.fn()} onOpenSession={vi.fn()}
+        onDetachSession={vi.fn()} onCloseSession={vi.fn()} onResumeSession={vi.fn()} />,
+    ),
   );
 }
 
@@ -76,5 +83,11 @@ describe("TaskCard — session tree and folded closed sessions", () => {
   it("shows no warning sign on a closed row", () => {
     renderCard([link("gone", true)]);
     expect(screen.queryByText(/⚠/)).toBeNull();
+  });
+
+  it("marks exactly the finished row with a ✓", () => {
+    const live = link("live", false);
+    renderCard([live, link("other", false)], new Set([`${live.env}:${live.paneId}`]));
+    expect(screen.getAllByTitle("Finished — not opened yet")).toHaveLength(1);
   });
 });
