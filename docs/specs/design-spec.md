@@ -81,8 +81,8 @@ a thin app over herdr's CLI.
    + SSE; UI shows sessions and live status across envs (replaces the ad-hoc scripting).
 2. **Tasks & linkage:** boards/tasks storage + mutex + git; Kanban UI; Unassigned pool;
    attach/detach. Validates "see status → link to task."
-3. **Attention & control:** transition detection + snapshot + attention feed + ack;
-   `pane run` command input; spawn-from-task. Validates "ack what needs me."
+3. **Attention & control:** transition detection + snapshot + attention feed;
+   `pane run` command input; spawn-from-task. Validates "see what needs me."
 4. **Ergonomics:** priority, comments, `herdr-board` CLI, agent stub.
 
 ---
@@ -247,7 +247,7 @@ so the precondition holds for spawned sessions.
 UI + CLI + poller can mutate the same file. Node's single thread does **not** serialize the
 read-modify-write cycle (multiple async suspension points → lost update). Therefore every
 read-modify-write of a board file or `attention.json` is wrapped in a **per-file async mutex**
-(`async-mutex`, keyed by file path). `attention.json` writes (poller transitions + `/ack`) go
+(`async-mutex`, keyed by file path). `attention.json` writes (poller transitions + clears) go
 through the same mutex. This makes the "server serializes mutations" guarantee real.
 
 ### 6.4 Board file (`boards/<id>.json`)
@@ -278,23 +278,37 @@ through the same mutex. This makes the "server serializes mutations" guarantee r
 ```jsonc
 {
   "work-local:w653..-1": {
-    "state":"blocked", "since":1718700800, "acked":false,
+    "state":"blocked", "since":1718700800, "sessionName":"task-42-a",
     "lastLines":"…last N lines of pane output captured at transition…",  // self-sufficient for agent + UI
-    "agentCommentId":null                                                 // set when the future agent comments
+    "captured":true                                                     // false until the snapshot read lands
   }
 }
 ```
 - On a transition (→ `blocked` / `finished`) the poller **overwrites** that session's entry (new
-  `since`, `acked:false`) and snapshots the session's last N output lines into `lastLines` — so a
-  finished session's final output survives even though the rolling buffer may scroll away before the
-  next poll (esp. remote 30s tier). On ack → `acked:true`. Entry pruned when the session disappears;
-  a prune pass also runs on server startup against the live list (so entries don't orphan while the
-  poller was offline).
+  `since`, `captured:false` until the next poll's snapshot read lands) — so a finished session's final
+  output survives even though the rolling buffer may scroll away before the next poll (esp. remote 30s
+  tier). There is no ack: a record clears itself once it's no longer relevant.
+- **Clear rules** — no ack, no dismiss button; each state clears on its own condition:
+
+  | record | clears on |
+  |---|---|
+  | `finished` | row status → `working`; pane disappears; OR a corral web-terminal attach on that pane closes after outliving a short grace window (guards against a probe that dies immediately) — counts as "seen," even without re-working |
+  | `blocked` | **state-based, checked every poll:** row status ∈ {`working`, `idle`, `done`}; pane disappears |
+
+  The `blocked` rule is state-based rather than transition-based so a record reloaded from
+  `attention.json` after a restart still heals against the live row instead of waiting for a fresh
+  transition it may never see. `finished` keeps the transition-based re-working clear and adds the
+  attach-close signal; herdr's own `idle`/`done` is not that signal (§6.6).
 - Bounded by *number of live sessions*, never by time. Full transition history → git.
 
 ### 6.6 `agent_status` enum (drives transitions)
 Valid values (from herdr): `working`, `idle`, `done`, `blocked`, `unknown`. Attention transitions
-fire on `working → blocked` and `working → done|idle` ("finished"). `unknown` is treated as "no change."
+fire on `→ blocked` from any prior status, and on `working → done|idle` after ≥`ATTENTION_MIN_WORK_MS`
+("finished"). `unknown` is treated as "no change" — it fires no event and clears nothing.
+
+herdr's own `idle`/`done` is not used as a "seen" signal: herdr has a single focus slot per server,
+and corral itself moves it (spawn with `--focus`, attach focus/restore), so herdr's idle/unseen bit
+reflects corral's own focus traffic, not whether the operator looked at the output.
 
 ---
 
@@ -316,7 +330,6 @@ fire on `working → blocked` and `working → done|idle` ("finished"). `unknown
 | `POST` | `/api/boards/:bid/tasks/:tid/spawn` | spawn (§9). **Idempotent:** pre-checks `agent list` for the intended name; attaches if already present instead of double-spawning. |
 | `POST` | `/api/boards/:bid/tasks/from-session` | create task from a pooled session. **Claim-checked:** verifies `(env,paneId)` is still unassigned at write time, else `409 Conflict`. |
 | `POST` | `/api/sessions/:env/:paneId/run` | `herdr pane run` (text + Enter). Validates env/paneId; logs to audit file (§13). |
-| `POST` | `/api/attention/:env/:paneId/ack` | mark attention item acked. |
 
 **Error envelope:** all errors return `{ error: { code, message } }` with machine-readable `code`
 (`env_offline` · `herdr_error` · `already_attached` · `conflict` · `validation`) so CLI/agent can branch.
@@ -398,15 +411,19 @@ exist in herdr across a state-loss restart — this limitation is explicit, not 
 - Each transition snapshots the session's last output lines into the attention record (§6.5), so
   the feed (and a future agent) can show/summarize *what happened* without relying on the volatile
   rolling buffer (`pane_history` defaults false in herdr — see §13).
-- Surfaced as an **Attention feed** of ackable items ("`task-42-1` went blocked" / "just finished").
-  Acked items don't re-surface until a *new* transition (different `since`).
+- Surfaced as an **Attention feed** ("`task-42-1` went blocked" / "just finished"), blocked entries
+  first. There is no ack; each entry lists until its record clears (§6.5).
+- **Badges** — board tab, Unassigned, bell, feed header: red `N` for `blocked` records and green `✓M`
+  for `finished` records, shown independently (both may be nonzero at once). The browser-tab title
+  counts `blocked` only, since that's the state that needs the operator; a session with a `finished`
+  record also gets a ✓ beside its name on the card/row.
 - **Future-agent seam:** the agent reads attention records (incl. `lastLines`) + board state via the
   API, summarizes/prioritizes, and writes comments (with `idemKey` = `env:paneId:since` to avoid
   double-writes; its `agentCommentId` is recorded on the record). The feed UI is unchanged; the
   deterministic version is the fallback when the agent is off.
-- **Eval signal (cheap, built now):** record time-to-ack on attention records. An item acked in
-  <~30s with no resulting task/comment is a proxy for "not actionable" — a lightweight quality
-  signal for the future agent without UX changes.
+- **Eval signal (cheap, built now):** record time-to-view — how long a `finished` record survives
+  before a corral attach clears it. A record cleared in <~30s with no resulting task/comment is a
+  proxy for "not actionable" — a lightweight quality signal for the future agent without UX changes.
 
 ---
 
@@ -553,7 +570,7 @@ corral/  (repo root)
   Not the real agent; no LLM.
 - **Real auth + remote deploy** (token/mTLS, CORS, rate limiting) — the gate for non-loopback bind.
 - **Typed custom-field schemas**, **labels/tags**, **per-board column editing UI**, **MCP server**.
-- **Agent eval** — use the time-to-ack signal (§10) + outcome labels to measure prioritization quality.
+- **Agent eval** — use the time-to-view signal (§10) + outcome labels to measure prioritization quality.
 
 ---
 
