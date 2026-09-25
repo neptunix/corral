@@ -173,6 +173,8 @@ export interface AttachServerOptions {
   // Test seam. Defaults to the real herdr-backed translator; opening the terminal focuses the pane's tab
   // and closing it restores the tab that was focused before — see server/focus-translate.ts.
   readonly focus?: FocusTranslator;
+  // Called when an attach that survived the probe grace closes — the operator has seen the pane.
+  readonly onViewed?: (env: HerdrEnv, paneId: string) => void;
 }
 
 interface ConnectionCtx {
@@ -184,6 +186,7 @@ interface ConnectionCtx {
   readonly auditLogPath: string;
   readonly now: () => number;
   readonly focus: FocusTranslator;
+  readonly onViewed: (env: HerdrEnv, paneId: string) => void;
   readonly size?: { readonly cols: number; readonly rows: number };
 }
 
@@ -226,6 +229,7 @@ function onConnection(ctx: ConnectionCtx): void {
   ctx.focus.onAttachOpen(ctx.env, ctx.paneId);
 
   const spawnedAt = ctx.now();
+  let probeDied = false;
   let closeAudited = false;
   const auditClose = (probeFailed: boolean): void => {
     if (closeAudited) return;
@@ -255,6 +259,7 @@ function onConnection(ctx: ConnectionCtx): void {
   // generic "pty exited". Task 0 confirmed the 0.7.1 stream is raw, so this only fires on real failures.
   pty.onExit(() => {
     const diedInProbe = ctx.now() - spawnedAt < WS_PROBE_GRACE_MS;
+    probeDied = diedInProbe;
     if (diedInProbe) {
       try {
         ctx.ws.close(4001, attachFailureReason(earlyOutput));
@@ -270,6 +275,7 @@ function onConnection(ctx: ConnectionCtx): void {
   ctx.ws.on("close", () => {
     auditClose(false);
     ctx.focus.onAttachClose(ctx.env, ctx.paneId);
+    if (!probeDied && ctx.now() - spawnedAt >= WS_PROBE_GRACE_MS) ctx.onViewed(ctx.env, ctx.paneId);
   });
 
   // Recording lives here, not in the bridge, so the bridge keeps its "no server imports" property.
@@ -295,6 +301,7 @@ export function attachWebSocketServer(server: UpgradableServer, opts: AttachServ
     tabIdOfPane: async (env, paneId) => (await paneGet(env, paneId)).tabId,
     tabFocus: (env, tabId) => tabFocus(env, tabId),
   });
+  const onViewed = opts.onViewed ?? (() => { /* no-op */ });
 
   server.on("upgrade", (req, socket, head) => {
     const check = validateUpgrade(req.url ?? "", { origin: req.headers.origin }, opts.envs, opts.allowedOrigins);
@@ -325,7 +332,7 @@ export function attachWebSocketServer(server: UpgradableServer, opts: AttachServ
     const origin = req.headers.origin ?? "";
     wss.handleUpgrade(req, socket, head, (ws) => {
       onConnection({
-        ws, env: check.env, paneId: check.paneId, origin, spawnPty, auditLogPath, now, focus,
+        ws, env: check.env, paneId: check.paneId, origin, spawnPty, auditLogPath, now, focus, onViewed,
         ...(check.size === undefined ? {} : { size: check.size }),
       });
     });

@@ -2,6 +2,7 @@ import { StreamFrameSchema, type BoardFrame, type BoardState, type SpawnPreset }
 import type { RecapSource, RecapStatus, RegistryStatus, SessionRow, StatuslineData } from "@shared/schema";
 import { useState, useEffect, useCallback, useMemo, type JSX } from "react";
 
+import { FinishedKeysContext } from "./components/AttentionMarks";
 import { Board as BoardView } from "./components/Board";
 import { BoardSettingsModal } from "./components/BoardSettingsModal";
 import { BoardSwitcher } from "./components/BoardSwitcher";
@@ -11,7 +12,9 @@ import { SideRail } from "./components/SideRail";
 import { UnassignedView } from "./components/UnassignedView";
 import { UsageFooter } from "./components/UsageFooter";
 import { api } from "./lib/api";
-import { attentionCountsByBoard, unassignedAttentionCount } from "./lib/attention";
+import {
+  attentionCountsByBoard, countStates, documentTitle, finishedKeys, unassignedAttentionCount,
+} from "./lib/attention";
 import { pickBoardState, pickGlobalState } from "./lib/board-precedence";
 import { envLabel } from "./lib/env";
 import { applyOptimisticState, type OptimisticState } from "./lib/optimistic";
@@ -138,7 +141,8 @@ export function App(): JSX.Element {
   // Memoized so the derived-attention useMemos below get a stable dependency (the `?? {}` fallback
   // would otherwise mint a new object every render).
   const attention = useMemo(() => globalState?.attention ?? {}, [globalState]);
-  const attentionCount = Object.keys(attention).length;
+  const blockedCount = useMemo(() => countStates(Object.values(attention)).blocked, [attention]);
+  const finished = useMemo(() => finishedKeys(attention), [attention]);
   const accounts = useMemo(() => (globalState !== null && "accounts" in globalState ? globalState.accounts : []), [globalState]);
   // Recap/statusline lookup for the live-terminal header's second line, keyed by `env:paneId` — covers
   // both unassigned rows and every task's enriched session link (`live` is null for a detached link).
@@ -177,11 +181,10 @@ export function App(): JSX.Element {
   const attentionCounts = useMemo(() => attentionCountsByBoard(attention, boards), [attention, boards]);
   const unassignedAttnCount = useMemo(() => unassignedAttentionCount(attention, boards), [attention, boards]);
 
-  // Tab title carries the GLOBAL count (all boards + unassigned) so a blocked/finished session is
-  // visible from any board even when the app isn't focused — the one intentionally-global signal.
+  // Tab title uses the GLOBAL blocked count (not the active board's) so it pages from any board; finished sessions don't page.
   useEffect(() => {
-    document.title = attentionCount > 0 ? `(${String(attentionCount)}) corral` : "corral";
-  }, [attentionCount]);
+    document.title = documentTitle(blockedCount);
+  }, [blockedCount]);
 
   async function handleNewBoard(): Promise<void> {
     const label = window.prompt("Board name:");
@@ -263,131 +266,133 @@ export function App(): JSX.Element {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background text-foreground">
-      <BoardSwitcher
-        boards={boards}
-        activeBoardId={activeBoardId}
-        unassignedCount={globalState?.unassigned.length ?? 0}
-        attentionCounts={attentionCounts}
-        unassignedAttentionCount={unassignedAttnCount}
-        showingUnassigned={showUnassigned}
-        onSelect={(id) => { setActiveBoardId(id); setShowUnassigned(false); }}
-        onUnassigned={() => { setShowUnassigned(true); }}
-        onNewBoard={() => { void handleNewBoard(); }}
-      />
+    <FinishedKeysContext.Provider value={finished}>
+      <div className="h-screen flex flex-col bg-background text-foreground">
+        <BoardSwitcher
+          boards={boards}
+          activeBoardId={activeBoardId}
+          unassignedCount={globalState?.unassigned.length ?? 0}
+          attentionCounts={attentionCounts}
+          unassignedAttentionCount={unassignedAttnCount}
+          showingUnassigned={showUnassigned}
+          onSelect={(id) => { setActiveBoardId(id); setShowUnassigned(false); }}
+          onUnassigned={() => { setShowUnassigned(true); }}
+          onNewBoard={() => { void handleNewBoard(); }}
+        />
 
-      <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0 bg-grid">
-          {showUnassigned ? (
-            <UnassignedView
-              sessions={globalState?.unassigned ?? []}
-              boards={boards}
-              envs={globalState?.envs ?? {}}
-              onOpen={openSession}
-              onCreateTask={(bid, title, session, name) => { void handleCreateTask(bid, title, session, name); }}
-              onAssignTask={(bid, tid, session) => { void handleAssignTask(bid, tid, session); }}
-            />
-          ) : boardStateForView !== null ? (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex items-center px-4 pt-3 pb-1 gap-2">
-                <h1 className="text-foreground font-semibold">{boardStateForView.board.label}</h1>
-                <button
-                  onClick={() => { setShowSettings(true); }}
-                  className="text-muted-foreground hover:text-foreground text-sm ml-1"
-                  title="Board settings"
-                >⚙</button>
-                <button
-                  onClick={() => { setNewTaskOpen(true); }}
-                  className="ml-auto px-3 py-1 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90"
-                >+ New task</button>
-              </div>
-              <BoardView
-                boardState={boardStateForView}
+        <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 flex flex-col overflow-hidden min-w-0 bg-grid">
+            {showUnassigned ? (
+              <UnassignedView
+                sessions={globalState?.unassigned ?? []}
                 boards={boards}
-                onBoardStateChange={refreshBoards}
-                onOpenSession={openSession}
-                onMarkOptimistic={markOptimistic}
-                onClearOptimistic={clearOptimistic}
-                pendingFixIssues={fixIssuesRequest}
-                onFixIssuesConsumed={consumeFixIssuesRequest}
+                envs={globalState?.envs ?? {}}
+                onOpen={openSession}
+                onCreateTask={(bid, title, session, name) => { void handleCreateTask(bid, title, session, name); }}
+                onAssignTask={(bid, tid, session) => { void handleAssignTask(bid, tid, session); }}
               />
-            </div>
-          ) : boardsError !== null ? (
-            <div className="flex-1 flex flex-col items-center justify-center gap-3">
-              <div className="text-red-500 text-sm">Failed to load boards: {boardsError}</div>
-              <button
-                onClick={() => { loadBoards(); }}
-                className="px-3 py-1 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90"
-              >Retry</button>
-            </div>
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-muted-foreground">
-              {boardsLoaded ? "Select a board" : "Loading…"}
-            </div>
-          )}
+            ) : boardStateForView !== null ? (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex items-center px-4 pt-3 pb-1 gap-2">
+                  <h1 className="text-foreground font-semibold">{boardStateForView.board.label}</h1>
+                  <button
+                    onClick={() => { setShowSettings(true); }}
+                    className="text-muted-foreground hover:text-foreground text-sm ml-1"
+                    title="Board settings"
+                  >⚙</button>
+                  <button
+                    onClick={() => { setNewTaskOpen(true); }}
+                    className="ml-auto px-3 py-1 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90"
+                  >+ New task</button>
+                </div>
+                <BoardView
+                  boardState={boardStateForView}
+                  boards={boards}
+                  onBoardStateChange={refreshBoards}
+                  onOpenSession={openSession}
+                  onMarkOptimistic={markOptimistic}
+                  onClearOptimistic={clearOptimistic}
+                  pendingFixIssues={fixIssuesRequest}
+                  onFixIssuesConsumed={consumeFixIssuesRequest}
+                />
+              </div>
+            ) : boardsError !== null ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-3">
+                <div className="text-red-500 text-sm">Failed to load boards: {boardsError}</div>
+                <button
+                  onClick={() => { loadBoards(); }}
+                  className="px-3 py-1 bg-primary text-primary-foreground text-sm rounded hover:bg-primary/90"
+                >Retry</button>
+              </div>
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-muted-foreground">
+                {boardsLoaded ? "Select a board" : "Loading…"}
+              </div>
+            )}
+          </div>
+
+          {/* Unconditional: 🛟 must be reachable on the Unassigned view, before any board is selected, and
+              on the "Failed to load boards" screen — the moment diagnostics matter most. 🔔 is board-scoped
+              and hides itself; unassigned attention surfaces through the switcher badge by design. */}
+          <SideRail
+            diagnostics={globalState?.diagnostics ?? null}
+            streamDown={streamDown}
+            attention={attention}
+            boards={boards}
+            envs={globalState?.envs ?? {}}
+            activeBoardId={activeBoardId}
+            showUnassigned={showUnassigned}
+            onOpen={openSession}
+            onFixIssues={setFixIssuesRequest}
+          />
         </div>
 
-        {/* Unconditional: 🛟 must be reachable on the Unassigned view, before any board is selected, and
-            on the "Failed to load boards" screen — the moment diagnostics matter most. 🔔 is board-scoped
-            and hides itself; unassigned attention surfaces through the switcher badge by design. */}
-        <SideRail
-          diagnostics={globalState?.diagnostics ?? null}
-          streamDown={streamDown}
-          attention={attention}
-          boards={boards}
-          envs={globalState?.envs ?? {}}
-          activeBoardId={activeBoardId}
-          showUnassigned={showUnassigned}
-          onOpen={openSession}
-          onFixIssues={setFixIssuesRequest}
-        />
+        {showSettings && activeBoardId !== null && activeBoardState !== null && (
+          <BoardSettingsModal
+            board={activeBoardState.board}
+            onSave={(patch) => api.boards.update(activeBoardId, patch).then(() => { refreshBoards(); })}
+            onDelete={() => handleDeleteBoard(activeBoardId)}
+            onClose={() => { setShowSettings(false); }}
+          />
+        )}
+
+        {session !== null && (
+          <SessionModal
+            key={`${session.env}:${session.paneId}`}
+            env={session.env}
+            envLabel={envLabel(globalState?.envs ?? {}, session.env)}
+            paneId={session.paneId}
+            awaitAgent={session.awaitAgent}
+            title={session.title}
+            workspace={liveByKey.get(`${session.env}:${session.paneId}`)?.workspace ?? ""}
+            recap={liveByKey.get(`${session.env}:${session.paneId}`)?.recap ?? null}
+            recapStatus={liveByKey.get(`${session.env}:${session.paneId}`)?.recapStatus ?? null}
+            recapSource={liveByKey.get(`${session.env}:${session.paneId}`)?.recapSource ?? null}
+            statusline={liveByKey.get(`${session.env}:${session.paneId}`)?.statusline ?? null}
+            claudeName={liveByKey.get(`${session.env}:${session.paneId}`)?.claudeName ?? null}
+            status={liveByKey.get(`${session.env}:${session.paneId}`)?.status ?? "unknown"}
+            claudeStatus={liveByKey.get(`${session.env}:${session.paneId}`)?.claudeStatus ?? null}
+            waitingFor={liveByKey.get(`${session.env}:${session.paneId}`)?.waitingFor ?? null}
+            remoteControl={liveByKey.get(`${session.env}:${session.paneId}`)?.remoteControl ?? null}
+            registryStatus={liveByKey.get(`${session.env}:${session.paneId}`)?.registryStatus ?? null}
+            canAttachFiles={globalState?.envs[session.env] !== undefined}
+            onClose={closeSession}
+          />
+        )}
+
+        {newTaskOpen && activeBoardId !== null && (
+          <CreateTaskModal
+            boards={boards}
+            defaultTitle=""
+            heading="New task"
+            defaultBoardId={activeBoardId}
+            onConfirm={(bid, title) => { void handleNewTask(bid, title); }}
+            onClose={() => { setNewTaskOpen(false); }}
+          />
+        )}
+
+        <UsageFooter accounts={accounts} />
       </div>
-
-      {showSettings && activeBoardId !== null && activeBoardState !== null && (
-        <BoardSettingsModal
-          board={activeBoardState.board}
-          onSave={(patch) => api.boards.update(activeBoardId, patch).then(() => { refreshBoards(); })}
-          onDelete={() => handleDeleteBoard(activeBoardId)}
-          onClose={() => { setShowSettings(false); }}
-        />
-      )}
-
-      {session !== null && (
-        <SessionModal
-          key={`${session.env}:${session.paneId}`}
-          env={session.env}
-          envLabel={envLabel(globalState?.envs ?? {}, session.env)}
-          paneId={session.paneId}
-          awaitAgent={session.awaitAgent}
-          title={session.title}
-          workspace={liveByKey.get(`${session.env}:${session.paneId}`)?.workspace ?? ""}
-          recap={liveByKey.get(`${session.env}:${session.paneId}`)?.recap ?? null}
-          recapStatus={liveByKey.get(`${session.env}:${session.paneId}`)?.recapStatus ?? null}
-          recapSource={liveByKey.get(`${session.env}:${session.paneId}`)?.recapSource ?? null}
-          statusline={liveByKey.get(`${session.env}:${session.paneId}`)?.statusline ?? null}
-          claudeName={liveByKey.get(`${session.env}:${session.paneId}`)?.claudeName ?? null}
-          status={liveByKey.get(`${session.env}:${session.paneId}`)?.status ?? "unknown"}
-          claudeStatus={liveByKey.get(`${session.env}:${session.paneId}`)?.claudeStatus ?? null}
-          waitingFor={liveByKey.get(`${session.env}:${session.paneId}`)?.waitingFor ?? null}
-          remoteControl={liveByKey.get(`${session.env}:${session.paneId}`)?.remoteControl ?? null}
-          registryStatus={liveByKey.get(`${session.env}:${session.paneId}`)?.registryStatus ?? null}
-          canAttachFiles={globalState?.envs[session.env] !== undefined}
-          onClose={closeSession}
-        />
-      )}
-
-      {newTaskOpen && activeBoardId !== null && (
-        <CreateTaskModal
-          boards={boards}
-          defaultTitle=""
-          heading="New task"
-          defaultBoardId={activeBoardId}
-          onConfirm={(bid, title) => { void handleNewTask(bid, title); }}
-          onClose={() => { setNewTaskOpen(false); }}
-        />
-      )}
-
-      <UsageFooter accounts={accounts} />
-    </div>
+    </FinishedKeysContext.Provider>
   );
 }

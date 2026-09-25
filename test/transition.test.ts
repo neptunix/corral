@@ -54,4 +54,18 @@ describe("detectTransitions", () => {
     expect(r.clearedKeys).toEqual([key("1")]);
     expect(key("1") in r.working).toBe(false);
   });
+  it("idle and done rows report clearedBlocked every poll (state-based, restart-safe)", () => {
+    const r = detectTransitions([], [row("1", "idle"), row("2", "done"), row("3", "blocked")], {}, 1000, MIN);
+    expect(r.clearedBlocked).toEqual([key("1"), key("2")]);
+  });
+  it("unknown status does not clear blocked", () => {
+    const r = detectTransitions([row("1", "blocked")], [row("1", "unknown")], {}, 1000, MIN);
+    expect(r.clearedBlocked).toEqual([]);
+    expect(r.clearedKeys).toEqual([]);
+  });
+  it("idle/done never clear a finished record (only clearedKeys clears any state)", () => {
+    const r = detectTransitions([row("1", "done")], [row("1", "idle")], {}, 1000, MIN);
+    expect(r.clearedKeys).toEqual([]);
+    expect(r.clearedBlocked).toEqual([key("1")]); // the store keeps finished — see Task 2 "clearedBlocked … keeps a finished one"
+  });
 });

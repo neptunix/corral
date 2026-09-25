@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
+import type { Board, SessionLink, Task } from "@shared/board-schema";
 import type { Check, DiagnosticsSnapshot } from "@shared/diagnostics-schema";
 import { emptyDiagnostics } from "@shared/diagnostics-schema";
+import type { AttentionMap } from "@shared/schema";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { JSX } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -91,6 +93,25 @@ describe("SideRail", () => {
     fireEvent.click(bell());
     expect(bell().getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByRole("button", { name: /System health/ }).getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("names both blocked and finished counts on the bell", () => {
+    function link(paneId: string): SessionLink {
+      return { env: "e1", paneId, tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "", cwdSnapshot: "", sessionId: null };
+    }
+    function task(id: string, sessions: readonly SessionLink[]): Task {
+      return { id, title: id, description: "", status: "todo", priority: null, sessions: [...sessions], createdAt: 0, updatedAt: 0, log: [] };
+    }
+    const boards: readonly Board[] = [
+      { id: "b1", label: "b1", columns: [], tasks: [task("t1", [link("p1"), link("p2"), link("p3")])], spawnPresets: [], defaultSpawnPresetId: null },
+    ];
+    const attention: AttentionMap = {
+      "e1:p1": { state: "blocked", since: 1, sessionName: null, lastLines: "", captured: false },
+      "e1:p2": { state: "finished", since: 1, sessionName: null, lastLines: "", captured: false },
+      "e1:p3": { state: "finished", since: 2, sessionName: null, lastLines: "", captured: false },
+    };
+    render(rail({ boards, attention }));
+    expect(screen.getByRole("button", { name: "Sessions needing attention: 1 blocked, 2 finished" })).toBeTruthy();
   });
 
   it("hides the bell off a board but keeps health reachable", () => {

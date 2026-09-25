@@ -1,9 +1,12 @@
 import type { AttentionMap, SessionRow, Snapshot, StatuslineData } from "@shared/schema";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it, expect, vi } from "vitest";
 
 import { CLAUDE_REGISTRY_POLL_MS } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
-import type { AttentionStore } from "../server/attention-store.ts";
+import { createAttentionStore, type AttentionStore } from "../server/attention-store.ts";
 import { createPoller, recordsEqual, type ListFn, type RecapFn, type StatuslineFn } from "../server/poller.ts";
 import { RegistryRecordSchema, type RegistryRead, type RegistryRecord } from "../server/session-registry.ts";
 
@@ -390,7 +393,7 @@ const NOOP_MAP: AttentionMap = {};
 describe("createPoller — attention detection", () => {
   it("runs detectTransitions and feeds the store a blocked event on the transition tick", async () => {
     const applied: { events: number; cleared: number }[] = [];
-    const store: AttentionStore = { init: noop, pruneEnv: noop, getMap: () => NOOP_MAP, apply: (_e, ev, cl) => { applied.push({ events: ev.length, cleared: cl.length }); } };
+    const store: AttentionStore = { init: noop, pruneEnv: noop, getMap: () => NOOP_MAP, clearFinished: () => false, apply: (_e, ev, cl, _cb) => { applied.push({ events: ev.length, cleared: cl.length }); } };
     let call = 0;
     const list: ListFn = () => Promise.resolve([mkRow(call++ === 0 ? "working" : "blocked")]);
     const poller = createPoller({ envs: [E], list, minWorkMs: 600_000, attention: store });
@@ -401,7 +404,7 @@ describe("createPoller — attention detection", () => {
 
   it("skips detection on a failed tick (unreachable env untouched)", async () => {
     const applied: number[] = [];
-    const store: AttentionStore = { init: noop, pruneEnv: noop, getMap: () => NOOP_MAP, apply: () => { applied.push(1); } };
+    const store: AttentionStore = { init: noop, pruneEnv: noop, getMap: () => NOOP_MAP, clearFinished: () => false, apply: () => { applied.push(1); } };
     const list: ListFn = () => { throw new Error("unreachable"); };
     const poller = createPoller({ envs: [E], list, attention: store });
     await poller.pollOnce();
@@ -410,12 +413,25 @@ describe("createPoller — attention detection", () => {
 
   it("prunes an env only on its first successful tick", async () => {
     const prunes: number[] = [];
-    const store: AttentionStore = { init: noop, getMap: () => NOOP_MAP, apply: noop, pruneEnv: () => { prunes.push(1); } };
+    const store: AttentionStore = { init: noop, getMap: () => NOOP_MAP, clearFinished: () => false, apply: noop, pruneEnv: () => { prunes.push(1); } };
     const list: ListFn = () => Promise.resolve([]);
     const poller = createPoller({ envs: [E], list, attention: store });
     await poller.pollOnce();
     await poller.pollOnce();
     expect(prunes).toEqual([1]); // once, not per tick
+  });
+
+  it("a persisted blocked record clears on the first poll after restart, pane now idle", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "poller-att-"));
+    writeFileSync(path.join(dir, "attention.json"), JSON.stringify({
+      "e1:p": { state: "blocked", since: 1, sessionName: null, lastLines: "", captured: false },
+    }));
+    const store = createAttentionStore({ dataDir: dir, read: vi.fn().mockResolvedValue({ text: "", ctxPct: null, model: null, sessionName: null }) });
+    store.init();
+    const list: ListFn = () => Promise.resolve([mkRow("idle")]);
+    const poller = createPoller({ envs: [E], list, attention: store });
+    await poller.pollOnce();
+    expect(store.getMap()["e1:p"]).toBeUndefined();
   });
 });
 

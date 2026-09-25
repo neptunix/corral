@@ -3,7 +3,8 @@ import type { AttentionMap, AttentionRecord, AttentionState } from "@shared/sche
 import { describe, expect, it } from "vitest";
 
 import {
-  attentionCountsByBoard, boardAttention, buildMembershipIndex, unassignedAttentionCount,
+  attentionCountsByBoard, boardAttention, buildMembershipIndex, countStates, documentTitle,
+  finishedKeys, unassignedAttentionCount,
 } from "../web/src/lib/attention.ts";
 
 // Pins the client-side per-board attention attribution (SessionModal design 2026-07-10): the panel and
@@ -43,17 +44,35 @@ describe("buildMembershipIndex", () => {
 });
 
 describe("attentionCountsByBoard", () => {
-  it("tallies bound attention records per board and excludes unassigned ones", () => {
+  it("tallies bound attention records per board, split by state, excluding unassigned ones", () => {
     const attention: AttentionMap = {
       "e:p1": rec("blocked", 3), "e:p2": rec("finished", 2), // both board A
       "e:p3": rec("blocked", 1),                              // board B
       "e:p9": rec("blocked", 4),                              // unassigned — excluded
     };
     const counts = attentionCountsByBoard(attention, boards);
-    expect(counts.get("A")).toBe(2);
-    expect(counts.get("B")).toBe(1);
+    expect(counts.get("A")).toEqual({ blocked: 1, finished: 1 });
+    expect(counts.get("B")).toEqual({ blocked: 1, finished: 0 });
     expect(counts.has("e:p9")).toBe(false);
-    expect([...counts.values()].reduce((a, b) => a + b, 0)).toBe(3); // unassigned not counted anywhere
+  });
+});
+
+describe("finishedKeys", () => {
+  it("holds only finished records' keys", () => {
+    expect([...finishedKeys({ "e:p1": rec("finished", 1), "e:p2": rec("blocked", 1) })]).toEqual(["e:p1"]);
+  });
+});
+
+describe("countStates", () => {
+  it("counts each state", () => {
+    expect(countStates([rec("blocked", 1), rec("finished", 1), rec("finished", 2)])).toEqual({ blocked: 1, finished: 2 });
+  });
+});
+
+describe("documentTitle", () => {
+  it("shows the plain app name at zero and a count prefix otherwise", () => {
+    expect(documentTitle(0)).toBe("corral");
+    expect(documentTitle(1)).toBe("(1) corral");
   });
 });
 
@@ -82,16 +101,16 @@ describe("boardAttention", () => {
 });
 
 describe("unassignedAttentionCount", () => {
-  it("counts only records whose session is bound to no board", () => {
+  it("counts only records whose session is bound to no board, split by state", () => {
     const attention: AttentionMap = {
-      "e:p1": rec("blocked", 1), // bound (A)
+      "e:p1": rec("blocked", 1), // bound (A) — excluded
       "e:p9": rec("blocked", 2), // unassigned
-      "e:p8": rec("finished", 3), // unassigned
+      "e:p8": rec("blocked", 3), // unassigned
     };
-    expect(unassignedAttentionCount(attention, boards)).toBe(2);
+    expect(unassignedAttentionCount(attention, boards)).toEqual({ blocked: 2, finished: 0 });
   });
 
   it("is zero when every attention record is bound", () => {
-    expect(unassignedAttentionCount({ "e:p1": rec("blocked", 1) }, boards)).toBe(0);
+    expect(unassignedAttentionCount({ "e:p1": rec("blocked", 1) }, boards)).toEqual({ blocked: 0, finished: 0 });
   });
 });

@@ -5,8 +5,9 @@ import type { AttentionMap, EnvState } from "@shared/schema";
 import { useEffect, useRef, useState, type JSX } from "react";
 
 import { AttentionFeed } from "./AttentionFeed";
+import { AttentionBadges } from "./AttentionMarks";
 import { HealthPanel } from "./HealthPanel";
-import { boardAttention } from "../lib/attention";
+import { boardAttention, countStates } from "../lib/attention";
 import { badgeCount, buildFixPreset, pickSnapshot, renderedChecks } from "../lib/diagnostics-view";
 import { envLabel } from "../lib/env";
 
@@ -69,6 +70,7 @@ export function SideRail({
   // itself outside one rather than opening onto nothing (see 🔔's own boardScoped gate, same reason).
   const fixBuilt = boardScoped ? buildFixPreset(rows, labelFor) : null;
   const entries = boardScoped ? boardAttention(attention, boards, activeBoardId) : [];
+  const counts = countStates(entries.map((e) => e.record));
   // Pure derivation, not an effect: no render may contain a panel scoped to a board that is not shown.
   const shown: Open = open === "attention" && !boardScoped ? "none" : open;
 
@@ -104,15 +106,13 @@ export function SideRail({
           <button type="button" onClick={() => { toggle("attention"); }}
                   aria-expanded={shown === "attention"} aria-controls="attention-panel"
                   className="relative flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground aria-expanded:text-foreground before:content-[''] before:absolute before:-left-2 before:top-1/2 before:-translate-y-1/2 before:w-0.5 before:h-[18px] before:rounded-full aria-expanded:before:bg-primary"
-                  aria-label={entries.length > 0
-                    ? `Sessions needing attention: ${String(entries.length)}`
+                  aria-label={counts.blocked + counts.finished > 0
+                    ? `Sessions needing attention: ${String(counts.blocked)} blocked, ${String(counts.finished)} finished`
                     : "Sessions needing attention: none"}>
             <span className="text-lg" aria-hidden>🔔</span>
-            {entries.length > 0 && (
-              <span aria-hidden className="absolute -top-1 -right-2 min-w-4 px-1 h-4 rounded-full bg-destructive text-destructive-foreground text-[10px] leading-4 text-center">
-                {entries.length}
-              </span>
-            )}
+            <span aria-hidden className="absolute -top-1 -right-2 flex gap-0.5">
+              <AttentionBadges counts={counts} scope="" />
+            </span>
           </button>
         )}
         <button type="button" onClick={() => { toggle("health"); }}

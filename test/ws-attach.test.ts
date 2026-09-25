@@ -408,6 +408,47 @@ describe("attachFailureReason", () => {
   });
 });
 
+describe("onViewed", () => {
+  it("reports the pane as viewed when a healthy attach closes", async () => {
+    let t = 0;
+    const viewed: string[] = [];
+    const h = await start({ now: () => t, onViewed: (_e, p) => { viewed.push(p); } });
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
+    await once(client, "open");
+    t = 60_000;
+    client.close();
+    await waitFor(() => viewed.length === 1);
+    expect(viewed).toEqual(["w1-1"]);
+  });
+
+  it("does not report viewed when the attach dies inside the probe grace", async () => {
+    const viewed: string[] = [];
+    const h = await start({ now: () => 0, onViewed: (_e, p) => { viewed.push(p); } });
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
+    await once(client, "open");
+    await waitFor(() => h.ptys.length === 1);
+    h.ptys[0]?.emitExit();
+    await once(client, "close");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(viewed).toEqual([]);
+  });
+
+  it("does not report viewed when the probe-window death's ws close completes after the grace elapses", async () => {
+    // Elapsed-time-only gating would count this viewed: close fires once t has passed the grace.
+    let t = 0;
+    const viewed: string[] = [];
+    const h = await start({ now: () => t, onViewed: (_e, p) => { viewed.push(p); } });
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
+    await once(client, "open");
+    await waitFor(() => h.ptys.length === 1);
+    h.ptys[0]?.emitExit(); // t=0, well within WS_PROBE_GRACE_MS
+    t = 60_000; // advance before the async close handshake completes, as if it ran late
+    await once(client, "close");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(viewed).toEqual([]);
+  });
+});
+
 // Placed last, deliberately: this block records into viewport memory, and the empty-memory
 // assertions earlier in the file depend on running before that happens.
 describe("viewport wiring: the attach's resize frame reaches recordViewport", () => {
