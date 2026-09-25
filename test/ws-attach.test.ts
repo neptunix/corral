@@ -434,8 +434,7 @@ describe("onViewed", () => {
   });
 
   it("does not report viewed when the probe-window death's ws close completes after the grace elapses", async () => {
-    // Elapsed-time-only gating would count this as viewed: the WS close callback runs once t has
-    // already passed the grace, even though the pty died inside it.
+    // Elapsed-time-only gating would count this viewed: close fires once t has passed the grace.
     let t = 0;
     const viewed: string[] = [];
     const h = await start({ now: () => t, onViewed: (_e, p) => { viewed.push(p); } });
