@@ -12,8 +12,14 @@ const SNAPSHOT_LINES = 60; // module const, colocated with its call site (§3.2)
 export interface AttentionStore {
   init(): void;
   getMap(): AttentionMap;
-  apply(env: HerdrEnv, events: readonly TransitionEvent[], clearedKeys: readonly string[]): void;
+  apply(
+    env: HerdrEnv,
+    events: readonly TransitionEvent[],
+    clearedKeys: readonly string[],
+    clearedBlocked: readonly string[],
+  ): void;
   pruneEnv(env: HerdrEnv, liveKeys: ReadonlySet<string>): void;
+  clearFinished(key: string): boolean;
 }
 
 function frozenName(row: TransitionEvent["row"]): string | null {
@@ -37,6 +43,12 @@ export function createAttentionStore(opts: { dataDir: string; read: ReadFn }): A
     const out: AttentionMap = {};
     for (const [k, v] of map) out[k] = v;
     return out;
+  }
+
+  function remove(key: string): boolean {
+    if (!map.delete(key)) return false;
+    bump(key);
+    return true;
   }
 
   function persist(): void {
@@ -76,9 +88,10 @@ export function createAttentionStore(opts: { dataDir: string; read: ReadFn }): A
       } catch { /* corrupt file → start empty */ }
     },
     getMap: toObject,
-    apply(env, events, clearedKeys) {
-      if (events.length === 0 && clearedKeys.length === 0) return; // no change — don't rewrite attention.json every poll
-      for (const key of clearedKeys) { map.delete(key); bump(key); }
+    apply(env, events, clearedKeys, clearedBlocked) {
+      let changed = false;
+      for (const key of clearedKeys) changed = remove(key) || changed;
+      for (const key of clearedBlocked) if (map.get(key)?.state === "blocked") changed = remove(key) || changed;
       for (const event of events) {
         const record: AttentionRecord = {
           state: event.state, since: event.since, sessionName: frozenName(event.row), lastLines: "", captured: false,
@@ -86,15 +99,23 @@ export function createAttentionStore(opts: { dataDir: string; read: ReadFn }): A
         map.set(event.key, record);
         const v = bump(event.key);
         void enrich(env, event, v);
+        changed = true;
       }
-      persist();
+      if (changed) persist();
     },
     pruneEnv(env, liveKeys) {
       const prefix = `${env.id}:`;
+      let changed = false;
       for (const key of [...map.keys()]) {
-        if (key.startsWith(prefix) && !liveKeys.has(key)) { map.delete(key); bump(key); }
+        if (key.startsWith(prefix) && !liveKeys.has(key)) changed = remove(key) || changed;
       }
+      if (changed) persist();
+    },
+    clearFinished(key) {
+      if (map.get(key)?.state !== "finished") return false;
+      remove(key);
       persist();
+      return true;
     },
   };
 }

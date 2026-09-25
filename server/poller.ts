@@ -225,9 +225,9 @@ export function createPoller(opts: {
       envStates[env.id] = { reachable: true, kind: env.kind, label: env.label };
       if (attention !== undefined) {
         const now = Date.now();
-        const { events, working: nextWorking, clearedKeys } = detectTransitions(prev, curr, working, now, minWorkMs);
+        const { events, working: nextWorking, clearedKeys, clearedBlocked } = detectTransitions(prev, curr, working, now, minWorkMs);
         working = nextWorking;
-        attention.apply(env, events, clearedKeys); // sync insert/delete before rebuild+push
+        attention.apply(env, events, clearedKeys, clearedBlocked); // sync insert/delete before rebuild+push
         if (!polledEnvs.has(env.id)) {
           polledEnvs.add(env.id);
           attention.pruneEnv(env, new Set(curr.map((r) => `${env.id}:${r.paneId}`)));

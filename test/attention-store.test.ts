@@ -21,7 +21,7 @@ describe("attention-store", () => {
   it("inserts synchronously with frozen SessionRow name, captured:false, then enriches", async () => {
     const read = vi.fn().mockResolvedValue({ text: "tail-out", ctxPct: null, model: null, sessionName: "IGNORED" });
     const s = createAttentionStore({ dataDir: mkdir(), read });
-    s.apply(env, [ev("1", "blocked")], []);
+    s.apply(env, [ev("1", "blocked")], [], []);
     expect(s.getMap()["e:1"]).toMatchObject({ state: "blocked", sessionName: "fs-1", lastLines: "", captured: false });
     await flush();
     expect(s.getMap()["e:1"]).toMatchObject({ lastLines: "tail-out", captured: true });
@@ -31,8 +31,8 @@ describe("attention-store", () => {
     let resolveRead!: (v: unknown) => void;
     const read = vi.fn().mockReturnValue(new Promise((r) => { resolveRead = r; }));
     const s = createAttentionStore({ dataDir: mkdir(), read });
-    s.apply(env, [ev("1", "finished")], []);   // insert, enrichment pending
-    s.apply(env, [], ["e:1"]);                  // cleared before the read resolves
+    s.apply(env, [ev("1", "finished")], [], []);   // insert, enrichment pending
+    s.apply(env, [], ["e:1"], []);                  // cleared before the read resolves
     expect(s.getMap()["e:1"]).toBeUndefined();
     resolveRead({ text: "late", ctxPct: null, model: null, sessionName: null });
     await flush();
@@ -45,9 +45,9 @@ describe("attention-store", () => {
     const resolvers: ((v: PaneRead) => void)[] = [];
     const read = vi.fn().mockImplementation(() => new Promise<PaneRead>((r) => { resolvers.push(r); }));
     const s = createAttentionStore({ dataDir: mkdir(), read });
-    s.apply(env, [ev("1", "finished")], []);   // record v1, enrichment #0 pending
-    s.apply(env, [], ["e:1"]);                  // clear (version bumps)
-    s.apply(env, [ev("1", "blocked")], []);     // record v3, enrichment #1 pending
+    s.apply(env, [ev("1", "finished")], [], []);   // record v1, enrichment #0 pending
+    s.apply(env, [], ["e:1"], []);                  // clear (version bumps)
+    s.apply(env, [ev("1", "blocked")], [], []);     // record v3, enrichment #1 pending
     resolvers[1]?.({ text: "fresh", ctxPct: null, model: null, sessionName: null }); // newest resolves first
     await flush();
     expect(s.getMap()["e:1"]).toMatchObject({ state: "blocked", lastLines: "fresh", captured: true });
@@ -59,7 +59,7 @@ describe("attention-store", () => {
   it("captured:false stays on read failure", async () => {
     const read = vi.fn().mockRejectedValue(new Error("boom"));
     const s = createAttentionStore({ dataDir: mkdir(), read });
-    s.apply(env, [ev("1", "blocked")], []);
+    s.apply(env, [ev("1", "blocked")], [], []);
     await flush();
     expect(s.getMap()["e:1"]).toMatchObject({ captured: false, lastLines: "" });
   });
@@ -69,7 +69,7 @@ describe("attention-store", () => {
       .mockRejectedValueOnce(new Error("slow"))
       .mockResolvedValueOnce({ text: "second", ctxPct: null, model: null, sessionName: null });
     const s = createAttentionStore({ dataDir: mkdir(), read });
-    s.apply(env, [ev("1", "finished")], []);
+    s.apply(env, [ev("1", "finished")], [], []);
     await flush();
     expect(read).toHaveBeenCalledTimes(2);
     expect(s.getMap()["e:1"]).toMatchObject({ captured: true, lastLines: "second" });
@@ -79,7 +79,7 @@ describe("attention-store", () => {
     const dir = mkdir();
     const read = vi.fn().mockResolvedValue({ text: "x", ctxPct: null, model: null, sessionName: null });
     const s1 = createAttentionStore({ dataDir: dir, read });
-    s1.apply(env, [ev("1", "blocked")], []);
+    s1.apply(env, [ev("1", "blocked")], [], []);
     await flush();
     expect(existsSync(path.join(dir, "attention.json"))).toBe(true);
     const s2 = createAttentionStore({ dataDir: dir, read });
@@ -93,7 +93,7 @@ describe("attention-store", () => {
     const dir = mkdir();
     const read = vi.fn().mockResolvedValue({ text: "x", ctxPct: null, model: null, sessionName: null });
     const s = createAttentionStore({ dataDir: dir, read });
-    s.apply(env, [], []);
+    s.apply(env, [], [], []);
     await flush();
     expect(existsSync(path.join(dir, "attention.json"))).toBe(false);
   });
@@ -119,10 +119,36 @@ describe("attention-store", () => {
   it("pruneEnv drops this env's orphans but keeps another env's records", () => {
     const read = vi.fn().mockResolvedValue({ text: "x", ctxPct: null, model: null, sessionName: null });
     const s = createAttentionStore({ dataDir: mkdir(), read });
-    s.apply(env, [ev("1", "blocked")], []);
-    s.apply({ id: "other", label: "O", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} }, [{ ...ev("9", "blocked"), key: "other:9" }], []);
+    s.apply(env, [ev("1", "blocked")], [], []);
+    s.apply({ id: "other", label: "O", kind: "local", claudeConfigDirs: [], spawnCommand: "claude", repos: {} }, [{ ...ev("9", "blocked"), key: "other:9" }], [], []);
     s.pruneEnv(env, new Set<string>()); // e:1 has no live key → prune; other:9 untouched
     expect(s.getMap()["e:1"]).toBeUndefined();
     expect(s.getMap()["other:9"]).toBeDefined();
+  });
+
+  it("clearedBlocked removes a blocked record but keeps a finished one", () => {
+    const s = createAttentionStore({ dataDir: mkdir(), read: vi.fn().mockResolvedValue({ text: "", ctxPct: null, model: null, sessionName: null }) });
+    s.apply(env, [ev("1", "blocked"), ev("2", "finished")], [], []);
+    s.apply(env, [], [], ["e:1", "e:2"]);
+    expect(s.getMap()["e:1"]).toBeUndefined();
+    expect(s.getMap()["e:2"]).toMatchObject({ state: "finished" });
+  });
+
+  it("clears of absent keys do not touch attention.json", async () => {
+    const dir = mkdir();
+    const s = createAttentionStore({ dataDir: dir, read: vi.fn() });
+    s.apply(env, [], ["e:x"], ["e:y"]);
+    s.pruneEnv(env, new Set());
+    await flush();
+    expect(existsSync(path.join(dir, "attention.json"))).toBe(false);
+  });
+
+  it("clearFinished removes only a finished record", () => {
+    const s = createAttentionStore({ dataDir: mkdir(), read: vi.fn().mockResolvedValue({ text: "", ctxPct: null, model: null, sessionName: null }) });
+    s.apply(env, [ev("1", "blocked"), ev("2", "finished")], [], []);
+    expect(s.clearFinished("e:1")).toBe(false);
+    expect(s.clearFinished("e:2")).toBe(true);
+    expect(s.clearFinished("e:2")).toBe(false);
+    expect(Object.keys(s.getMap())).toEqual(["e:1"]);
   });
 });
