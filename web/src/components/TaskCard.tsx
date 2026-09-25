@@ -9,6 +9,8 @@ import { api } from "../lib/api";
 import { newSince, readLogSeen, seenKey } from "../lib/log-seen";
 import { CLOSING_STATUS, RESUMING_STATUS } from "../lib/optimistic";
 import { TONE_DOT, isLiveLink, sessionLinkKey, sessionStateLabel, sessionStateTone } from "../lib/session-state";
+import { foldable, sessionItems } from "../lib/session-tree";
+import type { SessionItem } from "../lib/session-tree";
 import { relativeTime } from "../lib/time";
 
 const PRIORITY_STYLE: Record<string, string> = {
@@ -48,6 +50,10 @@ export function TaskCard({ task, boardId, onEdit, onOpenLog, onOpenSession, onDe
     seenSessionKeys.add(key);
     return true;
   });
+  const [showClosed, setShowClosed] = useState(false);
+  const canFold = foldable(dedupedSessions);
+  const items = sessionItems(dedupedSessions, !showClosed);
+  const rowHandlers = { title: task.title, onOpenSession, onCloseSession, onResumeSession, onDetachSession };
   const handleCardClick = (): void => {
     if (primary !== undefined) onOpenSession(primary.env, primary.paneId, false, task.title);
     else onEdit();
@@ -85,22 +91,68 @@ export function TaskCard({ task, boardId, onEdit, onOpenLog, onOpenSession, onDe
       <LogBadge task={task} boardId={boardId} onOpenLog={onOpenLog} />
       {dedupedSessions.length > 0 && (
         <div className="flex flex-col gap-1 mt-2">
-          {dedupedSessions.map((s) => (
-            // Key includes sessionId: after churn-heal two links can share an enriched paneId (one
-            // live at the reused pane, one detached still pointing at it), but their sessionIds differ.
-            <SessionRow
-              key={sessionLinkKey(s)}
-              s={s}
-              title={task.title}
-              onOpenSession={onOpenSession}
-              onCloseSession={onCloseSession}
-              onResumeSession={onResumeSession}
-              onDetachSession={onDetachSession}
-            />
-          ))}
+          <SessionItems items={items} rowHandlers={rowHandlers} onExpand={() => { setShowClosed(true); }} />
+          {canFold && showClosed && (
+            <button
+              type="button"
+              onPointerDown={(e) => { e.stopPropagation(); }}
+              onClick={(e) => { e.stopPropagation(); setShowClosed(false); }}
+              className="self-start text-muted-foreground/60 hover:text-foreground text-xs leading-none px-1 py-0.5"
+              title="Hide closed sessions"
+              aria-label="Hide closed sessions"
+            >⌃</button>
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+const RING = "w-2 h-2 rounded-full shrink-0 border border-slate-500";
+const MAX_RINGS = 7;
+
+type RowHandlers = Omit<SessionRowProps, "s">;
+
+function SessionItems({ items, rowHandlers, onExpand }: {
+  readonly items: readonly SessionItem<EnrichedSessionLink>[];
+  readonly rowHandlers: RowHandlers;
+  readonly onExpand: () => void;
+}): JSX.Element {
+  return (
+    <>
+      {items.map((item) => {
+        if (item.kind === "folded") {
+          const label = `${String(item.links.length)} closed — click to show`;
+          const extra = item.links.length - MAX_RINGS;
+          return (
+            <button
+              key={`folded:${item.links.map(sessionLinkKey).join("|")}`}
+              type="button"
+              onPointerDown={(e) => { e.stopPropagation(); }}
+              onClick={(e) => { e.stopPropagation(); onExpand(); }}
+              className="self-start flex items-center gap-0.5 -mx-1 px-1 py-1 rounded hover:bg-muted"
+              title={label}
+              aria-label={label}
+            >
+              {item.links.slice(0, MAX_RINGS).map((l) => <span key={sessionLinkKey(l)} className={RING} />)}
+              {extra > 0 && <span className="ml-1 text-[10px] text-muted-foreground">+{extra}</span>}
+            </button>
+          );
+        }
+        // Key includes sessionId: after churn-heal two links can share an enriched paneId (one
+        // live at the reused pane, one detached still pointing at it), but their sessionIds differ.
+        return (
+          <div key={sessionLinkKey(item.link)} className="flex flex-col gap-1">
+            <SessionRow s={item.link} {...rowHandlers} />
+            {item.children.length > 0 && (
+              <div className="flex flex-col gap-1 ml-1 pl-2 border-l border-border">
+                <SessionItems items={item.children} rowHandlers={rowHandlers} onExpand={onExpand} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -206,11 +258,11 @@ function SessionRow({ s, title, onOpenSession, onCloseSession, onResumeSession, 
         className="flex items-center gap-1.5 flex-1 min-w-0 text-left py-0.5"
         title={pending ? (isClosing ? "Closing…" : "Resuming…") : detached ? "Session ended — click to restore" : "Open this session"}
       >
-        <span className={`w-2 h-2 rounded-full shrink-0 ${detached ? "bg-slate-600" : TONE_DOT[sessionStateTone(s.live)]}`} />
+        <span className={detached ? RING : `w-2 h-2 rounded-full shrink-0 ${TONE_DOT[sessionStateTone(s.live)]}`} />
         <span className="text-xs truncate">
           {detached ? (
             <span className="text-muted-foreground">
-              ⚠ {s.name}
+              {s.name}
               {isClosing
                 ? <span className="text-muted-foreground/70"> · closing…</span>
                 : lastActive !== null && <span className="text-muted-foreground/70"> · last active {relativeTime(lastActive)}</span>}
