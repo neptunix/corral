@@ -147,7 +147,10 @@ void (async () => {
   });
   // Live-terminal WS attach rides the same loopback-only http server (assertLoopback above). SEC-1
   // Origin allowlist + SEC-2 rate/cap + SEC-3 reaping are all enforced inside attachWebSocketServer.
-  attachWebSocketServer(server, { envs: ENVS, allowedOrigins: WS_ALLOWED_ORIGINS });
+  attachWebSocketServer(server, {
+    envs: ENVS, allowedOrigins: WS_ALLOWED_ORIGINS,
+    onViewed: (env, paneId) => { if (attention.clearFinished(`${env.id}:${paneId}`)) void poller.refreshEnv(env.id); },
+  });
 
   // After the http server is listening: a shim's first call resolves identity over that loopback.
   const stopRemoteMcp = await startRemoteMcp({
