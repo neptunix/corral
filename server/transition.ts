@@ -13,6 +13,7 @@ export interface TransitionResult {
   readonly events: readonly TransitionEvent[];
   readonly working: WorkingMap;
   readonly clearedKeys: readonly string[];
+  readonly clearedBlocked: readonly string[];
 }
 
 const rowKey = (r: SessionRow): string => `${r.env}:${r.paneId}`;
@@ -38,6 +39,7 @@ export function detectTransitions(
   const nextWorking = new Map<string, number>(Object.entries(working));
   const events: TransitionEvent[] = [];
   const clearedKeys: string[] = [];
+  const clearedBlocked: string[] = [];
 
   for (const r of curr) {
     const key = rowKey(r);
@@ -57,6 +59,7 @@ export function detectTransitions(
         events.push({ key, state: "finished", since: nowMs, row: r });
       }
       nextWorking.delete(key); // known non-working → drop so a future re-work re-seeds
+      if (r.status !== "blocked") clearedBlocked.push(key);
     }
     // unrecognized status: inert — no event, working map untouched
 
@@ -73,5 +76,5 @@ export function detectTransitions(
     }
   }
 
-  return { events, working: Object.fromEntries(nextWorking), clearedKeys };
+  return { events, working: Object.fromEntries(nextWorking), clearedKeys, clearedBlocked };
 }
