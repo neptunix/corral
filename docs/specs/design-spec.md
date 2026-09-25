@@ -419,8 +419,8 @@ exist in herdr across a state-loss restart — this limitation is explicit, not 
   record also gets a ✓ beside its name on the card/row.
 - **Future-agent seam:** the agent reads attention records (incl. `lastLines`) + board state via the
   API, summarizes/prioritizes, and writes comments (with `idemKey` = `env:paneId:since` to avoid
-  double-writes; its `agentCommentId` is recorded on the record). The feed UI is unchanged; the
-  deterministic version is the fallback when the agent is off.
+  double-writes — nothing about the comment is recorded on the record today). The feed UI is
+  unchanged; the deterministic version is the fallback when the agent is off.
 - **Eval signal (cheap, built now):** record time-to-view — how long a `finished` record survives
   before a corral attach clears it. A record cleared in <~30s with no resulting task/comment is a
   proxy for "not actionable" — a lightweight quality signal for the future agent without UX changes.

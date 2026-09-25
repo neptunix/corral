@@ -85,9 +85,21 @@ describe("TaskCard — session tree and folded closed sessions", () => {
     expect(screen.queryByText(/⚠/)).toBeNull();
   });
 
-  it("marks exactly the finished row with a ✓", () => {
+  it("marks exactly the finished row with a ✓, on the matching live row only", () => {
     const live = link("live", false);
-    renderCard([live, link("other", false)], new Set([`${live.env}:${live.paneId}`]));
-    expect(screen.getAllByTitle("Finished — not opened yet")).toHaveLength(1);
+    const other = link("other", false);
+    renderCard([live, other], new Set([`${live.env}:${live.paneId}`]));
+    const marks = screen.getAllByTitle("Finished — not opened yet");
+    expect(marks).toHaveLength(1);
+    const liveRow = screen.getByTitle(/Claude session sid-live/).closest('div[class*="group/session"]');
+    expect(liveRow?.contains(marks[0] ?? null)).toBe(true);
+    const otherRow = screen.getByTitle(/Claude session sid-other/).closest('div[class*="group/session"]');
+    expect(otherRow?.querySelector('[title="Finished — not opened yet"]')).toBeNull();
+  });
+
+  it("shows no ✓ on a detached row even when its key is in the finished set", () => {
+    const detached = link("gone", true);
+    renderCard([detached], new Set([`${detached.env}:${detached.paneId}`]));
+    expect(screen.queryByTitle("Finished — not opened yet")).toBeNull();
   });
 });

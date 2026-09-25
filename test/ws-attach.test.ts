@@ -432,6 +432,22 @@ describe("onViewed", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(viewed).toEqual([]);
   });
+
+  it("does not report viewed when the probe-window death's ws close completes after the grace elapses", async () => {
+    // Elapsed-time-only gating would count this as viewed: the WS close callback runs once t has
+    // already passed the grace, even though the pty died inside it.
+    let t = 0;
+    const viewed: string[] = [];
+    const h = await start({ now: () => t, onViewed: (_e, p) => { viewed.push(p); } });
+    const client = connect(h.port, "w1-1", `http://127.0.0.1:${String(h.port)}`);
+    await once(client, "open");
+    await waitFor(() => h.ptys.length === 1);
+    h.ptys[0]?.emitExit(); // t=0, well within WS_PROBE_GRACE_MS
+    t = 60_000; // advance before the async close handshake completes, as if it ran late
+    await once(client, "close");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(viewed).toEqual([]);
+  });
 });
 
 // Placed last, deliberately: this block records into viewport memory, and the empty-memory
