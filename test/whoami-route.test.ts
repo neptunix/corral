@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ENVIRONMENTS } from "../environments.ts";
 import { createApi } from "../server/api.ts";
 import type { Poller } from "../server/poller.ts";
+import { makeGuarded } from "../server/scheduler.ts";
 import { createStorage } from "../server/storage.ts";
 
 const snap: Snapshot = {
@@ -164,6 +165,49 @@ describe("GET /api/whoami and /api/attention", () => {
       if (body.resolved) throw new Error("unreachable");
       expect(body.reason).toContain("no pane w9:p9");
     });
+  });
+
+  // Two tool calls in one turn hit whoami concurrently; the second must not fall back to a session-less row.
+  it("a concurrent caller waits for the in-flight re-poll and still finds a session-bound card", async () => {
+    let latest: Snapshot = snap;
+    let releaseTick = (): void => undefined;
+    const tick = makeGuarded(async () => {
+      await new Promise<void>((r) => { releaseTick = r; });
+      latest = snap;
+    });
+    const lagging: Poller = { ...poller, getSnapshot: () => latest, refreshEnv: tick };
+    const pane = {
+      paneId: "w1:p1", tabId: "tab1", tabLabel: "api-refactor-a",
+      workspaceId: "ws1", workspaceLabel: "repo", cwd: "/repo",
+    };
+    const app = createApi({
+      poller: lagging, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
+      paneIdentityFn: () => Promise.resolve(pane),
+    });
+    await app.request("/api/boards", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label: "Test" }),
+    });
+    const { id: tid } = await (await app.request("/api/boards/test/tasks", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Refactor the API", status: "todo" }),
+    })).json() as { id: string };
+    await app.request(`/api/boards/test/tasks/${tid}/attach`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", paneId: "w1:p1", name: "api-refactor-a", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }),
+    });
+    latest = { envs: snap.envs, sessions: [] };
+
+    const first = app.request("/api/whoami?paneId=w1%3Ap1&cwd=%2Frepo");
+    const second = app.request("/api/whoami?paneId=w1%3Ap1&cwd=%2Frepo");
+    await new Promise((r) => setTimeout(r, 10));
+    releaseTick();
+
+    for (const res of await Promise.all([first, second])) {
+      const parsed = WhoamiResponseSchema.parse(await res.json());
+      if (!parsed.resolved) throw new Error("expected resolved");
+      expect(parsed.task?.taskId).toBe(tid);
+    }
   });
 
   it("re-polls once per local environment and no more — the miss path stays bounded", async () => {
