@@ -51,7 +51,7 @@ const board: Board = {
       { env: "work-local", paneId: "w1:p9", tabId: "tab9", tabLabel: "api-refactor-c", workspaceId: "ws1", workspaceLabel: "repo", name: "api-refactor-c", cwdSnapshot: "/repo", sessionId: "00000000-0000-4000-8000-000000000000" },
     ],
   }],
-  spawnPresets: [], defaultSpawnPresetId: null,
+  description: "", spawnPresets: [], defaultSpawnPresetId: null,
 };
 
 describe("buildWhoami", () => {
@@ -255,7 +255,7 @@ describe("buildWhoami — spawnedBy", () => {
         id: "t_self", title: "T", description: "", status: "doing", priority: null,
         createdAt: 1, updatedAt: 1, log: [], sessions: [link],
       }],
-      spawnPresets: [], defaultSpawnPresetId: null,
+      description: "", spawnPresets: [], defaultSpawnPresetId: null,
     };
   }
 
@@ -290,7 +290,7 @@ describe("buildWhoami — spawnedBy", () => {
         id: "t_other", title: "T2", description: "", status: "doing", priority: null, createdAt: 1, updatedAt: 1, log: [],
         sessions: [{ env: "work-local", paneId: "w2:p1", tabId: "t", tabLabel: "orch-tab", workspaceId: "w", workspaceLabel: "w", name: "orch-tab", cwdSnapshot: "/", sessionId: PARENT_SID }],
       }],
-      spawnPresets: [], defaultSpawnPresetId: null,
+      description: "", spawnPresets: [], defaultSpawnPresetId: null,
     };
     const result = resolve(
       [selfBoard({ sessionId: PARENT_SID, env: "work-local", paneId: "w2:p1" }), otherBoard],
@@ -306,7 +306,7 @@ describe("buildWhoami — spawnedBy", () => {
         id: "t_other", title: "T2", description: "", status: "doing", priority: null, createdAt: 1, updatedAt: 1, log: [],
         sessions: [{ env: "work-local", paneId: "w2:p1", tabId: "t", tabLabel: "orch-tab", workspaceId: "w", workspaceLabel: "w", name: "orch-tab", cwdSnapshot: "/", sessionId: PARENT_SID }],
       }],
-      spawnPresets: [], defaultSpawnPresetId: null,
+      description: "", spawnPresets: [], defaultSpawnPresetId: null,
     };
     const result = resolve(
       [selfBoard({ sessionId: PARENT_SID, env: "work-local", paneId: "w2:p1" }), otherBoard],

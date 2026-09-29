@@ -180,6 +180,8 @@ export const BoardSchema = z.object({
   label: z.string(),
   columns: z.array(ColumnSchema),
   tasks: z.array(TaskSchema).default([]),
+  // Uncapped like SpawnPresetSchema.text: a `.max()` would make a board with a longer value unloadable.
+  description: z.string().default(""),
   // Defaults, never .optional(): a board written before these existed heals on parse, and every Board
   // value is uniformly shaped. A dangling defaultSpawnPresetId (matching no preset) is NOT resolved
   // here — that normalization lives only at the PATCH boundary (server/api.ts), so a board file

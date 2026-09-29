@@ -50,7 +50,7 @@ function makeBoardState(tasks: readonly EnrichedTask[]): BoardState {
   const board: BoardType = {
     id: "b1", label: "Board one",
     columns: [{ id: "doing", label: "Doing" }, { id: "closed", label: "Closed", type: "closed" }],
-    tasks: [], spawnPresets: [], defaultSpawnPresetId: null,
+    tasks: [], description: "", spawnPresets: [], defaultSpawnPresetId: null,
   };
   return {
     board, tasks: [...tasks], unassigned: [], envs: {}, attention: {}, accounts: [],

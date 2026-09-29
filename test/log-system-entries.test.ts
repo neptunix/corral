@@ -41,7 +41,7 @@ function board(tasks: Record<string, unknown>[], id = "b"): Board {
   const raw = {
     id, label: id.toUpperCase(),
     columns: [{ id: "todo", label: "Todo" }, { id: "doing", label: "Doing" }, { id: "done", label: "Done", type: "closed" }],
-    tasks, spawnPresets: [], defaultSpawnPresetId: null,
+    tasks, description: "", spawnPresets: [], defaultSpawnPresetId: null,
   };
   return BoardSchema.parse(raw);
 }
@@ -213,7 +213,7 @@ describe("status_changed — columns and nothing more, only on an actual move", 
 
   it("stamps status_changed on a board move that remaps the column", async () => {
     const src = board([task({ id: "t_aaaaaaa", status: "doing" })], "src");
-    const dst = BoardSchema.parse({ id: "dst", label: "DST", columns: [{ id: "backlog", label: "Backlog" }], tasks: [], spawnPresets: [], defaultSpawnPresetId: null });
+    const dst = BoardSchema.parse({ id: "dst", label: "DST", columns: [{ id: "backlog", label: "Backlog" }], tasks: [], description: "", spawnPresets: [], defaultSpawnPresetId: null });
     const { app, storage } = makeApi([src, dst], []);
 
     await app.request("/api/boards/src/tasks/t_aaaaaaa/move", json({ toBoardId: "dst" }));

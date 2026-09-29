@@ -11,7 +11,7 @@ import { boardReadHandler, createHandler, logHandler, readHandler } from "../mcp
 const SID = "11111111-2222-3333-4444-555555555555";
 
 const boundTask: WhoamiTask = {
-  boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Own card", description: "own desc",
+  boardId: "board", boardLabel: "Board", boardDescription: "", taskId: "t_abcdefg", title: "Own card", description: "own desc",
   status: "doing", priority: null,
   columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
   sessions: [], logCount: 0, lastLogAtMs: null, spawnedBy: null,
@@ -39,12 +39,12 @@ const otherBoard: Board = {
       env: "work-local", paneId: "w2:p1", tabId: "tb", tabLabel: "x", workspaceId: "ws", workspaceLabel: "w",
       name: "ghost", cwdSnapshot: "/x", sessionId: null }], createdAt: 1, updatedAt: 2, log: [] },
   ],
-  spawnPresets: [], defaultSpawnPresetId: null,
+  description: "", spawnPresets: [], defaultSpawnPresetId: null,
 };
 const ownBoard: Board = {
   id: "board", label: "Board", columns: boundTask.columns.map((c) => ({ id: c.id, label: c.label })),
   tasks: [{ id: "t_abcdefg", title: "Own card", description: "own desc", status: "doing", priority: null, sessions: [], createdAt: 1, updatedAt: 2, log: [] }],
-  spawnPresets: [], defaultSpawnPresetId: null,
+  description: "", spawnPresets: [], defaultSpawnPresetId: null,
 };
 
 function stub(over: Partial<CorralClient>): CorralClient {

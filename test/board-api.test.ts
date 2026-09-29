@@ -103,6 +103,26 @@ describe("PATCH /api/boards/:bid — column type", () => {
   });
 });
 
+describe("PATCH /api/boards/:bid — description", () => {
+  it("stores the description trimmed, keeps it across unrelated patches, and refuses one past the cap", async () => {
+    const app = makeApi(tmpDir);
+    await app.request("/api/boards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ label: "Desc" }) });
+    const patch = (body: unknown): Promise<Response> => Promise.resolve(app.request("/api/boards/desc", {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }));
+
+    const res = await patch({ description: "  Ship 1.0 first\n" });
+    expect(res.status).toBe(200);
+    expect((await res.json() as { description: string }).description).toBe("Ship 1.0 first");
+
+    const renamed = await patch({ label: "Renamed" });
+    expect((await renamed.json() as { description: string }).description).toBe("Ship 1.0 first");
+
+    expect((await patch({ description: "x".repeat(4001) })).status).toBe(400);
+    expect((await patch({ description: "x".repeat(4000) })).status).toBe(200);
+  });
+});
+
 describe("DELETE /api/boards/:bid", () => {
   it("refuses to delete a board that still holds tasks, and the board survives", async () => {
     const app = makeApi(tmpDir);
@@ -419,7 +439,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
     // but whose sessionId ("uuid-9") is stable.
     await storage.withBoard("test", () => ({
       board: {
-        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], spawnPresets: [], defaultSpawnPresetId: null,
+        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], description: "", spawnPresets: [], defaultSpawnPresetId: null,
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-9" }],
@@ -455,7 +475,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
     // Two sessions on one card: A stored at p1, B stored at p2.
     await storage.withBoard("test", () => ({
       board: {
-        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], spawnPresets: [], defaultSpawnPresetId: null,
+        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], description: "", spawnPresets: [], defaultSpawnPresetId: null,
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [
@@ -495,7 +515,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
     const now = Math.floor(Date.now() / 1000);
     await storage.withBoard("test", () => ({
       board: {
-        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], spawnPresets: [], defaultSpawnPresetId: null,
+        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], description: "", spawnPresets: [], defaultSpawnPresetId: null,
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [{ env: "work-local", paneId: "old-9", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-dead" }],
@@ -521,7 +541,7 @@ describe("GET /api/state — sessionId churn-heal", () => {
     // session vanishes from BOTH the card and the pool.
     await storage.withBoard("test", () => ({
       board: {
-        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], spawnPresets: [], defaultSpawnPresetId: null,
+        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], description: "", spawnPresets: [], defaultSpawnPresetId: null,
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [{ env: "work-local", paneId: "wQ:p4", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "sess", cwdSnapshot: "", sessionId: "uuid-old" }],
@@ -605,7 +625,7 @@ describe("GET /api/state — name healing for persisted empty-name links", () =>
     const now = Math.floor(Date.now() / 1000);
     await storage.withBoard("test", () => ({
       board: {
-        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], spawnPresets: [], defaultSpawnPresetId: null,
+        id: "test", label: "Test", columns: [...DEFAULT_COLUMNS], description: "", spawnPresets: [], defaultSpawnPresetId: null,
         tasks: [{
           id: "t_seeded", title: "T", description: "", status: "todo", priority: null,
           sessions: [{ env: "work-local", paneId: "old-1", tabId: "", tabLabel: "", workspaceId: "", workspaceLabel: "", name: "", cwdSnapshot: "", sessionId: null }],
@@ -1264,7 +1284,7 @@ describe("POST /api/boards/:bid/tasks/:tid/move", () => {
     const { id } = await (await app.request("/api/boards/src/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "T", status: "doing" }) })).json() as { id: string };
     // target board with custom columns that do NOT include "doing"
     await storage.withBoard("custom", () => ({
-      board: { id: "custom", label: "Custom", columns: [{ id: "backlog", label: "Backlog" }, { id: "done", label: "Done" }], tasks: [], spawnPresets: [], defaultSpawnPresetId: null },
+      board: { id: "custom", label: "Custom", columns: [{ id: "backlog", label: "Backlog" }, { id: "done", label: "Done" }], tasks: [], description: "", spawnPresets: [], defaultSpawnPresetId: null },
       result: undefined,
     }));
     const res = await app.request(`/api/boards/src/tasks/${id}/move`, {

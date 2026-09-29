@@ -11,7 +11,7 @@ import { logHandler, readHandler } from "../mcp/tools/task.ts";
 const SID = "11111111-2222-3333-4444-555555555555";
 
 const card: WhoamiTask = {
-  boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
+  boardId: "board", boardLabel: "Board", boardDescription: "", taskId: "t_abcdefg", title: "Refactor the API",
   description: "why and how", status: "doing", priority: "p1",
   columns: [{ id: "doing", label: "Doing", closed: false }],
   sessions: [], logCount: 0, lastLogAtMs: null, spawnedBy: null,
@@ -41,7 +41,7 @@ function boardWith(log: readonly LogEntry[]): Board {
       id: "t_abcdefg", title: "Refactor the API", description: "why and how", status: "doing",
       priority: "p1", sessions: [], log: [...log], createdAt: 1, updatedAt: 2,
     }],
-    spawnPresets: [], defaultSpawnPresetId: null,
+    description: "", spawnPresets: [], defaultSpawnPresetId: null,
   };
 }
 

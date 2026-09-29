@@ -37,7 +37,7 @@ function board(over: { readonly sessionId?: string | null } = {}): Board {
         sessionId: over.sessionId === undefined ? SID : over.sessionId,
       }],
     }],
-    spawnPresets: [], defaultSpawnPresetId: null,
+    description: "", spawnPresets: [], defaultSpawnPresetId: null,
   };
 }
 

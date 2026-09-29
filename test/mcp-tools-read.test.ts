@@ -113,7 +113,7 @@ describe("readHandler", () => {
   // exists to return whole.
   const description = Array.from({ length: 200 }, (_, i) => `entry ${String(i)}`).join("\n");
   const boundTask = {
-    boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
+    boardId: "board", boardLabel: "Board", boardDescription: "", taskId: "t_abcdefg", title: "Refactor the API",
     description, status: "doing", priority: null,
     columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
     sessions: [], logCount: 0, noteCount: 0, lastLogAtMs: null, spawnedBy: null,

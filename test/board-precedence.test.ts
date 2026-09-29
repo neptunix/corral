@@ -6,7 +6,7 @@ import { pickBoardState, pickGlobalState } from "../web/src/lib/board-precedence
 
 const global_: GlobalState = { unassigned: [], envs: {}, attention: {}, accounts: [], diagnostics: EMPTY_DIAGNOSTICS };
 const board = (id: string): BoardState => ({
-  ...global_, board: { id, label: id.toUpperCase(), columns: [], tasks: [], spawnPresets: [], defaultSpawnPresetId: null }, tasks: [],
+  ...global_, board: { id, label: id.toUpperCase(), columns: [], tasks: [], description: "", spawnPresets: [], defaultSpawnPresetId: null }, tasks: [],
 });
 
 const seed = board("seeded");

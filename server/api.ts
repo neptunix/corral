@@ -24,7 +24,7 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 
 import {
-  AMBIENT_HERDR_SOCKET, BRIEF_CLEANUP_DELAY_MS, BRIEF_MAX_BYTES, BRIEF_ROOT, READ_CACHE_TTL_MS,
+  AMBIENT_HERDR_SOCKET, BOARD_DESCRIPTION_MAX_CHARS, BRIEF_CLEANUP_DELAY_MS, BRIEF_MAX_BYTES, BRIEF_ROOT, READ_CACHE_TTL_MS,
   SPAWN_TIMEOUT_MS, TASK_DESCRIPTION_MAX_CHARS, UPLOAD_ROOT, WS_ALLOWED_ORIGINS,
 } from "../config.ts";
 import type { HerdrEnv } from "../environments.ts";
@@ -213,6 +213,7 @@ const SpawnPresetPatchSchema = z.object({
 const PatchBoardBodySchema = z.object({
   label: z.string().min(1).optional(),
   columns: z.array(ColumnSchema).optional(),
+  description: z.string().trim().max(BOARD_DESCRIPTION_MAX_CHARS, `description exceeds ${String(BOARD_DESCRIPTION_MAX_CHARS)} characters`).optional(),
   spawnPresets: z.array(SpawnPresetPatchSchema).max(20).optional(),
   defaultSpawnPresetId: z.string().nullable().optional(),
 });
@@ -718,7 +719,7 @@ export function createApi(opts: {
       return c.json({ error: { code: "board_id_collision", generatedId: id } }, 409);
     }
     const board = await opts.storage.withBoard(id, () => {
-      const b = { id, label, columns: [...DEFAULT_COLUMNS], tasks: [], spawnPresets: [], defaultSpawnPresetId: null };
+      const b = { id, label, columns: [...DEFAULT_COLUMNS], tasks: [], description: "", spawnPresets: [], defaultSpawnPresetId: null };
       return { board: b, result: b };
     });
     return c.json(board, 201);
@@ -741,7 +742,7 @@ export function createApi(opts: {
     if (!parsed.success) return c.json({ error: { code: "validation", message: parsed.error.message } }, 400);
     const bid = c.req.param("bid");
     if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
-    const { label, columns, spawnPresets, defaultSpawnPresetId } = parsed.data;
+    const { label, columns, description, spawnPresets, defaultSpawnPresetId } = parsed.data;
     if (columns?.length === 0) {
       return c.json({ error: { code: "validation", message: "columns must not be empty" } }, 400);
     }
@@ -767,6 +768,7 @@ export function createApi(opts: {
         }
         updated = { ...updated, columns };
       }
+      if (description !== undefined) updated = { ...updated, description };
       if (spawnPresets !== undefined) updated = { ...updated, spawnPresets: [...spawnPresets] };
       if (defaultSpawnPresetId !== undefined) updated = { ...updated, defaultSpawnPresetId };
       // A default pointing at no preset is no default — resolve it here rather than leaving a dangling

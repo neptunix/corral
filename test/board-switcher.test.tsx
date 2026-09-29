@@ -10,7 +10,7 @@ import { ZERO_COUNTS } from "../web/src/lib/attention";
 afterEach(cleanup);
 
 function board(id: string): BoardFrame {
-  return { id, label: id, columns: [], tasks: [], spawnPresets: [], defaultSpawnPresetId: null };
+  return { id, label: id, columns: [], tasks: [], description: "", spawnPresets: [], defaultSpawnPresetId: null };
 }
 
 describe("BoardSwitcher", () => {

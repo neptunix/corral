@@ -103,7 +103,7 @@ describe("SideRail", () => {
       return { id, title: id, description: "", status: "todo", priority: null, sessions: [...sessions], createdAt: 0, updatedAt: 0, log: [] };
     }
     const boards: readonly Board[] = [
-      { id: "b1", label: "b1", columns: [], tasks: [task("t1", [link("p1"), link("p2"), link("p3")])], spawnPresets: [], defaultSpawnPresetId: null },
+      { id: "b1", label: "b1", columns: [], tasks: [task("t1", [link("p1"), link("p2"), link("p3")])], description: "", spawnPresets: [], defaultSpawnPresetId: null },
     ];
     const attention: AttentionMap = {
       "e1:p1": { state: "blocked", since: 1, sessionName: null, lastLines: "", captured: false },
