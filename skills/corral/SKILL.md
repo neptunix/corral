@@ -15,6 +15,13 @@ description: Use when this session runs under corral (the corral_* MCP tools exi
   and it hides cards in closed columns. A card you cannot see there cannot be bound to. To survey ONE
   board including its closed-column cards — how you find a session still running behind a closed card —
   use `corral_board_read`.
+- **Listings are pages, sorted by priority and then newest first** (`corral_board_read` puts open
+  cards before closed ones). `corral_task_bind`, `corral_board_read` and `corral_fleet` show 50
+  (fleet: `limit`) rows and end with the `offset` for the next page when more matched — "not on the
+  first page" is not "does not exist". Repeat the same arguments with that `offset`; a bare `offset`
+  pages a different list. A card you are looking for by column, priority or title is a
+  `corral_board_read` filter away (`status`, `open`, `priority`, `q`); the sessions on one card are
+  `corral_fleet` with its `{boardId, taskId}`.
 - **A card is addressed by `{boardId, taskId}` together, never a bare `taskId`.** A task id is a
   nanoid unique only within its board. `corral_task_read`, `corral_task_log`, `corral_task_update` and
   `corral_spawn` default to this session's own card and take an optional `{boardId, taskId}` to reach

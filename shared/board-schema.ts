@@ -301,7 +301,7 @@ export const DEFAULT_COLUMNS: readonly Column[] = [
 
 const PRIORITY_ORDER: Record<string, number> = { p0: 0, p1: 1, p2: 2, p3: 3 };
 
-export function sortTasks(tasks: readonly Task[]): Task[] {
+export function sortTasks<T extends Pick<Task, "priority" | "createdAt">>(tasks: readonly T[]): T[] {
   return [...tasks].sort((a, b) => {
     const pa = a.priority !== null ? (PRIORITY_ORDER[a.priority] ?? 4) : 4;
     const pb = b.priority !== null ? (PRIORITY_ORDER[b.priority] ?? 4) : 4;

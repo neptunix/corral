@@ -66,6 +66,33 @@ describe("bindHandler", () => {
     expect(out).toContain("t_aaaaaaa");
   });
 
+  it("boardId alone narrows the listing to that board; an unknown one is refused with the ids", async () => {
+    const second: Board = { ...boards[0] ?? { id: "", label: "", columns: [], tasks: [], spawnPresets: [], defaultSpawnPresetId: null }, id: "second", tasks: [{ id: "t_second1", title: "Elsewhere", description: "", status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1, log: [] }] };
+    const c = stub({ whoami: async () => unbound, boards: async () => [...boards, second] });
+    const narrowed = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "second" });
+    expect(narrowed).toContain("t_second1");
+    expect(narrowed).not.toContain("t_aaaaaaa");
+    const refused = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "nope" });
+    expect(refused).toContain("no board");
+    expect(refused).toContain("board, second");
+    expect(refused).not.toContain("t_aaaaaaa");
+  });
+
+  it("offset pages the listing", async () => {
+    const c = stub({ whoami: async () => unbound });
+    const out = await bindHandler({ client: c, identity: idOf(c) }, { offset: 5 });
+    expect(out).toContain("past the end");
+    expect(out).not.toContain("t_aaaaaaa  ");
+  });
+
+  it("refuses offset alongside a card address and does not attach", async () => {
+    const calls: unknown[] = [];
+    const c = stub({ whoami: async () => unbound, attach: async (a) => { calls.push(a); } });
+    const out = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "board", taskId: "t_aaaaaaa", offset: 0 });
+    expect(out).toContain("offset pages the listing only");
+    expect(calls).toHaveLength(0);
+  });
+
   it("refuses to rebind an already-bound session and names the current card", async () => {
     const c = stub({});
     const out = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "board", taskId: "t_aaaaaaa" });

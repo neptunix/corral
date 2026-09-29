@@ -157,6 +157,51 @@ describe("fleetHandler", () => {
     expect(await fleetHandler(fleetDeps(client), { env: "work-remote" })).toContain("no sessions match");
   });
 
+  it("scopes rows to a card or a board, and refuses a bare or unknown id with the valid ones", async () => {
+    const link = { env: "work-local", paneId: "w1:p1", tabId: "t", tabLabel: "a", workspaceId: "w", workspaceLabel: "r", name: "a", cwdSnapshot: "/r", sessionId: null };
+    const boards = [{
+      id: "board", label: "Board", columns: [{ id: "todo", label: "Todo" }], spawnPresets: [], defaultSpawnPresetId: null,
+      tasks: [
+        { id: "t_one", title: "One", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions: [link] },
+        { id: "t_two", title: "Two", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions: [{ ...link, paneId: "w1:p2" }] },
+      ],
+    }];
+    const sessions = ["w1:p1", "w1:p2", "w1:p3"].map((paneId) => ({
+      env: "work-local", paneId, status: "idle", agent: "claude", cwd: "/r", tab: paneId, workspace: "w", sessionId: null,
+      recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
+    }));
+    const client = stub({ boards: async () => boards, state: async () => ({ envs: { "work-local": { reachable: true } }, sessions }) });
+    const byCard = await fleetHandler(fleetDeps(client), { boardId: "board", taskId: "t_two" });
+    expect(byCard).toContain("w1:p2");
+    expect(byCard).not.toContain("w1:p1 ");
+    expect(byCard).not.toContain("w1:p3");
+    const byBoard = await fleetHandler(fleetDeps(client), { boardId: "board" });
+    expect(byBoard).toContain("w1:p1");
+    expect(byBoard).toContain("w1:p2");
+    expect(byBoard).not.toContain("w1:p3");
+    expect(await fleetHandler(fleetDeps(client), { taskId: "t_two" })).toContain("boardId is required");
+    const noBoard = await fleetHandler(fleetDeps(client), { boardId: "nope" });
+    expect(noBoard).toContain("no board");
+    expect(noBoard).toContain('"board"');
+    const noCard = await fleetHandler(fleetDeps(client), { boardId: "board", taskId: "t_zzz" });
+    expect(noCard).toContain("no card board/t_zzz");
+    expect(noCard).toContain("corral_board_read");
+  });
+
+  it("offset pages the rows and the footer names the next offset", async () => {
+    const sessions = Array.from({ length: 5 }, (_, i) => ({
+      env: "work-local", paneId: `w1:p${String(i)}`, status: "idle", agent: "claude", cwd: "/r", tab: `s${String(i)}`, workspace: "w", sessionId: null,
+      recap: null, recapAt: null, recapStatus: null, recapSource: null, statusline: null, statuslineStatus: null, claudeStatus: null, waitingFor: null, remoteControl: null, registryStatus: null, claudeName: null, claudeNameUserSet: null,
+    }));
+    const client = stub({ state: async () => ({ envs: { "work-local": { reachable: true } }, sessions }) });
+    const out = await fleetHandler(fleetDeps(client), { limit: 2, offset: 2 });
+    expect(out).toContain("w1:p2");
+    expect(out).toContain("w1:p3");
+    expect(out).not.toContain("w1:p4");
+    expect(out).toContain("offset: 4");
+    expect(await fleetHandler(fleetDeps(client), { limit: 2, offset: 9 })).toContain("last page starts at offset: 4");
+  });
+
   it("defaults to all, applies the hard limit, and includes the untrusted-output note", async () => {
     const client = stub({
       state: async () => ({

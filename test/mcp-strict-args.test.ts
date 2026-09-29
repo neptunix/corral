@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CorralClient } from "../mcp/client.ts";
 import { createIdentity } from "../mcp/identity.ts";
+import { registerBoardReadTool } from "../mcp/tools/board-read.ts";
 import { registerFleetTool } from "../mcp/tools/fleet.ts";
 import { registerSelfTool } from "../mcp/tools/self.ts";
 import { registerSessionTools } from "../mcp/tools/session.ts";
@@ -25,6 +26,7 @@ async function connect(): Promise<Client> {
   const identity = createIdentity(client, { paneId: "w1:p1", socket: null, cwd: "/repo" });
   registerSelfTool(server, identity);
   registerTaskTools(server, { client, identity });
+  registerBoardReadTool(server, { client, identity });
   registerUpdateTool(server, { client, identity });
   registerSessionTools(server, { client, identity, envScope: null });
   registerFleetTool(server, { client, identity });
@@ -50,5 +52,18 @@ describe("every corral tool refuses an unknown argument", () => {
       expect(res.isError, t.name).toBe(true);
       expect(JSON.stringify(res.content), t.name).toContain("card_id");
     }
+  });
+});
+
+// The schema, not the handler, refuses these — pinned so a switch to a looser type cannot drop the valid set.
+describe("corral_board_read refuses a bad filter value before the handler runs", () => {
+  it("names the valid priorities; refuses a negative offset and an empty q", async () => {
+    const c = await connect();
+    const bad = await c.callTool({ name: "corral_board_read", arguments: { boardId: "b", priority: "p9" } });
+    expect(bad.isError).toBe(true);
+    const text = JSON.stringify(bad.content);
+    for (const p of ["p0", "p1", "p2", "p3"]) expect(text).toContain(p);
+    expect((await c.callTool({ name: "corral_board_read", arguments: { boardId: "b", offset: -1 } })).isError).toBe(true);
+    expect((await c.callTool({ name: "corral_board_read", arguments: { boardId: "b", q: "" } })).isError).toBe(true);
   });
 });
