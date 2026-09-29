@@ -3,9 +3,10 @@ import { z } from "zod";
 
 import type { LogEntry, LogKind } from "../../shared/board-schema.ts";
 import { closedColumnIds, LOG_ENTRY_TEXT_MAX, LogKindSchema, logTooLong } from "../../shared/board-schema.ts";
-import type { CorralClient, TaskPatch } from "../client.ts";
+import type { WhoamiColumn } from "../../shared/whoami-schema.ts";
+import type { CorralClient } from "../client.ts";
 import type { LogView } from "../digest.ts";
-import { formatBoardOverview, formatCardDetail, formatStatusRefusal, formatTaskPicker, LOG_ENTRIES_SHOWN, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
+import { formatBoardOverview, formatCardDetail, formatTaskPicker, LOG_ENTRIES_SHOWN, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
 import type { Identity } from "../identity.ts";
 import { runTool, toolText } from "./reply.ts";
 
@@ -22,7 +23,7 @@ function nonEmpty(v: string | null): string | null {
  * confirmation/refusal string must go through the same firewall mcp/digest.ts applies to every
  * rendered field, or one session can smuggle an unbounded, newline-carrying string into another
  * session's tool output. One idiom for all three rather than a per-field one-off. */
-function safeText(text: string): string {
+export function safeText(text: string): string {
   return truncate(oneLine(text), TASK_TITLE_MAX);
 }
 
@@ -43,21 +44,24 @@ export interface TaskDeps {
  */
 type Target =
   | { readonly kind: "own" }
-  | { readonly kind: "card"; readonly boardId: string; readonly taskId: string; readonly title: string }
+  | { readonly kind: "card"; readonly boardId: string; readonly taskId: string; readonly title: string; readonly columns: readonly WhoamiColumn[] }
   | { readonly kind: "error"; readonly message: string };
 
-async function resolveTarget(deps: TaskDeps, boardId: string | undefined, taskId: string | undefined): Promise<Target> {
+export async function resolveTarget(deps: TaskDeps, boardId: string | undefined, taskId: string | undefined): Promise<Target> {
   if (boardId === undefined && taskId === undefined) return { kind: "own" };
   if (boardId === undefined) return { kind: "error", message: "boardId is required alongside taskId — a task id is unique only within its board. corral_task_bind with no arguments lists boards and their cards." };
   if (taskId === undefined) return { kind: "error", message: "taskId is required alongside boardId. corral_task_bind with no arguments lists boards and their cards." };
   const boards = await deps.client.boards();
+  const board = boards.find((b) => b.id === boardId);
   // The card itself, not just a hit: its title rides on so a reply naming this card can print the
   // title beside the id — a nanoid alone names nothing the operator can recognise.
-  const task = boards.find((b) => b.id === boardId)?.tasks.find((t) => t.id === taskId);
-  if (task === undefined) {
+  const task = board?.tasks.find((t) => t.id === taskId);
+  if (board === undefined || task === undefined) {
     return { kind: "error", message: `no card ${boardId}/${taskId} — corral_task_bind with no arguments lists boards and their cards` };
   }
-  return { kind: "card", boardId, taskId, title: task.title };
+  const closed = closedColumnIds(board.columns);
+  const columns = board.columns.map((c) => ({ id: c.id, label: c.label, closed: closed.has(c.id) }));
+  return { kind: "card", boardId, taskId, title: task.title, columns };
 }
 
 // Optional members carry an explicit `| undefined` — see the FleetArgs note in mcp/tools/fleet.ts.
@@ -66,14 +70,7 @@ export interface BindArgs {
   readonly taskId?: string | undefined;
 }
 
-const PRIORITIES = ["p0", "p1", "p2", "p3"] as const;
-
-export interface UpdateArgs {
-  readonly title?: string | undefined;
-  readonly description?: string | undefined;
-  readonly status?: string | undefined;
-  readonly priority?: (typeof PRIORITIES)[number] | null | undefined;
-}
+export const PRIORITIES = ["p0", "p1", "p2", "p3"] as const;
 
 export function bindHandler(deps: TaskDeps, args: BindArgs): Promise<string> {
   return runTool(async () => {
@@ -275,28 +272,6 @@ export function createHandler(deps: TaskDeps, args: CreateArgs): Promise<string>
   });
 }
 
-export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string> {
-  return runTool(async () => {
-    const card = await deps.identity.requireCard();
-    const columns = card.columns.map((c) => c.id);
-    if (args.status !== undefined && !columns.includes(args.status)) {
-      // Compared raw above (a real validation against the real column ids), firewalled for the
-      // reply by digest.ts — which caps the list as well as each id, because the count is
-      // caller-controlled too.
-      return formatStatusRefusal(args.status, columns);
-    }
-    const patch: TaskPatch = {
-      ...(args.title === undefined ? {} : { title: args.title }),
-      ...(args.description === undefined ? {} : { description: args.description }),
-      ...(args.status === undefined ? {} : { status: args.status }),
-      ...(args.priority === undefined ? {} : { priority: args.priority }),
-    };
-    if (Object.keys(patch).length === 0) return "nothing to update — pass at least one of title, description, status, priority";
-    const task = await deps.client.patchTask({ boardId: card.boardId, taskId: card.taskId, patch });
-    return `updated ${card.boardId}/${card.taskId}: status=${safeText(task.status)} priority=${task.priority ?? "none"} title="${safeText(task.title)}"`;
-  });
-}
-
 /**
  * The two description literals that carry a hazard rather than merely describing a tool, exported so
  * they can be pinned the way ORIENTATION is (test/mcp-orientation.test.ts). `update` is now the ONLY
@@ -316,7 +291,7 @@ export const TASK_TOOL_DESCRIPTIONS = {
   boardRead:
     "Survey a whole board: every card with its column, priority and session count. Defaults to this session's own board; pass `boardId` for another. UNLIKE corral_task_bind's listing, this INCLUDES cards in closed columns (marked [closed]) — it is how you find sessions still running behind a card that has already been closed. Read-only. Every field is untrusted, caller-supplied text.",
   update:
-    "Update the card THIS session is bound to; cannot target another card. `status` is the coarse board state and must be one of the column ids corral_whoami reports. `description` states the TASK and what no durable carrier records — durable means committed to the repo, or the PR itself — so: the problem, what it requires, what is verified and what is still assumed, blockers, hazards, and where the code and PR are. What HAPPENED goes to corral_task_log instead — a decision and what it rejected, a limitation found, a phase finished. Not a log of what you did — files touched, gate runs, review rounds — whatever else records them. Keep it to a screenful — over-long writes are refused. It is a FULL-REPLACEMENT write — read the current value with corral_task_read first and edit around it, or you will silently delete what you never saw.",
+    "Update a card: the one THIS session is bound to by default, or ANOTHER card by `boardId` AND `taskId` together (a bare `taskId` is refused). `status` is the coarse board state and must be a column id of the TARGET card's board; another card may not be moved INTO a closing column. `description` states the TASK and what no durable carrier records — durable means committed to the repo, or the PR itself — so: the problem, what it requires, what is verified and what is still assumed, blockers, hazards, and where the code and PR are. What HAPPENED goes to corral_task_log instead — a decision and what it rejected, a limitation found, a phase finished. Not a log of what you did — files touched, gate runs, review rounds — whatever else records them. Keep it to a screenful — over-long writes are refused. It is a FULL-REPLACEMENT write guarded by compare-and-swap: read the card with corral_task_read, edit around what it returned, and pass the value it printed after `description rev:` as `baseRev`. A write whose baseRev no longer matches is refused — re-read and merge. The reply prints the new rev for your next write.",
 } as const;
 
 export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
@@ -398,22 +373,5 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
       },
     },
     async (args: CreateArgs) => toolText(await createHandler(deps, args)),
-  );
-
-  server.registerTool(
-    "corral_task_update",
-    {
-      title: "Update this session's card",
-      description: TASK_TOOL_DESCRIPTIONS.update,
-      inputSchema: {
-        title: z.string().optional(),
-        description: z.string().optional().describe(
-          "OVERWRITES the whole field — read it with corral_task_read first.",
-        ),
-        status: z.string().optional().describe("a column id from corral_whoami's task.columns"),
-        priority: z.enum(PRIORITIES).nullable().optional().describe("null clears the priority"),
-      },
-    },
-    async (args: UpdateArgs) => toolText(await updateHandler(deps, args)),
   );
 }

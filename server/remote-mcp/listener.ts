@@ -12,6 +12,7 @@ import { createIdentity } from "../../mcp/identity.ts";
 import { ORIENTATION } from "../../mcp/orientation.ts";
 import { registerSelfTool } from "../../mcp/tools/self.ts";
 import { registerSessionTools } from "../../mcp/tools/session.ts";
+import { registerUpdateTool } from "../../mcp/tools/task-update.ts";
 import { registerTaskTools } from "../../mcp/tools/task.ts";
 
 // 0700: the local half of the per-user rule sshd enforces on the remote end of the forward.
@@ -66,6 +67,7 @@ function serveConnection(conn: net.Socket, deps: PinnedDeps, baseUrl: string): v
     const server = new McpServer({ name: "corral", version: "0.1.0" }, { instructions: ORIENTATION });
     registerSelfTool(server, identity);
     registerTaskTools(server, { client, identity });
+    registerUpdateTool(server, { client, identity });
     registerSessionTools(server, { client, identity, envScope: deps.env.id });
 
     const transport = new StdioServerTransport(through, conn);

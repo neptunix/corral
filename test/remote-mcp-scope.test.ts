@@ -95,7 +95,7 @@ function deps(over: Partial<SessionDeps> = {}): SessionDeps {
   const nope = () => Promise.reject(new Error("must not be called"));
   const client: CorralClient = {
     whoami: nope, attention: nope, state: nope, boards: nope, board: nope, appendLog: nope,
-    createTask: nope, patchTask: nope, attach: nope, spawn: nope, closeSession: nope, spawnTargets: nope,
+    createTask: nope, editTask: nope, attach: nope, spawn: nope, closeSession: nope, spawnTargets: nope,
   };
   return { client, identity, envScope: "envA", ...over };
 }

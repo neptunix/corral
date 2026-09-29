@@ -8,6 +8,7 @@ import { ORIENTATION } from "./orientation.ts";
 import { registerFleetTool } from "./tools/fleet.ts";
 import { registerSelfTool } from "./tools/self.ts";
 import { registerSessionTools } from "./tools/session.ts";
+import { registerUpdateTool } from "./tools/task-update.ts";
 import { registerTaskTools } from "./tools/task.ts";
 
 // NEVER write to stdout in this process: stdout is the MCP protocol channel. Diagnostics go to
@@ -36,6 +37,7 @@ if (ctx === null) {
   const identity = createIdentity(client, ctx);
   registerSelfTool(server, identity);
   registerTaskTools(server, { client, identity });
+  registerUpdateTool(server, { client, identity });
   registerSessionTools(server, { client, identity, envScope: null });
   registerFleetTool(server, { client, identity });
 }

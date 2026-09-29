@@ -30,7 +30,7 @@ function client(body: WhoamiResponse, counter?: { n: number }): CorralClient {
     createTask: async () => ({ id: "t_new1234", title: "T", description: "", status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1 }),
     state: async () => ({ envs: {}, sessions: [] }),
     boards: async () => [],
-    patchTask: async () => { throw new Error("unused"); },
+    editTask: async () => { throw new Error("unused"); },
     attach: async () => undefined,
     spawn: async () => ({ env: "work-local", paneId: "w1:p2", name: "n", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }),
     closeSession: async () => undefined,

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { BoardFrameSchema, BoardSchema, TaskFrameSchema, TaskSchema } from "../shared/board-schema.ts";
+import { BoardFrameSchema, BoardSchema, TaskFrameSchema } from "../shared/board-schema.ts";
 import { AttentionMapSchema, SnapshotSchema } from "../shared/schema.ts";
 import { WhoamiResponseSchema } from "../shared/whoami-schema.ts";
 
@@ -96,7 +96,10 @@ export interface TaskPatch {
   readonly description?: string;
   readonly status?: string;
   readonly priority?: "p0" | "p1" | "p2" | "p3" | null;
+  readonly baseRev?: string;
 }
+
+const EditedTaskSchema = TaskFrameSchema.extend({ descriptionRev: z.string() });
 
 export interface CorralClient {
   whoami(q: { paneId: string; cwd: string; socket: string | null }): Promise<z.infer<typeof WhoamiResponseSchema>>;
@@ -117,7 +120,9 @@ export interface CorralClient {
     description?: string | undefined; priority?: "p0" | "p1" | "p2" | "p3" | null | undefined;
     sourceBoardId?: string | undefined; sourceTaskId?: string | undefined;
   }): Promise<z.infer<typeof TaskFrameSchema>>;
-  patchTask(a: { boardId: string; taskId: string; patch: TaskPatch }): Promise<z.infer<typeof TaskSchema>>;
+  /** The edit route: a description rewrite is compare-and-swap on `baseRev`, and a server that
+   *  predates the route 404s before anything is written. */
+  editTask(a: { boardId: string; taskId: string; patch: TaskPatch }): Promise<z.infer<typeof EditedTaskSchema>>;
   attach(a: { boardId: string; taskId: string; env: string; paneId: string; name: string }): Promise<void>;
   spawn(a: { boardId: string; taskId: string; env: string; brief: string; name?: string | undefined; model?: string | undefined; remoteControl?: boolean | undefined; targetWorkspaceId?: string | undefined; repo?: string | undefined; spawnedBy?: { sessionId: string | null; env: string; paneId: string } | undefined }): Promise<z.infer<typeof SpawnResultSchema>>;
   closeSession(a: { boardId: string; taskId: string; env: string; paneId: string; sessionId: string | null; deferred?: boolean | undefined }): Promise<void>;
@@ -191,12 +196,12 @@ export function createClient(baseUrl: string, fetchFn: FetchFn = fetch): CorralC
         }),
         TaskFrameSchema,
       ),
-    patchTask: (a) =>
+    editTask: (a) =>
       request(
         fetchFn,
-        `${base}/api/boards/${seg(a.boardId)}/tasks/${seg(a.taskId)}`,
+        `${base}/api/boards/${seg(a.boardId)}/tasks/${seg(a.taskId)}/edit`,
         { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify(a.patch) },
-        TaskSchema,
+        EditedTaskSchema,
       ),
     attach: async (a) => {
       await request(

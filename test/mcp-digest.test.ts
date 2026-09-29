@@ -1,4 +1,5 @@
 import type { Board, SessionLink, Task } from "@shared/board-schema.ts";
+import { descriptionRev } from "@shared/description-rev.ts";
 import type { AttentionMap, SessionRow, Snapshot, StatuslineData } from "@shared/schema";
 import type { WhoamiResolved, WhoamiTask } from "@shared/whoami-schema.ts";
 import { describe, expect, it } from "vitest";
@@ -1055,6 +1056,18 @@ describe("formatCardDetail", () => {
     expect(out).toContain("  | next: do the other thing");
     expect(out).not.toContain("TRUNCATED");
     expect(out.toUpperCase()).not.toContain("WARNING");
+  });
+
+  it("prints the description rev of a whole view, empty included", () => {
+    expect(formatCardDetail(task)).toContain(`description rev: ${descriptionRev("board", "t_abcdefg", task.description)}`);
+    expect(formatCardDetail({ ...task, description: "" })).toContain(`description rev: ${descriptionRev("board", "t_abcdefg", "")}`);
+  });
+
+  it("withholds the rev of a truncated view, so a partial read cannot back a rewrite", () => {
+    const out = formatCardDetail({ ...task, description: "x\n".repeat(30_000) });
+    expect(out).toContain("TRUNCATED");
+    expect(out).toContain("description rev: unavailable");
+    expect(out).not.toMatch(/description rev: [0-9a-f]{12}/);
   });
 
   it("tells the caller the gutter is the tool's, not the card's, and must be stripped before writing back", () => {

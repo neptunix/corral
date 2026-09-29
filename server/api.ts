@@ -14,10 +14,12 @@ import {
   sortTasks,
   toBoardFrame,
 } from "@shared/board-schema.ts";
+import { descriptionRev } from "@shared/description-rev.ts";
 import type { DiagnosticsSnapshot } from "@shared/diagnostics-schema";
 import { emptyDiagnostics } from "@shared/diagnostics-schema";
 import type { AttentionMap, PaneRead, SessionRow, Snapshot } from "@shared/schema";
 import { MoveTaskRequestSchema, UPLOAD_MAX_BYTES } from "@shared/schema";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
@@ -250,6 +252,12 @@ const PatchTaskBodySchema = z.object({
   priority: z.enum(["p0", "p1", "p2", "p3"]).nullable().optional(),
   description: DescriptionInputSchema.optional(),
 });
+
+// The MCP's write path: a description rewrite must name the revision it was read at.
+const EditTaskBodySchema = PatchTaskBodySchema.extend({ baseRev: z.string().optional() }).refine(
+  (b) => (b.description === undefined) === (b.baseRev === undefined),
+  { message: "baseRev is required with description, and only with it" },
+);
 
 /**
  * The append body. Not a PATCH of the task, and that is the point: a PATCH carries last-write-wins
@@ -861,23 +869,25 @@ export function createApi(opts: {
     return c.json(frame, 201);
   });
 
-  app.patch("/api/boards/:bid/tasks/:tid", async (c) => {
+  async function patchTask(c: Context, bid: string, tid: string, cas: boolean): Promise<Response> {
     if (opts.storage === undefined) return c.json({ error: { code: "no_storage" } }, 503);
     let body: unknown;
     try { body = await c.req.json(); } catch { return c.json({ error: { code: "validation", message: "invalid JSON" } }, 400); }
-    const parsed = PatchTaskBodySchema.safeParse(body);
+    const parsed = cas ? EditTaskBodySchema.safeParse(body) : PatchTaskBodySchema.safeParse(body);
     if (!parsed.success) return c.json({ error: { code: "validation", message: parsed.error.message } }, 400);
-    const bid = c.req.param("bid");
+    const baseRev = "baseRev" in parsed.data ? parsed.data.baseRev : undefined;
     if (!BID_RE.test(bid)) return c.json({ error: { code: "validation", message: "bad boardId" } }, 400);
-    const tid = c.req.param("tid");
     if (!TID_RE.test(tid)) return c.json({ error: { code: "validation", message: "bad taskId" } }, 400);
-    type PatchResult = null | { found: false } | { found: true; task: Task };
+    type PatchResult = null | { found: false } | { found: true; conflict: true } | { found: true; conflict: false; task: Task };
     const result = await opts.storage.withBoard<PatchResult>(bid, (existing) => {
       if (existing === null) return { board: null, result: null };
       const idx = existing.tasks.findIndex((t) => t.id === tid);
       if (idx === -1) return { board: existing, result: { found: false } };
       const old = existing.tasks[idx];
       if (old === undefined) return { board: existing, result: { found: false } };
+      if (baseRev !== undefined && descriptionRev(bid, tid, old.description) !== baseRev) {
+        return { board: existing, result: { found: true, conflict: true } };
+      }
       const updated = {
         ...old,
         ...(parsed.data.title !== undefined ? { title: parsed.data.title } : {}),
@@ -894,16 +904,22 @@ export function createApi(opts: {
         : updated;
       const tasks = [...existing.tasks];
       tasks[idx] = stamped;
-      return { board: { ...existing, tasks }, result: { found: true, task: stamped } };
+      return { board: { ...existing, tasks }, result: { found: true, conflict: false, task: stamped } };
     });
     if (!result?.found) return c.json({ error: { code: "not_found" } }, 404);
+    if (result.conflict) {
+      return c.json({ error: { code: "description_conflict", message: "the card or its description changed since baseRev was read" } }, 409);
+    }
     // The THIRD client-facing path, and log-free like the other two. A PATCH cannot change the log —
     // appending has its own route — so echoing it back is a copy nobody asked for on a response the
     // web holds as its updated task. One-off rather than per-tick, so the cost is not the argument:
     // the argument is that a card's log is fetched from exactly one place, `GET /api/boards/:bid`.
     const { log: _log, ...frame } = result.task;
-    return c.json(frame);
-  });
+    return cas ? c.json({ ...frame, descriptionRev: descriptionRev(bid, tid, frame.description) }) : c.json(frame);
+  }
+
+  app.patch("/api/boards/:bid/tasks/:tid", (c) => patchTask(c, c.req.param("bid"), c.req.param("tid"), false));
+  app.patch("/api/boards/:bid/tasks/:tid/edit", (c) => patchTask(c, c.req.param("bid"), c.req.param("tid"), true));
 
   // Appending is its own route rather than a field on the task PATCH — see AppendLogBodySchema.
   // Storage already gives everything the append needs: `withBoard` serializes read-modify-write under
