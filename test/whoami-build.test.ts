@@ -113,6 +113,16 @@ describe("buildWhoami", () => {
     expect(byId.get("work-remote")?.kind).toBe("remote");
   });
 
+  it("carries the board's description onto the task block", () => {
+    const localEnv = ENVIRONMENTS.find((e) => e.id === "work-local");
+    if (localEnv === undefined) throw new Error("fixture missing work-local");
+    const out = buildWhoami({
+      resolution: { ok: true, env: localEnv, row: me }, envs: ENVIRONMENTS, snapshot, boards: [{ ...board, description: "Ship 1.0 first" }],
+    });
+    if (!out.resolved) throw new Error("expected resolved");
+    expect(out.task?.boardDescription).toBe("Ship 1.0 first");
+  });
+
   it("finds the card, exposes its column ids, and marks self among the attached sessions", () => {
     const localEnv = ENVIRONMENTS.find((e) => e.id === "work-local");
     if (localEnv === undefined) throw new Error("fixture missing work-local");

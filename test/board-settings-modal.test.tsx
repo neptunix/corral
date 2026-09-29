@@ -145,10 +145,20 @@ describe("BoardSettingsModal — board description", () => {
     const onSave = vi.fn(() => Promise.resolve());
     render(<BoardSettingsModal board={makeBoard({ description: "Ship 1.0" })} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
 
+    expect(screen.getByLabelText("Board description")).toHaveProperty("value", "Ship 1.0");
     fireEvent.change(screen.getByLabelText("Board description"), { target: { value: "  Stabilise first\n" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => { expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ description: "Stabilise first" })); });
+  });
+});
+
+describe("BoardSettingsModal — board description, untouched", () => {
+  it("saves the stored description back unchanged when it was not edited", async () => {
+    const onSave = vi.fn(() => Promise.resolve());
+    render(<BoardSettingsModal board={makeBoard({ description: "Ship 1.0" })} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => { expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ description: "Ship 1.0" })); });
   });
 });
 

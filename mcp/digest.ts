@@ -799,12 +799,18 @@ function formatSpawnedByLine(spawnedBy: WhoamiTask["spawnedBy"], selfAccount: st
   return `spawned by: ${spawnedBy.name} (${spawnedBy.running ? "running" : "closed"})${capturedNote}${accountMarker(selfAccount, spawnedBy.account)}`;
 }
 
+// Hard-wrapped rather than left to `emit`, which would cut a long paragraph the PATCH cap allowed.
+function wrapToWidth(line: string, width: number): string[] {
+  if (line.length <= width) return [line];
+  return Array.from({ length: Math.ceil(line.length / width) }, (_, i) => line.slice(i * width, (i + 1) * width));
+}
+
 // Operator prose, so every line is gutter-prefixed: none can read as one of formatWhoami's own rows.
 function renderBoardDescription(raw: string): string[] {
   if (raw.trim() === "") return [];
   return [
     `board description (the operator's current direction for this board; each line below carries a leading "${BOARD_DESCRIPTION_LINE_PREFIX}" added by this tool):`,
-    ...splitLines(raw).map((line) => `${BOARD_DESCRIPTION_LINE_PREFIX}${line}`),
+    ...splitLines(raw).flatMap((line) => wrapToWidth(line, LINE_MAX - BOARD_DESCRIPTION_LINE_PREFIX.length).map((chunk) => `${BOARD_DESCRIPTION_LINE_PREFIX}${chunk}`)),
   ];
 }
 

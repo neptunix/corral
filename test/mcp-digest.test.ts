@@ -583,6 +583,13 @@ describe("formatWhoami", () => {
       expect(lines[header + 3]).toMatch(/^card: board\/t_abcdefg /);
       expect(lines.filter((l) => l.startsWith("card: "))).toHaveLength(1);
     });
+
+    it("wraps a paragraph longer than the line cap instead of cutting it", () => {
+      const out = withDescription("x".repeat(4000));
+      const rows = out.split("\n").filter((l) => l.startsWith("  ~ "));
+      expect(rows.length).toBeGreaterThan(1);
+      expect(rows.map((l) => l.slice(4)).join("")).toBe("x".repeat(4000));
+    });
   });
 
   // The rule "closing is the operator's call" is unfollowable from ids and labels: they are per
