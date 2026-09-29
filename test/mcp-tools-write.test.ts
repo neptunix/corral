@@ -381,10 +381,18 @@ describe("spawnHandler — the reply says where the session landed", () => {
 });
 
 describe("closeHandler", () => {
-  it("closes self by default, deferring the pane kill past the response", async () => {
+  it.each(["", "  "])("refuses a missing target %j instead of closing self", async (target) => {
+    const calls: unknown[] = [];
+    const c = stub({ closeSession: async (a) => { calls.push(a); } });
+    const out = await closeHandler({ client: c, identity: idOf(c), envScope: null }, { target });
+    expect(out).toContain('"self"');
+    expect(calls).toHaveLength(0);
+  });
+
+  it("closes self when asked by name, deferring the pane kill past the response", async () => {
     const calls: { env: string; paneId: string; sessionId: string | null; deferred: boolean | undefined }[] = [];
     const c = stub({ closeSession: async (a) => { calls.push({ env: a.env, paneId: a.paneId, sessionId: a.sessionId, deferred: a.deferred }); } });
-    const out = await closeHandler({ client: c, identity: idOf(c), envScope: null }, {});
+    const out = await closeHandler({ client: c, identity: idOf(c), envScope: null }, { target: "self" });
     // sessionId: null here (not SID, the live session's id) because the fixture's card session list
     // is empty — cardSid resolves to null, same as the "unbackfilled link" regression below.
     expect(calls).toEqual([{ env: "work-local", paneId: "w1:p1", sessionId: null, deferred: true }]);
@@ -409,7 +417,7 @@ describe("closeHandler", () => {
       }),
       closeSession: async (a) => { calls.push(a.sessionId); },
     });
-    const out = await closeHandler({ client: c, identity: idOf(c), envScope: null }, {});
+    const out = await closeHandler({ client: c, identity: idOf(c), envScope: null }, { target: "self" });
     expect(calls).toEqual([null]);
     expect(out.toLowerCase()).toContain("resume");
   });
@@ -436,7 +444,7 @@ describe("closeHandler", () => {
       }),
       closeSession: async (a) => { calls.push(a.sessionId); },
     });
-    const out = await closeHandler({ client: c, identity: idOf(c), envScope: null }, {});
+    const out = await closeHandler({ client: c, identity: idOf(c), envScope: null }, { target: "self" });
     expect(calls).toEqual([SID]);
     expect(out.toLowerCase()).toContain("resume");
   });

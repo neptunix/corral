@@ -301,10 +301,10 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
       title: "Bind this session to a card",
       description:
         "Link THIS session to an existing corral task card. Call with NO arguments to list the open cards, then call again with boardId and taskId. Refuses if this session is already bound. Creating a new card is not available.",
-      inputSchema: {
+      inputSchema: z.object({
         boardId: z.string().optional().describe("board id, as listed by a no-argument call"),
         taskId: z.string().optional().describe("task id, as listed by a no-argument call"),
-      },
+      }).strict(),
     },
     async (args: BindArgs) => toolText(await bindHandler(deps, args)),
   );
@@ -314,7 +314,7 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
     {
       title: "Read a card in full",
       description: TASK_TOOL_DESCRIPTIONS.read,
-      inputSchema: {
+      inputSchema: z.object({
         boardId: z.string().optional().describe("with taskId, read another card; omit both for this session's own card"),
         taskId: z.string().optional().describe("with boardId, read another card; a bare taskId is refused"),
         kind: z.array(LogKindSchema).optional().describe(
@@ -323,7 +323,7 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
         before: z.string().optional().describe(
           "page back to log entries older than this one. The id comes from a previous corral_task_read — either an entry's header line (`id:<id>`) or the paging footer (`older: N more — call corral_task_read with before: \"<id>\"`). Omit for the newest page. An id not found in the log (evicted, or wrong) is refused.",
         ),
-      },
+      }).strict(),
       annotations: { readOnlyHint: true },
     },
     async (args: ReadArgs) => toolText(await readHandler(deps, args)),
@@ -334,9 +334,9 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
     {
       title: "Survey a board",
       description: TASK_TOOL_DESCRIPTIONS.boardRead,
-      inputSchema: {
+      inputSchema: z.object({
         boardId: z.string().optional().describe("the board to survey; omit for this session's own board"),
-      },
+      }).strict(),
       annotations: { readOnlyHint: true },
     },
     async (args: BoardReadArgs) => toolText(await boardReadHandler(deps, args)),
@@ -347,7 +347,7 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
     {
       title: "Append a note to a card",
       description: TASK_TOOL_DESCRIPTIONS.log,
-      inputSchema: {
+      inputSchema: z.object({
         // No `.max()` here: the handler refuses an over-limit note in its own words, with the
         // overage, where a schema bound would hand the session a raw validation error.
         text: z.string().min(1).describe(
@@ -355,7 +355,7 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
         ),
         boardId: z.string().optional().describe("with taskId, append to another card; omit both for this session's own card"),
         taskId: z.string().optional().describe("with boardId, append to another card; a bare taskId is refused"),
-      },
+      }).strict(),
     },
     async (args: LogArgs) => toolText(await logHandler(deps, args)),
   );
@@ -365,12 +365,12 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
     {
       title: "Create a card",
       description: TASK_TOOL_DESCRIPTIONS.create,
-      inputSchema: {
+      inputSchema: z.object({
         title: z.string().min(1).describe("what the task is — the card's title"),
         description: z.string().optional().describe("the task statement; NOT provenance, which corral writes as the first log entry"),
         priority: z.enum(PRIORITIES).nullable().optional().describe("p0–p3, or null/omitted for none"),
         boardId: z.string().optional().describe("the board to create on; omit for this session's own board"),
-      },
+      }).strict(),
     },
     async (args: CreateArgs) => toolText(await createHandler(deps, args)),
   );

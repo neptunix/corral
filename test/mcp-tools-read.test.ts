@@ -143,6 +143,20 @@ describe("readHandler", () => {
 });
 
 describe("fleetHandler", () => {
+  it("refuses an unknown env with the configured ids, instead of reporting an empty fleet", async () => {
+    const client = stub({
+      whoami: async () => ({ ...resolved, envs: [...resolved.envs, { id: "work-remote", label: "Work (remote)", kind: "remote", reachable: false }] }),
+      state: async () => ({ envs: { "work-local": { reachable: true } }, sessions: [] }),
+    });
+    const out = await fleetHandler(fleetDeps(client), { env: "work" });
+    expect(out).toContain('no environment "work"');
+    expect(out).toContain("work-local");
+    expect(out).toContain("work-remote");
+    expect(out).not.toContain("no sessions match");
+    // Configured but not yet polled is a real env, not an unknown one.
+    expect(await fleetHandler(fleetDeps(client), { env: "work-remote" })).toContain("no sessions match");
+  });
+
   it("defaults to all, applies the hard limit, and includes the untrusted-output note", async () => {
     const client = stub({
       state: async () => ({

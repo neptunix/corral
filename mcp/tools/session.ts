@@ -26,7 +26,7 @@ export interface SpawnArgs {
 }
 
 export interface CloseArgs {
-  readonly target?: string | undefined;
+  readonly target: string;
 }
 
 /** The target environment's configured repository names, or null when they could not be read —
@@ -126,7 +126,9 @@ export function closeHandler(deps: SessionDeps, args: CloseArgs): Promise<string
     const me = await deps.identity.load();
     const selfKey = `${me.session.env}:${me.session.paneId}`;
 
-    const target = args.target ?? "self";
+    const target = args.target.trim();
+    // No default: a mis-named argument used to reach here as "self" and close the caller.
+    if (target === "") return 'target is required — "self" to close this session, or the "<env>:<paneId>" key corral_whoami lists';
     let key: string;
     if (target === "self") {
       key = selfKey;
@@ -198,7 +200,7 @@ export function registerSessionTools(server: McpServer, deps: SessionDeps): void
       title: "Spawn a session on a card",
       description:
         "Start a NEW Claude session attached to a card — for a context handoff or a parallel strand. An operator asking for \"a new session\" means THIS, on the card already open — not a new card, and not corral_task_create first. Defaults to THIS session's card; pass `boardId` AND `taskId` together to staff ANOTHER card (placing an executor is an ADD, which a session may do on any card — but it grants NO right to close that card's sessions). The brief is the text the new session begins from; write it as a full handoff. Defaults to this session's environment; on your OWN card, omit `repo` and the new session joins THIS session's workspace. On ANOTHER card there is no shared workspace to join, so `repo` is REQUIRED — pass the project the new session should work in. Pass `repo` on your own card too to land in a DIFFERENT project's workspace instead. `env` may name a remote environment too: the brief is written to a private temp file on that machine over ssh. Supply `name`, and supply the WHOLE name: corral uses your string verbatim as the Claude session name, the herdr tab label and the card's label — it no longer prefixes anything. Write it as `{slug}-{name}`, where `{slug}` is a very short label for the card (reuse the slug of your OWN session name when you have one, so the card's sessions cluster) and `{name}` is two to four words for what THIS session does. Destructive: this starts a real session that consumes tokens.",
-      inputSchema: {
+      inputSchema: z.object({
         brief: z.string().describe("handoff text the new session starts from; required"),
         env: z.string().optional().describe("environment id from corral_whoami (local or remote); defaults to this session's."),
         boardId: z.string().optional().describe("with taskId, staff another card; omit both for this session's own card"),
@@ -211,7 +213,7 @@ export function registerSessionTools(server: McpServer, deps: SessionDeps): void
           'model for the new session: an alias ("fable", "opus", "sonnet") or a full id. Omit to inherit the model this environment last used. corral does not validate the value beyond its shape — a wrong one starts a session that fails at the API.'),
         remoteControl: z.boolean().optional().describe(
           'start the session with Remote Control connected, so it is reachable from claude.ai. OMIT IT — it is inherited from THIS session, which is what an operator working remotely needs: spawned from a reachable session the successor is reachable too. Pass true/false only to override. Requires claude.ai subscription auth on that machine; without it the session still starts and asks for authorization inside.'),
-      },
+      }).strict(),
       // Machine-readable counterpart to the "Destructive." in the descriptions below — a harness can
       // gate on this without parsing prose. It changes nothing on its own: the actual control is the
       // operator declining to allowlist these two tools.
@@ -225,10 +227,10 @@ export function registerSessionTools(server: McpServer, deps: SessionDeps): void
     {
       title: "Close this session or one it spawned",
       description:
-        'Stop a Claude session: kills its pane but KEEPS the card link, so the card shows it as detached and it stays resumable. Target is "self" (default) or the "<env>:<paneId>" key of any session attached to the SAME card, as listed by corral_whoami — check its status there first; "working" means mid-task. Off-card targets are refused. Closing self ends THIS session, so make it the last action. Destructive.',
-      inputSchema: {
-        target: z.string().optional().describe('"self" (default) or "<env>:<paneId>"'),
-      },
+        'Stop a Claude session: kills its pane but KEEPS the card link, so the card shows it as detached and it stays resumable. `target` is REQUIRED: "self", or the "<env>:<paneId>" key of any session attached to the SAME card, as listed by corral_whoami — check its status there first; "working" means mid-task. Off-card targets are refused. Closing self ends THIS session, so make it the last action. Destructive.',
+      inputSchema: z.object({
+        target: z.string().describe('required: "self", or "<env>:<paneId>" as corral_whoami lists it'),
+      }).strict(),
       annotations: { destructiveHint: true },
     },
     async (args: CloseArgs) => toolText(await closeHandler(deps, args)),
