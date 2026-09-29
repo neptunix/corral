@@ -120,8 +120,7 @@ export interface CorralClient {
     description?: string | undefined; priority?: "p0" | "p1" | "p2" | "p3" | null | undefined;
     sourceBoardId?: string | undefined; sourceTaskId?: string | undefined;
   }): Promise<z.infer<typeof TaskFrameSchema>>;
-  /** The edit route: a description rewrite is compare-and-swap on `baseRev`, and a server that
-   *  predates the route 404s before anything is written. */
+  /** Compare-and-swap on `baseRev`; a server without the route 404s before writing. */
   editTask(a: { boardId: string; taskId: string; patch: TaskPatch }): Promise<z.infer<typeof EditedTaskSchema>>;
   attach(a: { boardId: string; taskId: string; env: string; paneId: string; name: string }): Promise<void>;
   spawn(a: { boardId: string; taskId: string; env: string; brief: string; name?: string | undefined; model?: string | undefined; remoteControl?: boolean | undefined; targetWorkspaceId?: string | undefined; repo?: string | undefined; spawnedBy?: { sessionId: string | null; env: string; paneId: string } | undefined }): Promise<z.infer<typeof SpawnResultSchema>>;

@@ -35,7 +35,7 @@ export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string>
     const own = await deps.identity.requireCard();
     const resolved = await resolveTarget(deps, args.boardId, args.taskId);
     if (resolved.kind === "error") return resolved.message;
-    const target = resolved.kind === "card" && !(resolved.boardId === own.boardId && resolved.taskId === own.taskId)
+    const target = resolved.kind === "card"
       ? resolved
       : { boardId: own.boardId, taskId: own.taskId, title: own.title, columns: own.columns };
     const crossCard = target.boardId !== own.boardId || target.taskId !== own.taskId;
