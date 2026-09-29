@@ -26,9 +26,8 @@ export const TASK_TITLE_MAX = 120;
 // formatWhoami is the call every session REPEATS — at startup, after a bind, to read its own ctx%,
 // to confirm a spawn landed — so there it is a PREVIEW: one bounded line, collapsed and truncated
 // like any other field, plus the line/char counts. The counts are a cheap staleness HEURISTIC, not a
-// guarantee: an edit that preserves both the length and the line count is invisible here, and the
-// write path has no optimistic concurrency to catch it. They are enough to skip a redundant re-read;
-// they are not enough to license a full-replacement write. corral_task_read is.
+// guarantee: an edit that preserves both the length and the line count is invisible here. They are
+// enough to skip a redundant re-read; a full-replacement write needs the rev corral_task_read prints.
 const DESCRIPTION_PREVIEW_MAX = 120;
 // formatCardDetail (corral_task_read) is the opposite contract: give me the whole thing, because
 // corral_task_update's `description` is a FULL-REPLACEMENT write and a session that writes back what

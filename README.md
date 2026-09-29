@@ -869,10 +869,12 @@ The eight tools:
 - `corral_fleet` — one bounded line per session across every environment, for cross-session triage.
 - `corral_task_bind` — link this session to an existing task card (no card creation).
 - `corral_task_read` — the bound card in full: its description, and the recent part of its log. `corral_whoami` renders the description as a one-line preview and the log as a count, because that call is repeated many times a session and inlining either on every one would flood the context; this is the opt-in full read, and the one to call before rewriting the description. `kind` narrows the log to what a session wrote (`note`) or to corral's own lifecycle events; `before` pages back further, taking the cursor id from an earlier read's entry headers or paging footer.
-- `corral_task_update` — update the bound card's title, description, status, or priority. `description` is a full-replacement write.
+- `corral_task_update` — update a card's title, description, status, or priority: the bound card, or another by `{boardId, taskId}`. `description` is a full-replacement write guarded by compare-and-swap — pass the `description rev` `corral_task_read` printed as `baseRev`, and a write over a description that changed since is refused. Another card cannot be moved into a closing column.
 - `corral_task_log` — append one entry to the bound card's log. Append-only, so two sessions on one card never overwrite each other; the server stamps the time and the writer, and the oldest entries are evicted once the card is full.
 - `corral_spawn` — start a new session on this session's card, with a brief as its first message; `repo` says which project it lands in.
-- `corral_session_close` — stop this session or one on the same card; suspend, not destroy.
+- `corral_session_close` — stop this session (`target: "self"`) or one on the same card; suspend, not destroy. `target` has no default.
+
+Every tool refuses an argument it does not declare, rather than dropping it and acting on the caller's own card or pane.
 
 The server registers **no tools outside herdr** — launched with `HERDR_ENV`/`HERDR_PANE_ID` unset,
 it connects but declares no tool capability at all, so a non-herdr session sees no corral tools and
