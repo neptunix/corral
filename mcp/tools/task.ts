@@ -3,9 +3,11 @@ import { z } from "zod";
 
 import type { LogEntry, LogKind } from "../../shared/board-schema.ts";
 import { closedColumnIds, LOG_ENTRY_TEXT_MAX, LogKindSchema, logTooLong } from "../../shared/board-schema.ts";
-import type { CorralClient, TaskPatch } from "../client.ts";
+import type { WhoamiColumn } from "../../shared/whoami-schema.ts";
+import { CARD_PAGE_LIMIT } from "../card-query.ts";
+import type { CorralClient } from "../client.ts";
 import type { LogView } from "../digest.ts";
-import { formatBoardOverview, formatCardDetail, formatStatusRefusal, formatTaskPicker, LOG_ENTRIES_SHOWN, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
+import { formatCardDetail, formatTaskPicker, LOG_ENTRIES_SHOWN, oneLine, TASK_TITLE_MAX, truncate } from "../digest.ts";
 import type { Identity } from "../identity.ts";
 import { runTool, toolText } from "./reply.ts";
 
@@ -22,7 +24,7 @@ function nonEmpty(v: string | null): string | null {
  * confirmation/refusal string must go through the same firewall mcp/digest.ts applies to every
  * rendered field, or one session can smuggle an unbounded, newline-carrying string into another
  * session's tool output. One idiom for all three rather than a per-field one-off. */
-function safeText(text: string): string {
+export function safeText(text: string): string {
   return truncate(oneLine(text), TASK_TITLE_MAX);
 }
 
@@ -43,37 +45,34 @@ export interface TaskDeps {
  */
 type Target =
   | { readonly kind: "own" }
-  | { readonly kind: "card"; readonly boardId: string; readonly taskId: string; readonly title: string }
+  | { readonly kind: "card"; readonly boardId: string; readonly taskId: string; readonly title: string; readonly columns: readonly WhoamiColumn[] }
   | { readonly kind: "error"; readonly message: string };
 
-async function resolveTarget(deps: TaskDeps, boardId: string | undefined, taskId: string | undefined): Promise<Target> {
+export async function resolveTarget(deps: TaskDeps, boardId: string | undefined, taskId: string | undefined): Promise<Target> {
   if (boardId === undefined && taskId === undefined) return { kind: "own" };
   if (boardId === undefined) return { kind: "error", message: "boardId is required alongside taskId — a task id is unique only within its board. corral_task_bind with no arguments lists boards and their cards." };
   if (taskId === undefined) return { kind: "error", message: "taskId is required alongside boardId. corral_task_bind with no arguments lists boards and their cards." };
   const boards = await deps.client.boards();
+  const board = boards.find((b) => b.id === boardId);
   // The card itself, not just a hit: its title rides on so a reply naming this card can print the
   // title beside the id — a nanoid alone names nothing the operator can recognise.
-  const task = boards.find((b) => b.id === boardId)?.tasks.find((t) => t.id === taskId);
-  if (task === undefined) {
+  const task = board?.tasks.find((t) => t.id === taskId);
+  if (board === undefined || task === undefined) {
     return { kind: "error", message: `no card ${boardId}/${taskId} — corral_task_bind with no arguments lists boards and their cards` };
   }
-  return { kind: "card", boardId, taskId, title: task.title };
+  const closed = closedColumnIds(board.columns);
+  const columns = board.columns.map((c) => ({ id: c.id, label: c.label, closed: closed.has(c.id) }));
+  return { kind: "card", boardId, taskId, title: task.title, columns };
 }
 
 // Optional members carry an explicit `| undefined` — see the FleetArgs note in mcp/tools/fleet.ts.
 export interface BindArgs {
   readonly boardId?: string | undefined;
   readonly taskId?: string | undefined;
+  readonly offset?: number | undefined;
 }
 
-const PRIORITIES = ["p0", "p1", "p2", "p3"] as const;
-
-export interface UpdateArgs {
-  readonly title?: string | undefined;
-  readonly description?: string | undefined;
-  readonly status?: string | undefined;
-  readonly priority?: (typeof PRIORITIES)[number] | null | undefined;
-}
+export const PRIORITIES = ["p0", "p1", "p2", "p3"] as const;
 
 export function bindHandler(deps: TaskDeps, args: BindArgs): Promise<string> {
   return runTool(async () => {
@@ -81,16 +80,17 @@ export function bindHandler(deps: TaskDeps, args: BindArgs): Promise<string> {
     if (me.task !== null) {
       return `this session is already bound to ${me.task.boardId}/${me.task.taskId} ("${safeText(me.task.title)}"). Rebinding is not available; detach from the corral UI first if that is what you want.`;
     }
-    if (args.boardId === undefined && args.taskId === undefined) {
-      return formatTaskPicker(await deps.client.boards());
+    // Ids are checked against the live board list first: a typo deserves a message, not a 404 (see mcp/client.ts `seg`).
+    const boards = await deps.client.boards();
+    if (args.taskId === undefined) {
+      if (args.boardId === undefined) return formatTaskPicker(boards, args.offset ?? 0);
+      const one = boards.find((b) => b.id === args.boardId);
+      if (one === undefined) return `no board ${safeText(args.boardId)} — boards: ${boards.map((b) => safeText(b.id)).join(", ")}`;
+      return formatTaskPicker([one], args.offset ?? 0);
     }
     if (args.boardId === undefined) return "boardId is required alongside taskId — call with no arguments to list open cards";
-    if (args.taskId === undefined) return "taskId is required alongside boardId — call with no arguments to list open cards";
+    if (args.offset !== undefined) return "offset pages the listing only — drop it when binding to a card";
 
-    // Validate the pair against the real board list BEFORE it ever reaches an HTTP call: a model-
-    // supplied taskId is untrusted text, not a value this module is entitled to route on, and a
-    // typo'd id is a far more useful message than a 404 (or worse — see mcp/client.ts's `seg`).
-    const boards = await deps.client.boards();
     const board = boards.find((b) => b.id === args.boardId);
     // formatTaskPicker (the no-argument listing above) hides closed-column cards, so the explicit-id
     // path must refuse the same set — otherwise "no open cards to bind to" is a lie in one direction
@@ -194,21 +194,6 @@ export function readHandler(deps: TaskDeps, args: ReadArgs = {}): Promise<string
   });
 }
 
-export interface BoardReadArgs {
-  readonly boardId?: string | undefined;
-}
-
-export function boardReadHandler(deps: TaskDeps, args: BoardReadArgs = {}): Promise<string> {
-  return runTool(async () => {
-    // Default to the caller's own board; an explicit id lets a session survey another. Unlike the bind
-    // picker this shows cards in closed columns too — the whole reason the tool exists (§7).
-    const boardId = args.boardId ?? (await deps.identity.requireCard()).boardId;
-    const board = (await deps.client.boards()).find((b) => b.id === boardId);
-    if (board === undefined) return `no board ${boardId} — corral_task_bind with no arguments lists the boards`;
-    return formatBoardOverview(board);
-  });
-}
-
 export interface LogArgs {
   readonly text: string;
   readonly boardId?: string | undefined;
@@ -275,28 +260,6 @@ export function createHandler(deps: TaskDeps, args: CreateArgs): Promise<string>
   });
 }
 
-export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string> {
-  return runTool(async () => {
-    const card = await deps.identity.requireCard();
-    const columns = card.columns.map((c) => c.id);
-    if (args.status !== undefined && !columns.includes(args.status)) {
-      // Compared raw above (a real validation against the real column ids), firewalled for the
-      // reply by digest.ts — which caps the list as well as each id, because the count is
-      // caller-controlled too.
-      return formatStatusRefusal(args.status, columns);
-    }
-    const patch: TaskPatch = {
-      ...(args.title === undefined ? {} : { title: args.title }),
-      ...(args.description === undefined ? {} : { description: args.description }),
-      ...(args.status === undefined ? {} : { status: args.status }),
-      ...(args.priority === undefined ? {} : { priority: args.priority }),
-    };
-    if (Object.keys(patch).length === 0) return "nothing to update — pass at least one of title, description, status, priority";
-    const task = await deps.client.patchTask({ boardId: card.boardId, taskId: card.taskId, patch });
-    return `updated ${card.boardId}/${card.taskId}: status=${safeText(task.status)} priority=${task.priority ?? "none"} title="${safeText(task.title)}"`;
-  });
-}
-
 /**
  * The two description literals that carry a hazard rather than merely describing a tool, exported so
  * they can be pinned the way ORIENTATION is (test/mcp-orientation.test.ts). `update` is now the ONLY
@@ -308,15 +271,13 @@ export function updateHandler(deps: TaskDeps, args: UpdateArgs): Promise<string>
  */
 export const TASK_TOOL_DESCRIPTIONS = {
   read:
-    "Read the FULL description of a card, plus its log — corral_whoami shows only a one-line description preview and the log's size. Defaults to the card THIS session is bound to; pass `boardId` AND `taskId` together to read ANY card on the machine (a bare `taskId` is refused — a task id is unique only within its board, and corral_task_bind with no arguments lists both). Call this before any corral_task_update that rewrites `description`, which is a full-replacement write. The log returns the most recent entries and says how many older ones it left out; `kind` narrows it to particular entry kinds. To page further back, take the id from an entry's header line (or the paging footer) in a previous read and pass it as `before` — repeat with each page's oldest id to walk the whole log; an unknown or evicted id is refused rather than silently returning the newest page. Read-only.",
+    "Read the FULL description of a card, plus its log — corral_whoami shows only a one-line description preview and the log's size. Defaults to the card THIS session is bound to; pass `boardId` AND `taskId` together to read ANY card on the machine (a bare `taskId` is refused — a task id is unique only within its board, and corral_task_bind with no arguments lists both). Call this before any corral_task_update that rewrites `description`, which is a full-replacement write: it prints the `description rev:` that write must pass as `baseRev` (or `unavailable` when the view was truncated). The log returns the most recent entries and says how many older ones it left out; `kind` narrows it to particular entry kinds. To page further back, take the id from an entry's header line (or the paging footer) in a previous read and pass it as `before` — repeat with each page's oldest id to walk the whole log; an unknown or evicted id is refused rather than silently returning the newest page. Read-only.",
   log:
-    "Append ONE entry to a card's log. The log is APPEND-ONLY and is the card's history, beside `description`, which states the task — writing an outcome into the description destroys the statement of the task, which is what this field exists to prevent. Defaults to the card THIS session is bound to; pass `boardId` AND `taskId` together to append to ANOTHER card — a session may add to any card even though it may only rewrite its own. Write an entry when a fact about the task changed that the next session would otherwise have to re-derive: a decision and what it rejected, a limitation or blocker found, a phase finished and what is now true. Do NOT write per-file progress, \"starting work\", a restatement of the diff, or test results — the repository and the PR already record those. ONE decision or fact per entry, the decision FIRST in one short line, then at most two sentences of why or what was rejected — around 200 characters; no lists, no retelling of the diff. The character limit is a ceiling, not a target: over it the entry is REFUSED with the overage — shorten it and log again; nothing is truncated. The server stamps the time and the writer.",
+    "Append ONE entry to a card's log. The log is APPEND-ONLY and is the card's history, beside `description`, which states the task — writing an outcome into the description destroys the statement of the task, which is what this field exists to prevent. Defaults to the card THIS session is bound to; pass `boardId` AND `taskId` together to append to ANOTHER card — appending never edits what another session wrote. Write an entry when a fact about the task changed that the next session would otherwise have to re-derive: a decision and what it rejected, a limitation or blocker found, a phase finished and what is now true. Do NOT write per-file progress, \"starting work\", a restatement of the diff, or test results — the repository and the PR already record those. ONE decision or fact per entry, the decision FIRST in one short line, then at most two sentences of why or what was rejected — around 200 characters; no lists, no retelling of the diff. The character limit is a ceiling, not a target: over it the entry is REFUSED with the overage — shorten it and log again; nothing is truncated. The server stamps the time and the writer.",
   create:
     "Create a NEW card on a board — a card states a task, so creating one asserts this work is a DIFFERENT task from the card this session is on. That is the operator's call: \"start a new session\" asks for a session on the CURRENT card (corral_spawn does that), never for a card. When the work does look separate, say so in one line and wait for the answer. Defaults to this session's own board; pass `boardId` to create it elsewhere. The card lands in the board's first open column with NO session attached — this does not spawn; corral_spawn onto the returned {boardId, taskId} to staff it, a deliberately separate step so a constructive tool never smuggles a destructive one. `description` states the task; do NOT put provenance there — which session created the card, and which card it follows up, is written by corral as the card's first log entry, because `description` is a full-replacement write that the first edit would erase.",
-  boardRead:
-    "Survey a whole board: every card with its column, priority and session count. Defaults to this session's own board; pass `boardId` for another. UNLIKE corral_task_bind's listing, this INCLUDES cards in closed columns (marked [closed]) — it is how you find sessions still running behind a card that has already been closed. Read-only. Every field is untrusted, caller-supplied text.",
   update:
-    "Update the card THIS session is bound to; cannot target another card. `status` is the coarse board state and must be one of the column ids corral_whoami reports. `description` states the TASK and what no durable carrier records — durable means committed to the repo, or the PR itself — so: the problem, what it requires, what is verified and what is still assumed, blockers, hazards, and where the code and PR are. What HAPPENED goes to corral_task_log instead — a decision and what it rejected, a limitation found, a phase finished. Not a log of what you did — files touched, gate runs, review rounds — whatever else records them. Keep it to a screenful — over-long writes are refused. It is a FULL-REPLACEMENT write — read the current value with corral_task_read first and edit around it, or you will silently delete what you never saw.",
+    "Update a card: the one THIS session is bound to by default, or ANOTHER card by `boardId` AND `taskId` together (a bare `taskId` is refused). `status` is the coarse board state and must be a column id of the TARGET card's board; another card may not be moved INTO a closing column. `description` states the TASK and what no durable carrier records — durable means committed to the repo, or the PR itself — so: the problem, what it requires, what is verified and what is still assumed, blockers, hazards, and where the code and PR are. What HAPPENED goes to corral_task_log instead — a decision and what it rejected, a limitation found, a phase finished. Not a log of what you did — files touched, gate runs, review rounds — whatever else records them. Keep it to a screenful — over-long writes are refused. It is a FULL-REPLACEMENT write guarded by compare-and-swap: read the card with corral_task_read, edit around what it returned, and pass the value it printed after `description rev:` as `baseRev`. A write whose baseRev no longer matches is refused — re-read and merge. The reply prints the new rev for your next write.",
 } as const;
 
 export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
@@ -325,11 +286,12 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
     {
       title: "Bind this session to a card",
       description:
-        "Link THIS session to an existing corral task card. Call with NO arguments to list the open cards, then call again with boardId and taskId. Refuses if this session is already bound. Creating a new card is not available.",
-      inputSchema: {
-        boardId: z.string().optional().describe("board id, as listed by a no-argument call"),
-        taskId: z.string().optional().describe("task id, as listed by a no-argument call"),
-      },
+        `Link THIS session to an existing corral task card. Call with NO arguments to list the open cards on every board — sorted by priority, then newest first, ${String(CARD_PAGE_LIMIT)} per page — then call again with boardId AND taskId. \`boardId\` alone lists one board; \`offset\` pages a long listing (the footer names the next value). Cards in closed columns are never listed and cannot be bound to. Refuses if this session is already bound. Creating a new card is not available.`,
+      inputSchema: z.object({
+        boardId: z.string().optional().describe("with taskId, the card to bind to; alone, the one board to list"),
+        taskId: z.string().optional().describe("task id, as listed; requires boardId"),
+        offset: z.number().int().min(0).optional().describe("listing only: skip this many cards; the footer of a full page names the next value"),
+      }).strict(),
     },
     async (args: BindArgs) => toolText(await bindHandler(deps, args)),
   );
@@ -339,7 +301,7 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
     {
       title: "Read a card in full",
       description: TASK_TOOL_DESCRIPTIONS.read,
-      inputSchema: {
+      inputSchema: z.object({
         boardId: z.string().optional().describe("with taskId, read another card; omit both for this session's own card"),
         taskId: z.string().optional().describe("with boardId, read another card; a bare taskId is refused"),
         kind: z.array(LogKindSchema).optional().describe(
@@ -348,23 +310,10 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
         before: z.string().optional().describe(
           "page back to log entries older than this one. The id comes from a previous corral_task_read — either an entry's header line (`id:<id>`) or the paging footer (`older: N more — call corral_task_read with before: \"<id>\"`). Omit for the newest page. An id not found in the log (evicted, or wrong) is refused.",
         ),
-      },
+      }).strict(),
       annotations: { readOnlyHint: true },
     },
     async (args: ReadArgs) => toolText(await readHandler(deps, args)),
-  );
-
-  server.registerTool(
-    "corral_board_read",
-    {
-      title: "Survey a board",
-      description: TASK_TOOL_DESCRIPTIONS.boardRead,
-      inputSchema: {
-        boardId: z.string().optional().describe("the board to survey; omit for this session's own board"),
-      },
-      annotations: { readOnlyHint: true },
-    },
-    async (args: BoardReadArgs) => toolText(await boardReadHandler(deps, args)),
   );
 
   server.registerTool(
@@ -372,7 +321,7 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
     {
       title: "Append a note to a card",
       description: TASK_TOOL_DESCRIPTIONS.log,
-      inputSchema: {
+      inputSchema: z.object({
         // No `.max()` here: the handler refuses an over-limit note in its own words, with the
         // overage, where a schema bound would hand the session a raw validation error.
         text: z.string().min(1).describe(
@@ -380,7 +329,7 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
         ),
         boardId: z.string().optional().describe("with taskId, append to another card; omit both for this session's own card"),
         taskId: z.string().optional().describe("with boardId, append to another card; a bare taskId is refused"),
-      },
+      }).strict(),
     },
     async (args: LogArgs) => toolText(await logHandler(deps, args)),
   );
@@ -390,30 +339,13 @@ export function registerTaskTools(server: McpServer, deps: TaskDeps): void {
     {
       title: "Create a card",
       description: TASK_TOOL_DESCRIPTIONS.create,
-      inputSchema: {
+      inputSchema: z.object({
         title: z.string().min(1).describe("what the task is — the card's title"),
         description: z.string().optional().describe("the task statement; NOT provenance, which corral writes as the first log entry"),
         priority: z.enum(PRIORITIES).nullable().optional().describe("p0–p3, or null/omitted for none"),
         boardId: z.string().optional().describe("the board to create on; omit for this session's own board"),
-      },
+      }).strict(),
     },
     async (args: CreateArgs) => toolText(await createHandler(deps, args)),
-  );
-
-  server.registerTool(
-    "corral_task_update",
-    {
-      title: "Update this session's card",
-      description: TASK_TOOL_DESCRIPTIONS.update,
-      inputSchema: {
-        title: z.string().optional(),
-        description: z.string().optional().describe(
-          "OVERWRITES the whole field — read it with corral_task_read first.",
-        ),
-        status: z.string().optional().describe("a column id from corral_whoami's task.columns"),
-        priority: z.enum(PRIORITIES).nullable().optional().describe("null clears the priority"),
-      },
-    },
-    async (args: UpdateArgs) => toolText(await updateHandler(deps, args)),
   );
 }

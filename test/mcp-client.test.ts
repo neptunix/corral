@@ -82,17 +82,34 @@ describe("corral client", () => {
     expect(out).toContain("remoteControl");
   });
 
-  it("PATCHes only the fields it was given", async () => {
+  it("PATCHes only the fields it was given, to the edit route, and keeps descriptionRev", async () => {
     let sentBody = "";
-    const client = createClient("http://127.0.0.1:8787", async (_input, init) => {
+    let sentUrl = "";
+    const client = createClient("http://127.0.0.1:8787", async (input, init) => {
+      sentUrl = urlOf(input);
       sentBody = typeof init?.body === "string" ? init.body : "";
       return jsonResponse({
         id: "t_abcdefg", title: "T", description: "", status: "doing", priority: null,
-        sessions: [], createdAt: 1, updatedAt: 2,
+        sessions: [], createdAt: 1, updatedAt: 2, descriptionRev: "0123456789ab",
       });
     });
-    await client.patchTask({ boardId: "b", taskId: "t_abcdefg", patch: { status: "doing" } });
+    const task = await client.editTask({ boardId: "b", taskId: "t_abcdefg", patch: { status: "doing" } });
+    expect(new URL(sentUrl).pathname).toBe("/api/boards/b/tasks/t_abcdefg/edit");
     expect(JSON.parse(sentBody)).toEqual({ status: "doing" });
+    expect(task.descriptionRev).toBe("0123456789ab");
+  });
+
+  it("surfaces a 409 description_conflict as its own error code", async () => {
+    const client = createClient("http://127.0.0.1:8787", async () =>
+      jsonResponse({ error: { code: "description_conflict", message: "changed" } }, 409));
+    await expect(client.editTask({ boardId: "b", taskId: "t_abcdefg", patch: { description: "d", baseRev: "0123456789ab" } }))
+      .rejects.toMatchObject({ code: "description_conflict" });
+  });
+
+  it("reports a server without the edit route as too old, so nothing is written", async () => {
+    const client = createClient("http://127.0.0.1:8787", async () => new Response("404 Not Found", { status: 404 }));
+    await expect(client.editTask({ boardId: "b", taskId: "t_abcdefg", patch: { description: "d", baseRev: "0123456789ab" } }))
+      .rejects.toMatchObject({ code: "server_too_old" });
   });
 
   it("passes sid and deferred as close query parameters", async () => {

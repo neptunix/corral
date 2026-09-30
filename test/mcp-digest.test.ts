@@ -1,9 +1,10 @@
 import type { Board, SessionLink, Task } from "@shared/board-schema.ts";
+import { descriptionRev } from "@shared/description-rev.ts";
 import type { AttentionMap, SessionRow, Snapshot, StatuslineData } from "@shared/schema";
 import type { WhoamiResolved, WhoamiTask } from "@shared/whoami-schema.ts";
 import { describe, expect, it } from "vitest";
 
-import { formatCardDetail, formatFleet, formatRepoRefusal, formatSpawnReply, formatStatusRefusal, formatTaskPicker, formatWhoami, oneLine, truncate } from "../mcp/digest.ts";
+import { formatBoardOverview, formatCardDetail, formatFleet, formatRepoRefusal, formatSpawnReply, formatStatusRefusal, formatTaskPicker, formatWhoami, oneLine, truncate } from "../mcp/digest.ts";
 
 // The one-line invariant must hold for every newline-carrying whitespace run, not just "\n" — a
 // crafted value could just as easily use a CRLF or a lone CR to try to fabricate an extra line.
@@ -145,9 +146,42 @@ describe("truncate", () => {
 
 describe("formatFleet", () => {
   const base = {
-    snapshot, attention, boards: [] as Board[], env: null, limit: 20, recapChars: 160,
+    snapshot, attention, boards: [] as Board[], env: null, limit: 20, offset: 0, card: null, recapChars: 160,
     selfAccount: null as string | null,
   };
+
+  it("offset skips rows and the footer names the next offset", () => {
+    const sessions = Array.from({ length: 5 }, (_, i) => row({ paneId: `w1:p${String(i)}`, tab: `s${String(i)}` }));
+    const out = formatFleet({ ...base, snapshot: { envs: {}, sessions }, filter: "all", limit: 2, offset: 2 });
+    expect(out).not.toContain("w1:p1 ");
+    expect(out).toContain("w1:p2");
+    expect(out).toContain("w1:p3");
+    expect(out).not.toContain("w1:p4");
+    expect(out).toContain("1 more matched");
+    expect(out).toContain("offset: 4");
+  });
+
+  it("card narrows the rows to the sessions bound to that card or board", () => {
+    const boards: Board[] = [{
+      id: "board", label: "Board", columns: [{ id: "todo", label: "Todo" }], spawnPresets: [], defaultSpawnPresetId: null,
+      tasks: [
+        { id: "t_one", title: "One", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, log: [], sessions: [link({ paneId: "w1:p1" })] },
+        { id: "t_two", title: "Two", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, log: [], sessions: [link({ paneId: "w1:p2" })] },
+      ],
+    }];
+    const sessions = [row({ paneId: "w1:p1" }), row({ paneId: "w1:p2" }), row({ paneId: "w1:p3" })];
+    const byCard = formatFleet({ ...base, boards, snapshot: { envs: {}, sessions }, filter: "all", card: { boardId: "board", taskId: "t_two" } });
+    expect(byCard).toContain("w1:p2");
+    expect(byCard).not.toContain("w1:p1 ");
+    expect(byCard).not.toContain("w1:p3");
+    const byBoard = formatFleet({ ...base, boards, snapshot: { envs: {}, sessions }, filter: "all", card: { boardId: "board", taskId: null } });
+    expect(byBoard).toContain("w1:p1");
+    expect(byBoard).toContain("w1:p2");
+    expect(byBoard).not.toContain("w1:p3");
+    const none = formatFleet({ ...base, boards, snapshot: { envs: {}, sessions: [sessions[2] ?? row({})] }, filter: "all", card: { boardId: "board", taskId: "t_two" } });
+    expect(none).toContain("no sessions match");
+    expect(none).toContain("board/t_two");
+  });
 
   // The name a session answers to is its OWN name (`/rename`, `claude --name`), which the tab label
   // only happens to match when corral spawned it. Read from the registry, not the statusline capture:
@@ -513,17 +547,100 @@ describe("formatTaskPicker", () => {
     expect(out.split("\n").filter((l) => l.includes("board/fake") || l.includes("t_sneaky"))).toHaveLength(1);
   });
 
-  it("caps rows at 50 and truncates titles to 120 chars, reporting how many were dropped", () => {
-    const tasks: Task[] = Array.from({ length: 80 }, (_, i) => ({
-      id: `t_${String(i).padStart(3, "0")}`, title: "x".repeat(300), description: "",
-      status: "todo", priority: null, sessions: [], log: [], createdAt: 1, updatedAt: 1,
-    }));
-    const manyBoards: Board[] = [{ id: "board", label: "Board", columns: [{ id: "todo", label: "Todo" }], tasks, spawnPresets: [], defaultSpawnPresetId: null }];
+  const manyTasks: Task[] = Array.from({ length: 80 }, (_, i) => ({
+    id: `t_${String(i).padStart(3, "0")}`, title: "x".repeat(300), description: "",
+    status: "todo", priority: null, sessions: [], log: [], createdAt: i, updatedAt: i,
+  }));
+  const manyBoards: Board[] = [{ id: "board", label: "Board", columns: [{ id: "todo", label: "Todo" }], tasks: manyTasks, spawnPresets: [], defaultSpawnPresetId: null }];
+
+  it("caps rows at 50 and truncates titles to 120 chars, reporting how many were dropped and the next offset", () => {
     const out = formatTaskPicker(manyBoards);
     const rows = out.split("\n").filter((l) => l.startsWith("board/"));
     expect(rows).toHaveLength(50);
     expect(out).toContain("30 more");
+    expect(out).toContain("offset: 50");
     expect(out).not.toContain("x".repeat(121));
+  });
+
+  it("lists newest first within a priority, so a fresh card is on the first page", () => {
+    const out = formatTaskPicker(manyBoards);
+    const rows = out.split("\n").filter((l) => l.startsWith("board/"));
+    expect(rows[0]).toContain("board/t_079");
+    expect(out).not.toContain("t_000");
+  });
+
+  it("offset returns the next page and says where it starts", () => {
+    const out = formatTaskPicker(manyBoards, 50);
+    const rows = out.split("\n").filter((l) => l.startsWith("board/"));
+    expect(rows).toHaveLength(30);
+    expect(rows[0]).toContain("board/t_029");
+    expect(out).toContain("51–80 of 80");
+    expect(out).not.toContain("more");
+  });
+
+  it("refuses an offset past the end and names the last page's offset", () => {
+    const out = formatTaskPicker(manyBoards, 200);
+    expect(out).not.toContain("board/t_");
+    expect(out).toContain("past the end");
+    expect(out).toContain("offset: 50");
+  });
+
+  it("sorts across boards: a p0 card on a later board leads every p3 card on an earlier one", () => {
+    const first: Board = { ...manyBoards[0] ?? boards[0] ?? { id: "", label: "", columns: [], tasks: [], spawnPresets: [], defaultSpawnPresetId: null }, id: "a", tasks: manyTasks.map((t) => ({ ...t, priority: "p3" as const })) };
+    const second: Board = { ...first, id: "b", tasks: [{ ...manyTasks[0] ?? { id: "", title: "", description: "", status: "todo", priority: null, sessions: [], log: [], createdAt: 0, updatedAt: 0 }, id: "t_urgent", priority: "p0" as const }] };
+    const rows = formatTaskPicker([first, second]).split("\n").filter((l) => l.startsWith("a/") || l.startsWith("b/"));
+    expect(rows[0]).toContain("b/t_urgent");
+  });
+
+  it("tells the caller to repeat the arguments with the next offset", () => {
+    expect(formatTaskPicker(manyBoards)).toContain("same arguments and offset: 50");
+  });
+});
+
+describe("formatBoardOverview", () => {
+  const board: Board = {
+    id: "board", label: "Board",
+    columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
+    tasks: [
+      { id: "t_old", title: "Old", description: "", status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1, log: [] },
+      { id: "t_done", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 2, updatedAt: 2, log: [] },
+      { id: "t_new", title: "New", description: "", status: "todo", priority: "p1", sessions: [], createdAt: 3, updatedAt: 3, log: [] },
+    ],
+    spawnPresets: [], defaultSpawnPresetId: null,
+  };
+  const page = (tasks: readonly Task[], offset = 0, matched = tasks.length) => ({ tasks, matched, offset, limit: 50 });
+
+  it("prints the page in the order given and marks closed cards", () => {
+    const out = formatBoardOverview(board, page(board.tasks), {});
+    const rows = out.split("\n").filter((l) => l.startsWith("board/"));
+    expect(rows.map((r) => r.split("  ")[0])).toEqual(["board/t_old", "board/t_done", "board/t_new"]);
+    expect(rows[1]).toContain("[closed]");
+    expect(out).toContain("3 cards");
+  });
+
+  it("with a filter the header counts matches against the board total and names the filter", () => {
+    const out = formatBoardOverview(board, page(board.tasks.filter((t) => t.id === "t_new")), { open: true, q: "new" });
+    expect(out).toContain("1 of 3 cards match");
+    expect(out).toContain('open q="new"');
+  });
+
+  it("a partial page names the next offset; an offset past the end is refused with the last one", () => {
+    const more = formatBoardOverview(board, page(board.tasks.slice(0, 1), 0, 120), {});
+    expect(more).toContain("119 more");
+    expect(more).toContain("corral_board_read again with the same arguments and offset: 1");
+    const past = formatBoardOverview(board, page([], 500, 120), {});
+    expect(past).toContain("past the end");
+    expect(past).toContain("offset: 100");
+  });
+
+  it("names the last page correctly when the match count is an exact multiple of the page size", () => {
+    expect(formatBoardOverview(board, page([], 150, 100), {})).toContain("offset: 50");
+    expect(formatBoardOverview(board, page([], 50, 50), {})).toContain("offset: 0");
+  });
+
+  it("a filter that matches nothing says so, distinct from an empty board", () => {
+    expect(formatBoardOverview(board, page([]), { status: "todo", q: "zzz" })).toContain("no cards match");
+    expect(formatBoardOverview({ ...board, tasks: [] }, page([]), {})).toContain("has no cards");
   });
 });
 
@@ -702,7 +819,7 @@ describe("formatWhoami", () => {
       const recap = "r".repeat(1000);
       const out = formatFleet({
         snapshot: { envs: {}, sessions: [row({ recap })] },
-        attention: {}, boards: [], filter: "all", env: null, limit: 20, recapChars: 1000,
+        attention: {}, boards: [], filter: "all", env: null, limit: 20, offset: 0, card: null, recapChars: 1000,
         selfAccount: null, nowMs: 0,
       });
       expect(out).toContain(recap);
@@ -1055,6 +1172,18 @@ describe("formatCardDetail", () => {
     expect(out).toContain("  | next: do the other thing");
     expect(out).not.toContain("TRUNCATED");
     expect(out.toUpperCase()).not.toContain("WARNING");
+  });
+
+  it("prints the description rev of a whole view, empty included", () => {
+    expect(formatCardDetail(task)).toContain(`description rev: ${descriptionRev("board", "t_abcdefg", task.description)}`);
+    expect(formatCardDetail({ ...task, description: "" })).toContain(`description rev: ${descriptionRev("board", "t_abcdefg", "")}`);
+  });
+
+  it("withholds the rev of a truncated view, so a partial read cannot back a rewrite", () => {
+    const out = formatCardDetail({ ...task, description: "x\n".repeat(30_000) });
+    expect(out).toContain("TRUNCATED");
+    expect(out).toContain("description rev: unavailable");
+    expect(out).not.toMatch(/description rev: [0-9a-f]{12}/);
   });
 
   it("tells the caller the gutter is the tool's, not the card's, and must be stripped before writing back", () => {
