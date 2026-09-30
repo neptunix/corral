@@ -236,7 +236,7 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
           placeholder="Current direction: the stage goal, priorities, which cards come first, what not to touch right now."
           value={description} onChange={(e) => { setDescription(e.target.value); }} />
         <p className="text-[11px] text-muted-foreground mb-4">
-          Shown to every session bound to a card on this board, above its card in <code>corral_whoami</code>.
+          Every session working on a card here reads this when it starts, before its card.
           Use it for current goals and priorities; what the product is belongs in <code>CLAUDE.md</code>.
         </p>
         <label className="block text-xs text-muted-foreground mb-2">Columns</label>
