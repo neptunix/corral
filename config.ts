@@ -200,6 +200,8 @@ export const BRIEF_MAX_BYTES = intFromEnv("BRIEF_MAX_BYTES", 16384, { min: 1 });
 // update and growth compounds. Kept under corral_task_read's render budget (mcp/digest.ts) so what
 // was writable normally renders whole.
 export const TASK_DESCRIPTION_MAX_CHARS = intFromEnv("TASK_DESCRIPTION_MAX_CHARS", 32000, { min: 1 });
+// Rendered into every corral_whoami of the board and carried on every board frame.
+export const BOARD_DESCRIPTION_MAX_CHARS = 4000;
 // BACKSTOP delay before the server unlinks a brief (server/api.ts). The normal deletion is the
 // `rm -f` the launch command runs right after its own `$(cat …)` (server/spawn.ts), so on any pane
 // that actually runs the command the file is already gone long before this fires. This timer only

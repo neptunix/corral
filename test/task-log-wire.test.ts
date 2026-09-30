@@ -33,7 +33,7 @@ function board(): Board {
         workspaceLabel: "w", name: "worker-a", cwdSnapshot: "/repo", sessionId: SID,
       }],
     }],
-    spawnPresets: [], defaultSpawnPresetId: null,
+    description: "", spawnPresets: [], defaultSpawnPresetId: null,
   };
 }
 
@@ -138,7 +138,7 @@ describe("whoami carries the log's existence", () => {
 
   it("defaults the counters when an older corral server omits them", () => {
     const parsed = WhoamiTaskSchema.parse({
-      boardId: "b", boardLabel: "B", taskId: "t_abcdefg", title: "T", description: "d",
+      boardId: "b", boardLabel: "B", boardDescription: "", taskId: "t_abcdefg", title: "T", description: "d",
       status: "todo", priority: null, columns: [], sessions: [],
     });
     expect(parsed.logCount).toBe(0);

@@ -9,7 +9,7 @@ import { updateHandler } from "../mcp/tools/task-update.ts";
 
 const REV = "0123456789ab";
 const boundTask: WhoamiTask = {
-  boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Umbrella", description: "",
+  boardId: "board", boardLabel: "Board", boardDescription: "", taskId: "t_abcdefg", title: "Umbrella", description: "",
   status: "doing", priority: null,
   columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }, { id: "done", label: "Done", closed: true }],
   sessions: [], logCount: 0, lastLogAtMs: null, spawnedBy: null,
@@ -36,13 +36,13 @@ const boards: Board[] = [
       { id: "t_c2c2c2c", title: "C2", description: "c2 text", status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1, log: [] },
       { id: "t_closedd", title: "Closed", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1, log: [] },
     ],
-    spawnPresets: [], defaultSpawnPresetId: null,
+    description: "", spawnPresets: [], defaultSpawnPresetId: null,
   },
   {
     id: "other", label: "Other",
     columns: [{ id: "backlog", label: "Backlog" }, { id: "shipped", label: "Shipped", type: "closed" }],
     tasks: [{ id: "t_otherrr", title: "Elsewhere", description: "", status: "backlog", priority: null, sessions: [], createdAt: 1, updatedAt: 1, log: [] }],
-    spawnPresets: [], defaultSpawnPresetId: null,
+    description: "", spawnPresets: [], defaultSpawnPresetId: null,
   },
 ];
 

@@ -85,7 +85,7 @@ function task(id: string, sessions: SessionLink[]): Task {
 }
 
 function board(id: string, tasks: Task[]): Board {
-  return { id, label: id, columns: [{ id: "todo", label: "Todo" }], tasks, spawnPresets: [], defaultSpawnPresetId: null };
+  return { id, label: id, columns: [{ id: "todo", label: "Todo" }], tasks, description: "", spawnPresets: [], defaultSpawnPresetId: null };
 }
 
 describe("findCard — walks every board and every task, not just the first", () => {

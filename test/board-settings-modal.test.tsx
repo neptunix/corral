@@ -13,6 +13,7 @@ function makeBoard(overrides: Partial<BoardFrame> = {}): BoardFrame {
     label: "Original name",
     columns: [{ id: "c1", label: "To do" }, { id: "c2", label: "Done", type: "closed" }],
     tasks: [],
+    description: "",
     spawnPresets: [{ id: "p1", text: "/plan" }],
     defaultSpawnPresetId: null,
     ...overrides,
@@ -136,6 +137,28 @@ describe("BoardSettingsModal — start-command rows", () => {
     // A default id that survived into the patch would dangle: the server resolves it to null anyway,
     // so disagreeing here would just make the saved board differ from what the form showed.
     expect(onSave.mock.calls[0]?.[0].defaultSpawnPresetId).toBeNull();
+  });
+});
+
+describe("BoardSettingsModal — board description", () => {
+  it("shows the stored description and saves the edited one trimmed", async () => {
+    const onSave = vi.fn(() => Promise.resolve());
+    render(<BoardSettingsModal board={makeBoard({ description: "Ship 1.0" })} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+
+    expect(screen.getByLabelText("Board description")).toHaveProperty("value", "Ship 1.0");
+    fireEvent.change(screen.getByLabelText("Board description"), { target: { value: "  Stabilise first\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => { expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ description: "Stabilise first" })); });
+  });
+});
+
+describe("BoardSettingsModal — board description, untouched", () => {
+  it("saves the stored description back unchanged when it was not edited", async () => {
+    const onSave = vi.fn(() => Promise.resolve());
+    render(<BoardSettingsModal board={makeBoard({ description: "Ship 1.0" })} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => { expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ description: "Ship 1.0" })); });
   });
 });
 

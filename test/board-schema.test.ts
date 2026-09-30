@@ -37,6 +37,7 @@ describe("BoardSchema", () => {
   it("parses a valid board", () => {
     const b = BoardSchema.parse({ id: "personal", label: "Personal", columns: [{ id: "todo", label: "Todo" }] });
     expect(b.tasks).toEqual([]);
+    expect(b.description).toBe("");
   });
 
   it("rejects missing id", () => {

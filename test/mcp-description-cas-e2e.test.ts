@@ -24,7 +24,7 @@ const board: Board = BoardSchema.parse({
     { id: "t_umbrell", title: "Umbrella", description: "umbrella text", status: "todo", priority: null, createdAt: 1, updatedAt: 1, log: [], sessions: [] },
     { id: "t_c2c2c2c", title: "C2", description: "c2 text", status: "todo", priority: null, createdAt: 1, updatedAt: 1, log: [], sessions: [] },
   ],
-  spawnPresets: [], defaultSpawnPresetId: null,
+  description: "", spawnPresets: [], defaultSpawnPresetId: null,
 });
 
 let dir: string;
@@ -63,7 +63,7 @@ function setup(): { readonly deps: { client: CorralClient; identity: ReturnType<
       model: null, ctxPct: null, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null, remoteControl: null,
     },
     task: {
-      boardId: "b", boardLabel: "B", taskId: "t_umbrell", title: "Umbrella", description: "umbrella text", status: "todo",
+      boardId: "b", boardLabel: "B", boardDescription: "", taskId: "t_umbrell", title: "Umbrella", description: "umbrella text", status: "todo",
       priority: null, columns: [{ id: "todo", label: "Todo", closed: false }, { id: "done", label: "Done", closed: true }],
       sessions: [], logCount: 0, lastLogAtMs: null, spawnedBy: null,
     },

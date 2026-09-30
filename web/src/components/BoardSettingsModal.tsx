@@ -10,7 +10,7 @@ interface Props {
   readonly board: BoardFrame;
   // Returns a promise that REJECTS on a refused save, so handleSave can keep the modal open and
   // show the server's message instead of closing on a failure it never saw.
-  readonly onSave: (patch: { label?: string; columns?: Column[]; spawnPresets?: SpawnPreset[]; defaultSpawnPresetId?: string | null }) => Promise<void>;
+  readonly onSave: (patch: { label?: string; columns?: Column[]; description?: string; spawnPresets?: SpawnPreset[]; defaultSpawnPresetId?: string | null }) => Promise<void>;
   // Same reject-on-refusal contract as onSave — a board_not_empty refusal (e.g. a task landed on the
   // board from another tab after this modal opened) surfaces through the same saveError channel.
   readonly onDelete: () => Promise<void>;
@@ -85,6 +85,7 @@ function SortableColumnRow({ col, isLanding, skipsClosedAbove, canRemove, onRena
 
 export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props): JSX.Element {
   const [label, setLabel] = useState(board.label);
+  const [description, setDescription] = useState(board.description);
   const [columns, setColumns] = useState<Column[]>([...board.columns]);
   const [newColLabel, setNewColLabel] = useState("");
   const [presets, setPresets] = useState<SpawnPreset[]>([...board.spawnPresets]);
@@ -195,6 +196,7 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
       await onSave({
         label: label.trim(),
         columns,
+        description: description.trim(),
         spawnPresets: kept,
         defaultSpawnPresetId: kept.some((p) => p.id === defaultPresetId) ? defaultPresetId : null,
       });
@@ -228,6 +230,15 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
         <label className="block text-xs text-muted-foreground mb-1">Board name</label>
         <input className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-4"
           value={label} onChange={(e) => { setLabel(e.target.value); }} />
+        <label className="block text-xs text-muted-foreground mb-1" htmlFor="board-description">Board description</label>
+        <textarea id="board-description" rows={5}
+          className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm placeholder:text-muted-foreground/70"
+          placeholder="Current direction: the stage goal, priorities, which cards come first, what not to touch right now."
+          value={description} onChange={(e) => { setDescription(e.target.value); }} />
+        <p className="text-[11px] text-muted-foreground mb-4">
+          Every session working on a card here reads this when it starts, before its card.
+          Use it for current goals and priorities; what the product is belongs in <code>CLAUDE.md</code>.
+        </p>
         <label className="block text-xs text-muted-foreground mb-2">Columns</label>
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
           <SortableContext items={columns.map((c) => c.id)} strategy={verticalListSortingStrategy}>

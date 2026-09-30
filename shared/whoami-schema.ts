@@ -69,6 +69,8 @@ export const WhoamiColumnSchema = z.object({ id: z.string(), label: z.string(), 
 export const WhoamiTaskSchema = z.object({
   boardId: z.string(),
   boardLabel: z.string(),
+  // Defaulted: an MCP client may talk to a server that predates the field.
+  boardDescription: z.string().default(""),
   taskId: z.string(),
   title: z.string(),
   description: z.string(),

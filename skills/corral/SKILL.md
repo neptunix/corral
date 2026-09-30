@@ -43,6 +43,8 @@ description: Use when this session runs under corral (the corral_* MCP tools exi
 1. `corral_whoami`.
 2. **Bound** → the card is the assignment. `corral_task_read` for its description — the task — and its
    log — what has already happened on it. Start from both, not from zero.
+   A `board description` block above the card is the operator's current direction for the whole
+   board — priorities and what not to touch. It bounds the card; the card is still the task.
 3. **Unbound** → `corral_task_bind` with no arguments, then bind to the card this work belongs to. If
    no card fits and the work is a genuinely new task, `corral_task_create` makes one — it does not
    bind or spawn; bind to it afterwards. When in doubt whether a new card is wanted, ask.

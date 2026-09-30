@@ -32,7 +32,7 @@ function board(over: Partial<Board>): Board {
   return {
     id: "b", label: "Board",
     columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
-    tasks: [], spawnPresets: [], defaultSpawnPresetId: null, ...over,
+    tasks: [], description: "", spawnPresets: [], defaultSpawnPresetId: null, ...over,
   };
 }
 

@@ -17,7 +17,7 @@ const board: BoardFrame = {
     card({ id: "t_new", priority: null, createdAt: 3, status: "doing" }),
     card({ id: "t_done", priority: "p0", createdAt: 4, status: "done" }),
   ],
-  spawnPresets: [], defaultSpawnPresetId: null,
+  description: "", spawnPresets: [], defaultSpawnPresetId: null,
 };
 
 describe("pageCards", () => {

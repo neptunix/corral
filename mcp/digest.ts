@@ -47,6 +47,8 @@ const DESCRIPTION_LINE_PREFIX = "  | ";
 // log line carries it, so no entry can produce a raw line that reads as one of formatCardDetail's
 // structural rows.
 export const LOG_LINE_PREFIX = "  > ";
+// The board description's gutter, distinct from the two above so a reader can tell the blocks apart.
+const BOARD_DESCRIPTION_LINE_PREFIX = "  ~ ";
 // The two marks that follow the gutter, and the reason a header cannot be forged from an entry's own
 // text: a header is the ONLY line whose gutter is followed by `# `, and every text line's gutter is
 // followed by two spaces — a mark this function writes, never the caller. Indentation alone was not
@@ -876,6 +878,21 @@ function formatSpawnedByLine(spawnedBy: WhoamiTask["spawnedBy"], selfAccount: st
   return `spawned by: ${spawnedBy.name} (${spawnedBy.running ? "running" : "closed"})${capturedNote}${accountMarker(selfAccount, spawnedBy.account)}`;
 }
 
+// Hard-wrapped rather than left to `emit`, which would cut a long paragraph the PATCH cap allowed.
+function wrapToWidth(line: string, width: number): string[] {
+  if (line.length <= width) return [line];
+  return Array.from({ length: Math.ceil(line.length / width) }, (_, i) => line.slice(i * width, (i + 1) * width));
+}
+
+// Operator prose, so every line is gutter-prefixed: none can read as one of formatWhoami's own rows.
+function renderBoardDescription(raw: string): string[] {
+  if (raw.trim() === "") return [];
+  return [
+    `board description (the operator's current direction for this board; each line below carries a leading "${BOARD_DESCRIPTION_LINE_PREFIX}" added by this tool):`,
+    ...splitLines(raw).flatMap((line) => wrapToWidth(line, LINE_MAX - BOARD_DESCRIPTION_LINE_PREFIX.length).map((chunk) => `${BOARD_DESCRIPTION_LINE_PREFIX}${chunk}`)),
+  ];
+}
+
 /** The whoami rendering. Compact but complete — this is the one call every session makes at start. */
 export function formatWhoami(w: WhoamiResolved): string {
   const s = w.session;
@@ -921,6 +938,7 @@ export function formatWhoami(w: WhoamiResolved): string {
     const shownSessions = t.sessions.slice(0, WHOAMI_SESSIONS_MAX);
     const sessionsDropped = t.sessions.length - shownSessions.length;
     lines.push(
+      ...renderBoardDescription(t.boardDescription),
       `card: ${t.boardId}/${t.taskId}  ${t.priority ?? "--"}  ${t.status}  ${title}`,
       columnsLine,
       describePreview(t.description),

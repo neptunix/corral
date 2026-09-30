@@ -14,7 +14,7 @@ const resolvedBody: WhoamiResponse = {
     ctxPct: 41, costUsd: null, fiveHourPct: null, sevenDayPct: null, account: null, remoteControl: null,
   },
   task: {
-    boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "T",
+    boardId: "board", boardLabel: "Board", boardDescription: "", taskId: "t_abcdefg", title: "T",
     description: "", status: "doing", priority: null, columns: [{ id: "doing", label: "Doing", closed: false }],
     sessions: [], logCount: 0, lastLogAtMs: null, spawnedBy: null,
   },

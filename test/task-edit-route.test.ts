@@ -16,7 +16,7 @@ const board: Board = BoardSchema.parse({
   id: "b", label: "B",
   columns: [{ id: "todo", label: "Todo" }, { id: "doing", label: "Doing" }],
   tasks: [{ id: "t_aaaaaaa", title: "T", description: "old", status: "todo", priority: null, createdAt: 1, updatedAt: 2, log: [], sessions: [] }],
-  spawnPresets: [], defaultSpawnPresetId: null,
+  description: "", spawnPresets: [], defaultSpawnPresetId: null,
 });
 
 let dir: string;

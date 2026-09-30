@@ -113,7 +113,7 @@ describe("readHandler", () => {
   // exists to return whole.
   const description = Array.from({ length: 200 }, (_, i) => `entry ${String(i)}`).join("\n");
   const boundTask = {
-    boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "Refactor the API",
+    boardId: "board", boardLabel: "Board", boardDescription: "", taskId: "t_abcdefg", title: "Refactor the API",
     description, status: "doing", priority: null,
     columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
     sessions: [], logCount: 0, noteCount: 0, lastLogAtMs: null, spawnedBy: null,
@@ -160,7 +160,7 @@ describe("fleetHandler", () => {
   it("scopes rows to a card or a board, and refuses a bare or unknown id with the valid ones", async () => {
     const link = { env: "work-local", paneId: "w1:p1", tabId: "t", tabLabel: "a", workspaceId: "w", workspaceLabel: "r", name: "a", cwdSnapshot: "/r", sessionId: null };
     const boards = [{
-      id: "board", label: "Board", columns: [{ id: "todo", label: "Todo" }], spawnPresets: [], defaultSpawnPresetId: null,
+      id: "board", label: "Board", columns: [{ id: "todo", label: "Todo" }], description: "", spawnPresets: [], defaultSpawnPresetId: null,
       tasks: [
         { id: "t_one", title: "One", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions: [link] },
         { id: "t_two", title: "Two", description: "", status: "todo", priority: null, createdAt: 1, updatedAt: 1, sessions: [{ ...link, paneId: "w1:p2" }] },

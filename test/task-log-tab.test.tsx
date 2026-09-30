@@ -15,7 +15,7 @@ function entry(over: Partial<LogEntry> & { readonly id: string }): LogEntry {
 
 function boardWith(log: LogEntry[], taskId = "t1"): Board {
   return {
-    id: "b1", label: "Board", columns: [{ id: "c1", label: "To do" }], spawnPresets: [], defaultSpawnPresetId: null,
+    id: "b1", label: "Board", columns: [{ id: "c1", label: "To do" }], description: "", spawnPresets: [], defaultSpawnPresetId: null,
     tasks: [{ id: taskId, title: "T", description: "", status: "c1", priority: null, sessions: [], log, createdAt: 0, updatedAt: 0 }],
   };
 }

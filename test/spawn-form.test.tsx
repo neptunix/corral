@@ -41,7 +41,7 @@ function makeBoard(overrides: Partial<Board> = {}): Board {
     label: "Board one",
     columns: [{ id: "c1", label: "To do" }],
     tasks: [],
-    spawnPresets: [],
+    description: "", spawnPresets: [],
     defaultSpawnPresetId: null,
     ...overrides,
   };

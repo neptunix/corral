@@ -11,7 +11,7 @@ import { bindHandler } from "../mcp/tools/task.ts";
 const SID = "11111111-2222-3333-4444-555555555555";
 const SID_B = "99999999-8888-7777-6666-555555555555";
 const boundTask: WhoamiTask = {
-  boardId: "board", boardLabel: "Board", taskId: "t_abcdefg", title: "T", description: "",
+  boardId: "board", boardLabel: "Board", boardDescription: "", taskId: "t_abcdefg", title: "T", description: "",
   status: "doing", priority: null,
   columns: [{ id: "todo", label: "Todo", closed: false }, { id: "doing", label: "Doing", closed: false }],
   sessions: [], logCount: 0, lastLogAtMs: null, spawnedBy: null,
@@ -36,7 +36,7 @@ const boards: Board[] = [{
   id: "board", label: "Board",
   columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
   tasks: [{ id: "t_aaaaaaa", title: "Open one", description: "", status: "todo", priority: "p1", sessions: [], createdAt: 1, updatedAt: 1 , log: []}],
-  spawnPresets: [], defaultSpawnPresetId: null,
+  description: "", spawnPresets: [], defaultSpawnPresetId: null,
 }];
 
 function stub(over: Partial<CorralClient>): CorralClient {
@@ -67,7 +67,7 @@ describe("bindHandler", () => {
   });
 
   it("boardId alone narrows the listing to that board; an unknown one is refused with the ids", async () => {
-    const second: Board = { ...boards[0] ?? { id: "", label: "", columns: [], tasks: [], spawnPresets: [], defaultSpawnPresetId: null }, id: "second", tasks: [{ id: "t_second1", title: "Elsewhere", description: "", status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1, log: [] }] };
+    const second: Board = { ...boards[0] ?? { id: "", label: "", columns: [], tasks: [], description: "", spawnPresets: [], defaultSpawnPresetId: null }, id: "second", tasks: [{ id: "t_second1", title: "Elsewhere", description: "", status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1, log: [] }] };
     const c = stub({ whoami: async () => unbound, boards: async () => [...boards, second] });
     const narrowed = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "second" });
     expect(narrowed).toContain("t_second1");
@@ -143,7 +143,7 @@ describe("bindHandler", () => {
       id: "board", label: "Board",
       columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
       tasks: [{ id: "t_done001", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 , log: []}],
-      spawnPresets: [], defaultSpawnPresetId: null,
+      description: "", spawnPresets: [], defaultSpawnPresetId: null,
     }];
     const calls: unknown[] = [];
     const c = stub({ whoami: async () => unbound, boards: async () => closedBoards, attach: async (a) => { calls.push(a); } });
@@ -164,7 +164,7 @@ describe("bindHandler", () => {
       id: "board", label: "Board",
       columns: [{ id: "todo", label: "Todo" }, { id: "done", label: "Done", type: "closed" }],
       tasks: [{ id: "t_done001", title: "Shipped", description: "", status: "done", priority: null, sessions: [], createdAt: 1, updatedAt: 1 , log: []}],
-      spawnPresets: [], defaultSpawnPresetId: null,
+      description: "", spawnPresets: [], defaultSpawnPresetId: null,
     }];
     const c = stub({ whoami: async () => unbound, boards: async () => closedBoards });
     const closedOut = await bindHandler({ client: c, identity: idOf(c) }, { boardId: "board", taskId: "t_done001" });
