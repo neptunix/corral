@@ -83,6 +83,14 @@ describe("sortTasks", () => {
     ];
     expect(sortTasks(tasks).map(t => t.id)).toEqual(["b", "a"]);
   });
+
+  it("accepts task frames — the MCP sees no log field", () => {
+    const frames = [
+      { id: "a", title: "a", status: "todo", priority: null, description: "", sessions: [], createdAt: 1, updatedAt: 1 },
+      { id: "b", title: "b", status: "todo", priority: "p2" as const, description: "", sessions: [], createdAt: 2, updatedAt: 2 },
+    ];
+    expect(sortTasks(frames).map(t => t.id)).toEqual(["b", "a"]);
+  });
 });
 
 describe("slugifyBoardId", () => {

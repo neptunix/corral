@@ -5,8 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { CorralClient } from "../mcp/client.ts";
 import { createIdentity } from "../mcp/identity.ts";
+import { boardReadHandler } from "../mcp/tools/board-read.ts";
 import { closeHandler, spawnHandler } from "../mcp/tools/session.ts";
-import { boardReadHandler, createHandler, logHandler, readHandler } from "../mcp/tools/task.ts";
+import { createHandler, logHandler, readHandler } from "../mcp/tools/task.ts";
 
 const SID = "11111111-2222-3333-4444-555555555555";
 
@@ -56,7 +57,7 @@ function stub(over: Partial<CorralClient>): CorralClient {
     createTask: async () => ({ id: "t_new1234", title: "New", description: "", status: "todo", priority: null, sessions: [], createdAt: 1, updatedAt: 1 }),
     state: async () => ({ envs: {}, sessions: [] }),
     boards: async () => [ownBoard, otherBoard],
-    patchTask: async () => { throw new Error("unused"); },
+    editTask: async () => { throw new Error("unused"); },
     attach: async () => undefined,
     spawn: async () => ({ env: "work-local", paneId: "w1:p2", name: "n", workspaceLabel: "repo", cwdSnapshot: "/repo", idempotent: false }),
     closeSession: async () => undefined,
@@ -142,6 +143,46 @@ describe("corral_board_read — shows closed-column cards that the bind picker h
     expect(out).toContain("other/t_other11");
     expect(out).toContain("other/t_closed1");
     expect(out).toContain("[closed]");
+  });
+
+  it("open hides the closed card; status keeps one column; q matches the title", async () => {
+    const open = await boardReadHandler(deps(stub({})), { boardId: "other", open: true });
+    expect(open).toContain("t_other11");
+    expect(open).not.toContain("t_closed1");
+    const done = await boardReadHandler(deps(stub({})), { boardId: "other", status: "done" });
+    expect(done).toContain("t_closed1");
+    expect(done).not.toContain("t_other11");
+    const q = await boardReadHandler(deps(stub({})), { boardId: "other", q: "THEIR", priority: "p2" });
+    expect(q).toContain("t_other11");
+    expect(q).not.toContain("t_closed1");
+  });
+
+  it("refuses a status that is not a column of THAT board, listing its column ids", async () => {
+    const out = await boardReadHandler(deps(stub({})), { boardId: "other", status: "doing" });
+    expect(out).not.toContain("t_other11");
+    expect(out).toContain("todo");
+    expect(out).toContain("done");
+    expect(out).toContain('"doing"');
+  });
+
+  it("refuses an unknown board with the ids that exist", async () => {
+    const out = await boardReadHandler(deps(stub({})), { boardId: "nope" });
+    expect(out).toContain("no board");
+    expect(out).toContain("board, other");
+  });
+
+  it("defaults to this session's own board, and refuses an unbound session", async () => {
+    const own = await boardReadHandler(deps(stub({})), {});
+    expect(own).toContain("board/t_abcdefg");
+    expect(own).not.toContain("other/");
+    const unbound = await boardReadHandler(deps(stub({ whoami: async () => ({ ...bound, task: null }) })), {});
+    expect(unbound).toContain("corral_task_bind");
+  });
+
+  it("refuses an offset past the end with the last page's offset", async () => {
+    const out = await boardReadHandler(deps(stub({})), { boardId: "other", offset: 7 });
+    expect(out).toContain("past the end");
+    expect(out).toContain("offset: 0");
   });
 });
 

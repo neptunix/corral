@@ -15,13 +15,21 @@ description: Use when this session runs under corral (the corral_* MCP tools exi
   and it hides cards in closed columns. A card you cannot see there cannot be bound to. To survey ONE
   board including its closed-column cards — how you find a session still running behind a closed card —
   use `corral_board_read`.
+- **Listings are pages, sorted by priority and then newest first** (`corral_board_read` puts open
+  cards before closed ones). `corral_task_bind`, `corral_board_read` and `corral_fleet` show 50
+  (fleet: `limit`) rows and end with the `offset` for the next page when more matched — "not on the
+  first page" is not "does not exist". Repeat the same arguments with that `offset`; a bare `offset`
+  pages a different list. A card you are looking for by column, priority or title is a
+  `corral_board_read` filter away (`status`, `open`, `priority`, `q`); the sessions on one card are
+  `corral_fleet` with its `{boardId, taskId}`.
 - **A card is addressed by `{boardId, taskId}` together, never a bare `taskId`.** A task id is a
-  nanoid unique only within its board. `corral_task_read`, `corral_task_log` and `corral_spawn` default
-  to this session's own card and take an optional `{boardId, taskId}` to reach another; you learn
+  nanoid unique only within its board. `corral_task_read`, `corral_task_log`, `corral_task_update` and
+  `corral_spawn` default to this session's own card and take an optional `{boardId, taskId}` to reach
+  another; you learn
   another card's `boardId` from the no-argument `corral_task_bind` listing or `corral_board_read`.
 - **`corral_whoami`'s description counts are a heuristic, not proof.** An edit that preserves both the
-  length and the line count is invisible in the preview, and the write path has no concurrency check.
-  Use the counts to skip a redundant re-read; never to license a full-replacement write.
+  length and the line count is invisible in the preview. Use the counts to skip a redundant re-read;
+  a description rewrite needs the `description rev` only `corral_task_read` prints.
 - **Missing metrics are usually not a broken session.** Right after a pane starts, `session id`,
   `model`, `ctx` and `cost` may all be `—` while identity, cwd and the card are already correct — call
   again later. Still empty minutes in means the herdr Claude integration is not installed on that
@@ -52,8 +60,7 @@ The card has two fields, and they answer different questions.
   history: the log holds a fixed number of entries and the oldest are dropped once it is full.
   Corral also stamps its own lifecycle entries here (a card created, a session spawned/bound/closed,
   a status change); `corral_task_read`'s `kind` filter pulls the notes back out of that noise. You may
-  append to ANOTHER card's log (`corral_task_log` with its `{boardId, taskId}`) even though you can
-  only rewrite your own — adding to a card you are not bound to is allowed; changing it is not.
+  append to ANOTHER card's log (`corral_task_log` with its `{boardId, taskId}`).
 
 Writing an outcome into the description is the failure the split exists to prevent — it overwrites
 the statement of the task with a record of the work, and the next session inherits a card that no
@@ -109,8 +116,11 @@ column stops being read.
 An operator who names the column is making the move themselves — write it without arguing; only
 deciding it for them is forbidden.
 
-`corral_task_read` in the same turn you rewrite the description, and edit around what it returned.
-The log needs none of that — appending never edits what is already there.
+`corral_task_read` in the same turn you rewrite the description, edit around what it returned, and
+pass its `description rev` as `baseRev`. A refusal that the description changed means another writer
+got there first: read again and merge, never resend. `unavailable` means the read was truncated —
+that description is the operator's to edit in the corral UI. The log needs none of that — appending
+never edits what is already there.
 
 ## Talking to another session
 
@@ -188,8 +198,8 @@ Handoff itself follows the procedure below — wait for the operator, never spaw
 `[corral] card empty` appears on prompts when the card this session is bound to has no description.
 
 - **You know the task** — from your spawn brief or the operator's request — write it now, per
-  "Keeping the card current", and `corral_task_read` in the same turn: another session may be on this
-  card and the write replaces the whole field.
+  "Keeping the card current": `corral_task_read` first, then write with the `description rev` it
+  printed — another session may be on this card, and the write replaces the whole field.
 - **Only a title exists and nothing told you the task** — do not invent one. A description nobody
   wrote is worse than an empty card: empty is honest, invention looks written and gets believed. Say
   the card is empty, state what you do know, and ask.
