@@ -254,7 +254,7 @@ describe("TaskEditModal — fix-issues extraPreset", () => {
     const board = makeBoard({ spawnPresets: [{ id: "p1", text: "/existing" }], defaultSpawnPresetId: "p1" });
     const extraPreset = { id: "corral-doctor-fix", text: "/corral-doctor fix\n\nfix jq" };
     render(<TaskEditModal task={makeTask()} board={board} {...baseProps}
-      envs={[{ id: "e1", label: "Env1", kind: "local", reachable: true }]}
+      envs={[{ id: "e1", label: "Env1", reachable: true }]}
       onSave={vi.fn()} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()}
       initialTab="run" extraPreset={extraPreset} />);
     const option = screen.getByRole("option", { name: "/corral-doctor fix" });
@@ -265,7 +265,7 @@ describe("TaskEditModal — fix-issues extraPreset", () => {
   it("falls back to the board's own default preset when extraPreset is absent", () => {
     const board = makeBoard({ spawnPresets: [{ id: "p1", text: "/existing" }], defaultSpawnPresetId: "p1" });
     render(<TaskEditModal task={makeTask()} board={board} {...baseProps}
-      envs={[{ id: "e1", label: "Env1", kind: "local", reachable: true }]}
+      envs={[{ id: "e1", label: "Env1", reachable: true }]}
       onSave={vi.fn()} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()} initialTab="run" />);
     expect(screen.queryByRole("option", { name: "/corral-doctor fix" })).toBeNull();
     const option = screen.getByRole("option", { name: "/existing" });

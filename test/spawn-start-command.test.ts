@@ -55,6 +55,34 @@ describe("POST spawn with a startCommand", () => {
     });
   }
 
+  it("writes a remote start command over ssh, verbatim, and hands spawn the remote path", async () => {
+    const writes: { name: string; text: string }[] = [];
+    const a = createApi({
+      poller, envs: ENVIRONMENTS, storage: createStorage(tmpDir),
+      briefRoot: path.join(tmpDir, "briefs"),
+      writeRemote: (_env, o) => {
+        writes.push({ name: o.name, text: new TextDecoder().decode(o.bytes) });
+        return Promise.resolve("/remote/tmp/corral-upload.abc/brief.md");
+      },
+      spawn: async (opts) => {
+        seen.push(opts);
+        return {
+          paneId: "w1:p2", tabId: "t2", workspaceId: "ws1", workspaceLabel: "repo",
+          tabLabel: "refactor-the-api-a", cwdSnapshot: "/repo", idempotent: false,
+        };
+      },
+    });
+    const tid = await makeBoardAndTask(a);
+    const res = await a.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-remote", repo: "repo", startCommand: "/plan" }),
+    });
+    expect(res.status).toBe(200);
+    expect(writes).toEqual([{ name: "brief.md", text: "/plan" }]);
+    expect(seen[0]?.briefPath).toBe("/remote/tmp/corral-upload.abc/brief.md");
+    expect(seen[0]?.briefFallback).not.toContain("handoff");
+  });
+
   it("rejects startCommand and brief sent together", async () => {
     const a = app();
     const tid = await makeBoardAndTask(a);
