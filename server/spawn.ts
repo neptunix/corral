@@ -127,9 +127,7 @@ export interface SpawnOpts {
   // Part A/B: which command to send, and where to land.
   readonly spawnCommand?: string;                 // default "claude"
   readonly resumeSessionId?: string;   // when set: run `${spawnCommand} --resume <uuid>` and force the tab cwd
-  // Absolute path to a brief file on the pane's own host. When set (and not resuming), the launch
-  // command reads it through the pane's shell, so the brief's bytes never enter a command string —
-  // only this server-generated, shell-quoted path does.
+  // Brief file on the pane's own host; the launch command cats it, so its bytes never enter a command string.
   readonly briefPath?: string;
   /** What the pane shows when the shell cannot read the brief file. Defaults to BRIEF_FALLBACK, whose
    *  wording is about a LOST HANDOFF — wrong for a start command, where nothing was handed off and no
