@@ -447,7 +447,7 @@ export function Board({
           // the snapshot only until the next frame carries the card (a just-created one).
           task={tasks.find((t) => t.id === editingTask.id) ?? editingTask}
           board={board}
-          envs={Object.entries(envs).map(([id, e]) => ({ id, label: e.label ?? id, kind: e.kind ?? null, reachable: e.reachable }))}
+          envs={Object.entries(envs).map(([id, e]) => ({ id, label: e.label ?? id, reachable: e.reachable }))}
           onSave={handleSave}
           onDelete={handleDelete}
           onSpawn={async (body) => {

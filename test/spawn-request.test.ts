@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildSpawnRequest, type SpawnFormState } from "../web/src/lib/spawn-request.ts";
 
 const base: SpawnFormState = {
-  env: "work-local", envKind: "local", targetWorkspaceId: null, repo: "repo",
+  env: "work-local", targetWorkspaceId: null, repo: "repo",
   model: null, remoteControl: false, startCommand: null,
 };
 
@@ -12,19 +12,9 @@ describe("buildSpawnRequest", () => {
     expect(buildSpawnRequest(base)).toEqual({ env: "work-local", targetWorkspaceId: null, repo: "repo", spawnedBy: "operator" });
   });
 
-  it("sends the start command on a local env", () => {
+  it("sends the start command", () => {
     expect(buildSpawnRequest({ ...base, startCommand: "/plan" }))
       .toEqual({ env: "work-local", targetWorkspaceId: null, repo: "repo", startCommand: "/plan", spawnedBy: "operator" });
-  });
-
-  it("omits the start command on a remote env", () => {
-    expect(buildSpawnRequest({ ...base, envKind: "remote", startCommand: "/plan" }))
-      .toEqual({ env: "work-local", targetWorkspaceId: null, repo: "repo", spawnedBy: "operator" });
-  });
-
-  it("omits the start command when the env kind is unknown — unknown is NOT local", () => {
-    expect(buildSpawnRequest({ ...base, envKind: null, startCommand: "/plan" }))
-      .toEqual({ env: "work-local", targetWorkspaceId: null, repo: "repo", spawnedBy: "operator" });
   });
 
   it("still sends model and remoteControl when set", () => {

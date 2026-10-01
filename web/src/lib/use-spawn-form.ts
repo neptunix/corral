@@ -9,7 +9,6 @@ import { buildSpawnRequest } from "./spawn-request";
 export interface SpawnEnvOption {
   readonly id: string;
   readonly label: string;
-  readonly kind: "local" | "remote" | null; // null = unknown → treated as NOT local
   readonly reachable: boolean;
 }
 
@@ -53,7 +52,6 @@ export interface SpawnForm {
   readonly newRepoOptions: readonly Repo[];
   readonly noTargets: boolean;
   readonly envReachable: boolean;
-  readonly commandAllowed: boolean;
   readonly target: string;
   readonly chooseTarget: (value: string) => void;
   readonly model: string;
@@ -97,13 +95,9 @@ export function useSpawnForm({ envs, presets, defaultPresetId, onSpawn, onSpawne
   const [targets, setTargets] = useState<TargetsState>({ phase: "loading" });
   const [selectedTarget, setSelectedTarget] = useState<string>(""); // a workspaceId (join) or "new:<repo>" (create)
   const [spawnError, setSpawnError] = useState<string | null>(null);
-  // Deliberately NOT reset when spawnEnv changes — buildSpawnRequest already drops it for a non-local
-  // env, so the operator's pick survives switching away and back rather than being lost.
   const [presetId, setPresetId] = useState<string | null>(defaultPresetId);
   const selectedPreset = presets.find((p) => p.id === presetId) ?? null;
-  const envKind = envs.find((e) => e.id === spawnEnv)?.kind ?? null;
   const envReachable = envs.find((e) => e.id === spawnEnv)?.reachable ?? true;
-  const commandAllowed = envKind === "local";
 
   // Fetch spawn targets for the chosen env. The targets request itself CATCHES an unreachable env
   // (server/api.ts) and still returns 200 with the configured repos, so "error" phase here means the
@@ -176,7 +170,6 @@ export function useSpawnForm({ envs, presets, defaultPresetId, onSpawn, onSpawne
       const repoArg = isNew ? selectedTarget.slice(4) : null;
       const link = await onSpawn(buildSpawnRequest({
         env: spawnEnv,
-        envKind,
         targetWorkspaceId,
         repo: repoArg,
         model: spawnModel === "" ? null : spawnModel,
@@ -201,7 +194,6 @@ export function useSpawnForm({ envs, presets, defaultPresetId, onSpawn, onSpawne
     newRepoOptions,
     noTargets,
     envReachable,
-    commandAllowed,
     target: selectedTarget,
     chooseTarget,
     model: spawnModel,

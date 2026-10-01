@@ -27,12 +27,12 @@ afterEach(() => {
 });
 
 const envs: SpawnEnvOption[] = [
-  { id: "local", label: "local", kind: "local", reachable: true },
-  { id: "other", label: "other", kind: "local", reachable: true },
-  { id: "empty", label: "empty", kind: "local", reachable: true }, // settled, genuinely no targets
-  { id: "boom", label: "boom", kind: "local", reachable: true }, // the targets request itself fails
-  { id: "far", label: "far", kind: "remote", reachable: true }, // remote → no start command
-  { id: "down", label: "down", kind: "local", reachable: false }, // corral cannot reach it
+  { id: "local", label: "local", reachable: true },
+  { id: "other", label: "other", reachable: true },
+  { id: "empty", label: "empty", reachable: true }, // settled, genuinely no targets
+  { id: "boom", label: "boom", reachable: true }, // the targets request itself fails
+  { id: "far", label: "far", reachable: true }, // stands in for a remote env
+  { id: "down", label: "down", reachable: false }, // corral cannot reach it
 ];
 
 function makeBoard(overrides: Partial<Board> = {}): Board {
@@ -259,14 +259,20 @@ describe("spawn form — why a target cannot be picked", () => {
     expect(screen.queryByText(/No spaces or configured repos/)).toBeNull();
   });
 
-  it("locks the start command on a remote env and says the pick is kept", async () => {
-    renderModal(makeBoard({ spawnPresets: [{ id: "p1", text: "/plan" }], defaultSpawnPresetId: "p1" }));
+  it("sends the start command to a remote env", async () => {
+    const onSpawn = vi.fn((_body: SpawnRequestBody) => Promise.resolve(link));
+    renderModal(makeBoard({ spawnPresets: [{ id: "p1", text: "/plan" }], defaultSpawnPresetId: "p1" }), onSpawn);
     openRunTab();
     fireEvent.change(getSelectAfter("Environment"), { target: { value: "far" } });
 
-    await waitFor(() => { expect(screen.getByText(/local environments only/)).toBeDefined(); });
-    expect(getSelectAfter("Start command").hasAttribute("disabled")).toBe(true);
-    expect(getSelectAfter("Start command").value).toBe("p1"); // kept, not cleared
+    expect(getSelectAfter("Start command").hasAttribute("disabled")).toBe(false);
+    expect(screen.queryByText(/local environments only/)).toBeNull();
+    const run = screen.getByRole("button", { name: "Run Claude" });
+    await waitFor(() => { expect(run.hasAttribute("disabled")).toBe(false); });
+    fireEvent.click(run);
+
+    await waitFor(() => { expect(onSpawn).toHaveBeenCalledTimes(1); });
+    expect(onSpawn.mock.calls[0]?.[0]).toMatchObject({ env: "far", startCommand: "/plan" });
   });
 });
 

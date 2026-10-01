@@ -18,11 +18,9 @@ export function SpawnFields({ form, hasSessions }: Props): JSX.Element {
   // to 2000 chars with newlines of its own, and a clamped copy of it under the select was three lines
   // of whichever text happened to come first — for a multi-line preset, the command, a blank line, and
   // a cut-off fragment. The full text is on the option's own hover title, which is where it belongs.
-  const startCommandHint: JSX.Element = !form.commandAllowed
-    ? <p className="text-xs text-muted-foreground mt-1">Start commands are available for local environments only — your pick is kept.</p>
-    : form.presets.length === 0
-      ? <p className="text-xs text-muted-foreground mt-1">No start commands on this board — add them in Board settings → Start commands.</p>
-      : <p className="text-xs text-muted-foreground mt-1">Edited in Board settings → Start commands.</p>;
+  const startCommandHint: JSX.Element = form.presets.length === 0
+    ? <p className="text-xs text-muted-foreground mt-1">No start commands on this board — add them in Board settings → Start commands.</p>
+    : <p className="text-xs text-muted-foreground mt-1">Edited in Board settings → Start commands.</p>;
 
   return (
     <div>
@@ -95,7 +93,7 @@ export function SpawnFields({ form, hasSessions }: Props): JSX.Element {
         <div className="min-w-0">
           <label className="block text-xs text-muted-foreground mb-1">Start command</label>
           <select
-            className="w-full bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm"
             // Bound to the RESOLVED preset, not the raw presetId, so the bound value is always one of the
             // options below. Belt-and-braces, NOT a rendering fix: react-dom selects the first
             // non-disabled option when a controlled value matches none, so a stale id would display as
@@ -103,7 +101,6 @@ export function SpawnFields({ form, hasSessions }: Props): JSX.Element {
             // What keeps the three surfaces honest is that single source — and that "no command" stays
             // the FIRST option, since react-dom's fallback is positional (test/spawn-form.test.tsx).
             value={form.selectedPreset?.id ?? ""}
-            disabled={!form.commandAllowed}
             onChange={(e) => { form.choosePreset(e.target.value === "" ? null : e.target.value); }}
           >
             <option value="">no command</option>
