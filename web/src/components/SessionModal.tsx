@@ -12,6 +12,7 @@ import {
   RECONNECT_LIMIT_DELAY_MS, RECONNECT_MAX_MS, reconnectNominalMs, RECONNECT_STABLE_MS,
   RESUME_PROBE_MS, type ResumeTrigger, resumeAction, shouldReconnectAfterClose, shouldRetryAttach,
 } from "../lib/attach";
+import { attachForcedSelectionGuard } from "../lib/forced-selection";
 import { applyStickyCtrl } from "../lib/key-bar";
 import { formatDropInjection, formatPaste } from "../lib/paste";
 import { closeMessage } from "../lib/protocol";
@@ -483,6 +484,7 @@ export function SessionModal({
     // which this modal covers, so the value cannot change while a terminal is on screen. Attached AFTER
     // the touch shim, but order does not matter — this listener is in the capture phase.
     const detachWheelGain = attachWheelGain(el, readTerminalPrefs().scrollSpeed);
+    const detachSelectionGuard = attachForcedSelectionGuard(el);
 
     return () => {
       disposed = true;
@@ -498,6 +500,7 @@ export function SessionModal({
       frameObserver.disconnect();
       detachTouchScroll();
       detachWheelGain();
+      detachSelectionGuard();
       el.removeEventListener("paste", onPasteCapture, true);
       detachTextInput();
       dataSub.dispose();
