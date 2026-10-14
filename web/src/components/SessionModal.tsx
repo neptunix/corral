@@ -12,6 +12,7 @@ import {
   RECONNECT_LIMIT_DELAY_MS, RECONNECT_MAX_MS, reconnectNominalMs, RECONNECT_STABLE_MS,
   RESUME_PROBE_MS, type ResumeTrigger, resumeAction, shouldReconnectAfterClose, shouldRetryAttach,
 } from "../lib/attach";
+import { cleanSelection } from "../lib/copy-selection";
 import { attachForcedSelectionGuard } from "../lib/forced-selection";
 import { applyStickyCtrl } from "../lib/key-bar";
 import { formatDropInjection, formatPaste } from "../lib/paste";
@@ -453,8 +454,13 @@ export function SessionModal({
     // inert (no clipboard addon, SEC-5). Non-empty guard: a selection *clear* fires the same event
     // and must not wipe the clipboard. localhost is a secure context, so navigator.clipboard exists;
     // a rejected write (focus lost mid-drag) is deliberately ignored.
+    let blockSelect = false;
+    // Mirrors xterm: off Mac, ⌥-drag is a column selection, where every row starts at the same column.
+    const onSelectStart = (e: MouseEvent): void => { blockSelect = e.altKey && !/Mac|iPhone|iPad|iPod/.test(navigator.userAgent); };
+    el.addEventListener("mousedown", onSelectStart, true);
     const selSub = term.onSelectionChange(() => {
-      const s = term.getSelection();
+      const startCol = blockSelect ? 0 : (term.getSelectionPosition()?.start.x ?? 0);
+      const s = cleanSelection(term.getSelection(), startCol);
       if (s.length > 0) void navigator.clipboard.writeText(s).catch(() => undefined);
     });
 
@@ -502,6 +508,7 @@ export function SessionModal({
       detachWheelGain();
       detachSelectionGuard();
       el.removeEventListener("paste", onPasteCapture, true);
+      el.removeEventListener("mousedown", onSelectStart, true);
       detachTextInput();
       dataSub.dispose();
       selSub.dispose();
