@@ -274,8 +274,8 @@ permissions or the wrong account. It also resumes in the pane's cwd rather than 
 recorded, which misses a session that ran in a worktree. The setting is read when the server
 starts, so restart the herdr servers after changing it (see [Keep it running](#keep-it-running)).
 
-Recovery goes through corral instead, and how depends on the restart: after one that loses herdr's own state, `fleet:restore` resumes the mirrored sessions; after
-one that keeps it, the panes come back dormant and each is resumed by opening it (see [Fleet mirror &
+Recovery goes through corral instead, and how depends on the restart: after one that loses herdr's
+own state, `fleet:restore` resumes the mirrored sessions; after one that keeps it, the panes come back dormant and each is resumed by opening it (see [Fleet mirror &
 restore](#fleet-mirror--restore)).
 
 ### Upgrading herdr
