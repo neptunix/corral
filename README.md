@@ -56,6 +56,9 @@ command -v jq >/dev/null || echo "install jq first — the live metrics need it"
 # 1. herdr's Claude integration (per machine) — REQUIRED: recaps, live metrics and live session state
 herdr integration install claude
 
+# 1b. turn off herdr's own agent auto-resume (per machine) — it is ON by default; see "Running herdr"
+mkdir -p ~/.config/herdr && $EDITOR ~/.config/herdr/config.toml   # add: [session] resume_agents_on_restore = false
+
 # 2. configure your environments
 mkdir -p ~/.corral
 cp environments.example.json ~/.corral/environments.json
@@ -256,9 +259,23 @@ comes back with it — but **the processes inside those panes do not**. A restar
 same panes running fresh shells. For agent panes, herdr's `[session] resume_agents_on_restore` is what
 relaunches the agent into its conversation session.
 
-**Keep `resume_agents_on_restore` off.** Recovery goes through corral instead, and how depends on the
-restart: after one that loses herdr's own state, `fleet:restore` resumes the mirrored sessions; after
-one that keeps it, the panes come back dormant and each is resumed by opening it (see [Fleet mirror &
+**Turn `resume_agents_on_restore` off — it is on by default**, so this takes an explicit line in
+`~/.config/herdr/config.toml` on every machine that runs a herdr server, remote boxes included:
+
+```toml
+[session]
+resume_agents_on_restore = false
+```
+
+Left on, herdr relaunches each agent pane itself, the first time the pane is opened after a restart,
+with a bare `claude --resume <uuid>`. That command ignores the environment's `spawnCommand`, so a
+wrapper's flags or `CLAUDE_CONFIG_DIR` are lost and the session comes back under the wrong
+permissions or the wrong account. It also resumes in the pane's cwd rather than the one the session
+recorded, which misses a session that ran in a worktree. The setting is read when the server
+starts, so restart the herdr servers after changing it (see [Keep it running](#keep-it-running)).
+
+Recovery goes through corral instead, and how depends on the restart: after one that loses herdr's
+own state, `fleet:restore` resumes the mirrored sessions; after one that keeps it, the panes come back dormant and each is resumed by opening it (see [Fleet mirror &
 restore](#fleet-mirror--restore)).
 
 ### Upgrading herdr
@@ -472,7 +489,8 @@ Each entry describes one place corral can see and spawn sessions into:
   resolves there just as an executable on `PATH` does. Put it in the interactive rc file, not
   `.zprofile` / `.bash_profile` — herdr's `[terminal] shell_mode` defaults to a login shell only on
   macOS. A script is still the more portable choice, and it is what the *Multiple Claude accounts*
-  example below uses.
+  example below uses. herdr's own auto-resume does not know about it — turn that off (see
+  [Running herdr](#keep-it-running)).
   corral now appends `--name <session-name>` — plus `--model <model>` and `--remote-control
   <session-name>` when those are chosen — to every launch except `--resume`, so the command **must
   forward its arguments**. The `exec … claude "$@"` wrapper shown under *Multiple Claude accounts* below
