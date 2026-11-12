@@ -84,6 +84,18 @@ describe("launch — the two halves of the Run button", () => {
     expect(h.onOpenSession).not.toHaveBeenCalled();
   });
 
+  it("the background half carries its own hover bubble instead of a browser title tooltip", async () => {
+    renderModal();
+    await openRunTab();
+    const half = screen.getByRole("button", { name: "Run in background" });
+    expect(half.hasAttribute("title")).toBe(false);
+    const bubble = screen.getByRole("tooltip", { hidden: true });
+    expect(bubble.textContent).toContain("Run in background — no terminal");
+    // The bubble is shown by hovering the half's wrapper, so it must share that wrapper's group.
+    expect(half.parentElement?.className.split(/\s+/)).toContain("group/bg");
+    expect(bubble.className.split(/\s+/)).toContain("group-hover/bg:block");
+  });
+
   it("both halves send the preset selected on the Run tab", async () => {
     const board = makeBoard({ spawnPresets: [{ id: "p1", text: "/plan" }], defaultSpawnPresetId: "p1" });
     const onSpawn = vi.fn((_body: SpawnRequestBody) => Promise.resolve(link));

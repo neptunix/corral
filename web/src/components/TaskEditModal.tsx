@@ -275,18 +275,26 @@ export function TaskEditModal({
                 </button>
               )}
               {tab === "run" && (
-                <div className={`flex rounded overflow-hidden bg-success text-success-foreground ${launching || !spawn.canSpawn ? "opacity-50" : ""}`}>
+                <div className={`flex bg-success text-success-foreground ${launching || !spawn.canSpawn ? "opacity-50" : ""}`}>
                   <button onClick={() => { void handleLaunch("open"); }} disabled={launching || !spawn.canSpawn}
-                    className="px-4 py-2 text-sm hover:bg-success/90">
+                    className="rounded-l px-4 py-2 text-sm enabled:hover:bg-black/15">
                     {saving ? "Saving…" : spawn.spawning ? "Starting…" : "Run Claude"}
                   </button>
-                  <button onClick={() => { void handleLaunch("background"); }} disabled={launching || !spawn.canSpawn}
-                    aria-label="Run in background" title="Run in background — no terminal"
-                    className="px-3 py-2 border-l border-success-foreground/25 hover:bg-success/90">
-                    <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-                      <circle cx="8" cy="8" r="6" /><path d="M8 4.5V8l2.5 1.5" />
-                    </svg>
-                  </button>
+                  {/* Own bubble, not a title attribute: the browser's tooltip waits a second and looks foreign. */}
+                  <span className="relative group/bg">
+                    <button onClick={() => { void handleLaunch("background"); }} disabled={launching || !spawn.canSpawn}
+                      aria-label="Run in background"
+                      className="h-full rounded-r px-3 py-2 border-l border-success-foreground/25 enabled:hover:bg-black/15">
+                      <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                        <circle cx="8" cy="8" r="6" /><path d="M8 4.5V8l2.5 1.5" />
+                      </svg>
+                    </button>
+                    <span role="tooltip"
+                      className="pointer-events-none absolute right-0 bottom-full mb-2 hidden group-hover/bg:block whitespace-nowrap rounded bg-foreground px-2.5 py-1.5 text-xs text-background shadow">
+                      Run in background — no terminal
+                      <span className="absolute right-3 top-full border-[5px] border-transparent border-t-foreground" aria-hidden="true" />
+                    </span>
+                  </span>
                 </div>
               )}
             </div>
