@@ -121,6 +121,24 @@ describe("launch — unsaved edits are saved first", () => {
     await waitFor(() => { expect(h.onClose).toHaveBeenCalledTimes(1); });
     expect(order).toEqual(["save", "spawn"]);
     expect(onSave).toHaveBeenCalledWith({ title: "Edited title", description: "Do it better", status: "c1", priority: "p1" });
+    // The terminal header carries the title that was just saved, not the one the modal opened with.
+    expect(h.onOpenSession).toHaveBeenCalledWith("local", "p1", true, "Edited title");
+  });
+
+  it("does not save when only the card changed underneath an untouched form", async () => {
+    const board = makeBoard();
+    const onSave = vi.fn(() => Promise.resolve());
+    const onSpawn = vi.fn(() => Promise.resolve(link));
+    const onClose = vi.fn();
+    const props = { board, envs, onSave, onDelete: vi.fn(), onSpawn, onOpenSession: vi.fn(), boards: [board], onMove: vi.fn(), onClose };
+    const { rerender } = render(<TaskEditModal task={makeTask()} {...props} />);
+    // Another session rewrote the description while the modal was open.
+    rerender(<TaskEditModal task={makeTask({ description: "rewritten by a session" })} {...props} />);
+    await openRunTab();
+    fireEvent.click(screen.getByRole("button", { name: "Run in background" }));
+
+    await waitFor(() => { expect(onClose).toHaveBeenCalledTimes(1); });
+    expect(onSave).not.toHaveBeenCalled();
   });
 
   it("does not save when nothing changed", async () => {
@@ -151,6 +169,9 @@ describe("launch — unsaved edits are saved first", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run Claude" }));
 
     await waitFor(() => { expect(screen.getByRole("button", { name: "Saving…" }).hasAttribute("disabled")).toBe(true); });
+    expect(screen.getByRole("button", { name: "Run in background" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("tab", { name: "Task" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
     fireEvent.keyDown(window, { key: "Escape" });
     expect(h.onClose).not.toHaveBeenCalled();
   });

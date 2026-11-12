@@ -42,6 +42,9 @@ export function TaskEditModal({
   initialTab, extraPreset,
 }: Props): JSX.Element {
   const [tab, setTab] = useState<Tab>(initialTab ?? "task");
+  // Edits are measured against the card as opened, not the live prop: a session rewriting the card
+  // underneath must not make an untouched form look dirty and get the stale copy saved on launch.
+  const [opened] = useState(task);
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [priority, setPriority] = useState<Priority>(task.priority);
@@ -68,17 +71,17 @@ export function TaskEditModal({
     onSpawn,
     onSpawned: (link, mode) => {
       onClose();
-      if (mode === "open") onOpenSession(link.env, link.paneId, true, task.title);
+      if (mode === "open") onOpenSession(link.env, link.paneId, true, title.trim());
     },
   });
 
   // Save is refused when nothing changed — the operator's actual complaint was hitting Save when they
   // meant to launch a session. BOTH sides are trimmed: handleSave sends the trimmed title, so a stored
   // title with surrounding whitespace (the server accepts one) would otherwise read as changed forever.
-  const dirty = title.trim() !== task.title.trim()
-    || description !== task.description
-    || status !== task.status
-    || priority !== task.priority;
+  const dirty = title.trim() !== opened.title.trim()
+    || description !== opened.description
+    || status !== opened.status
+    || priority !== opened.priority;
   const launching = saving || spawn.spawning;
 
   useEffect(() => {
@@ -103,33 +106,27 @@ export function TaskEditModal({
     el.style.overflowY = wanted > max ? "auto" : "hidden";
   }, [description, tab]);
 
-  async function handleSave(): Promise<void> {
+  async function saveCard(): Promise<boolean> {
     setTaskError(null);
     setSaving(true);
     try {
       await onSave({ title: title.trim(), description, status, priority });
-      onClose();
+      return true;
     } catch (err) {
       setTaskError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setSaving(false);
     }
   }
 
+  async function handleSave(): Promise<void> {
+    if (await saveCard()) onClose();
+  }
+
   // The new session reads the card from the server, so an unsaved description would never reach it.
   async function handleLaunch(mode: LaunchMode): Promise<void> {
-    setTaskError(null);
-    if (dirty) {
-      setSaving(true);
-      try {
-        await onSave({ title: title.trim(), description, status, priority });
-      } catch (err) {
-        setTaskError(err instanceof Error ? err.message : String(err));
-        return;
-      } finally {
-        setSaving(false);
-      }
-    }
+    if (dirty && !(await saveCard())) return;
     await spawn.submit(mode);
   }
 
