@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SpawnFields } from "./SpawnFields";
 import { TaskLogTab } from "./TaskLogTab";
 import type { SpawnRequestBody } from "../lib/api";
-import type { SpawnEnvOption } from "../lib/use-spawn-form";
+import type { LaunchMode, SpawnEnvOption } from "../lib/use-spawn-form";
 import { useSpawnForm } from "../lib/use-spawn-form";
 
 interface Props {
@@ -66,7 +66,10 @@ export function TaskEditModal({
     presets: extraPreset === null || extraPreset === undefined ? board.spawnPresets : [extraPreset, ...board.spawnPresets],
     defaultPresetId: extraPreset?.id ?? board.defaultSpawnPresetId,
     onSpawn,
-    onSpawned: (link) => { onClose(); onOpenSession(link.env, link.paneId, true, task.title); },
+    onSpawned: (link, mode) => {
+      onClose();
+      if (mode === "open") onOpenSession(link.env, link.paneId, true, task.title);
+    },
   });
 
   // Save is refused when nothing changed — the operator's actual complaint was hitting Save when they
@@ -76,6 +79,7 @@ export function TaskEditModal({
     || description !== task.description
     || status !== task.status
     || priority !== task.priority;
+  const launching = saving || spawn.spawning;
 
   useEffect(() => {
     // A save, delete or spawn in flight must not let a dismissal race its refusal — the same reason the
@@ -110,6 +114,23 @@ export function TaskEditModal({
     } finally {
       setSaving(false);
     }
+  }
+
+  // The new session reads the card from the server, so an unsaved description would never reach it.
+  async function handleLaunch(mode: LaunchMode): Promise<void> {
+    setTaskError(null);
+    if (dirty) {
+      setSaving(true);
+      try {
+        await onSave({ title: title.trim(), description, status, priority });
+      } catch (err) {
+        setTaskError(err instanceof Error ? err.message : String(err));
+        return;
+      } finally {
+        setSaving(false);
+      }
+    }
+    await spawn.submit(mode);
   }
 
   async function handleDelete(): Promise<void> {
@@ -155,11 +176,11 @@ export function TaskEditModal({
           {/* Locked while a spawn is in flight: leaving this tab would put Save and Delete — both of
               which close the modal — back within reach of a click that would race the spawn's result. */}
           <div role="tablist" aria-label="Edit task sections" className="flex gap-[3px] p-[3px] bg-muted rounded-lg">
-            <button role="tab" aria-selected={tab === "task"} disabled={spawn.spawning}
+            <button role="tab" aria-selected={tab === "task"} disabled={launching}
               onClick={() => { setTab("task"); }} className={tabClass("task", false)}>Task</button>
-            <button role="tab" aria-selected={tab === "log"} disabled={spawn.spawning}
+            <button role="tab" aria-selected={tab === "log"} disabled={launching}
               onClick={() => { setTab("log"); }} className={tabClass("log", false)}>Log</button>
-            <button role="tab" aria-selected={tab === "run"} disabled={spawn.spawning}
+            <button role="tab" aria-selected={tab === "run"} disabled={launching}
               onClick={() => { setTab("run"); }} className={tabClass("run", true)}>▶ Run Claude</button>
           </div>
         </div>
@@ -200,10 +221,10 @@ export function TaskEditModal({
               <input className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-3"
                 value={title} onChange={(e) => { setTitle(e.target.value); }} />
 
-              <label className="block text-xs text-muted-foreground mb-1">Description</label>
+              <label htmlFor="task-description" className="block text-xs text-muted-foreground mb-1">Description</label>
               {/* resize-none, not resize-y: the effect above owns the height and rewrites it on the next
                   keystroke, so a handle to drag would only promise a size that will not survive typing. */}
-              <textarea ref={descRef} rows={DESC_MIN_ROWS}
+              <textarea id="task-description" ref={descRef} rows={DESC_MIN_ROWS}
                 className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-3 resize-none leading-5"
                 value={description} onChange={(e) => { setDescription(e.target.value); }} />
 
@@ -229,6 +250,9 @@ export function TaskEditModal({
         <div className="flex flex-col gap-2 px-4 sm:px-6 py-4 border-t border-border bg-card">
           {taskError !== null && <p className="text-xs text-destructive">{taskError}</p>}
           {tab === "run" && spawn.error !== null && <p className="text-xs text-destructive whitespace-pre-wrap">{spawn.error}</p>}
+          {tab === "run" && description.trim() === "" && (
+            <p className="text-xs text-warning">The description is empty — the session will start without a task to read.</p>
+          )}
           <div className="flex justify-between items-center gap-3">
             {confirmDelete
               ? <div className="flex gap-2">
@@ -254,10 +278,19 @@ export function TaskEditModal({
                 </button>
               )}
               {tab === "run" && (
-                <button onClick={() => { void spawn.submit(); }} disabled={spawn.spawning || !spawn.canSpawn}
-                  className="px-4 py-2 bg-success text-success-foreground text-sm rounded hover:bg-success/90 disabled:opacity-50">
-                  {spawn.spawning ? "Starting…" : "Run Claude"}
-                </button>
+                <div className={`flex rounded overflow-hidden bg-success text-success-foreground ${launching || !spawn.canSpawn ? "opacity-50" : ""}`}>
+                  <button onClick={() => { void handleLaunch("open"); }} disabled={launching || !spawn.canSpawn}
+                    className="px-4 py-2 text-sm hover:bg-success/90">
+                    {saving ? "Saving…" : spawn.spawning ? "Starting…" : "Run Claude"}
+                  </button>
+                  <button onClick={() => { void handleLaunch("background"); }} disabled={launching || !spawn.canSpawn}
+                    aria-label="Run in background" title="Run in background — no terminal"
+                    className="px-3 py-2 border-l border-success-foreground/25 hover:bg-success/90">
+                    <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+                      <circle cx="8" cy="8" r="6" /><path d="M8 4.5V8l2.5 1.5" />
+                    </svg>
+                  </button>
+                </div>
               )}
             </div>
           </div>

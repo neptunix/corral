@@ -39,8 +39,11 @@ interface Args {
   readonly presets: readonly SpawnPreset[];
   readonly defaultPresetId: string | null;
   readonly onSpawn: (body: SpawnRequestBody) => Promise<SessionLink>;
-  readonly onSpawned: (link: SessionLink) => void; // the modal closes + auto-attaches
+  readonly onSpawned: (link: SessionLink, mode: LaunchMode) => void;
 }
+
+// "open" attaches a terminal to the new session; "background" leaves it to the card's session row.
+export type LaunchMode = "open" | "background";
 
 export interface SpawnForm {
   readonly envs: readonly SpawnEnvOption[];
@@ -63,7 +66,7 @@ export interface SpawnForm {
   readonly canSpawn: boolean;
   readonly spawning: boolean;
   readonly error: string | null;
-  readonly submit: () => Promise<void>;
+  readonly submit: (mode: LaunchMode) => Promise<void>;
 }
 
 /**
@@ -159,7 +162,7 @@ export function useSpawnForm({ envs, presets, defaultPresetId, onSpawn, onSpawne
     rememberSpawnRemoteControl(on);
   }
 
-  async function submit(): Promise<void> {
+  async function submit(mode: LaunchMode): Promise<void> {
     setSpawning(true);
     setSpawnError(null);
     try {
@@ -176,7 +179,7 @@ export function useSpawnForm({ envs, presets, defaultPresetId, onSpawn, onSpawne
         remoteControl: spawnRemoteControl,
         startCommand: selectedPreset?.text ?? null,
       }));
-      onSpawned(link);
+      onSpawned(link, mode);
     } catch (err) {
       setSpawnError(err instanceof Error ? err.message : String(err));
     } finally {
