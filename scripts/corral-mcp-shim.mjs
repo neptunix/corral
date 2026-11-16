@@ -7,6 +7,7 @@ import process from "node:process";
 const SOCKET = process.env.CORRAL_MCP_SOCKET ?? "";
 const PANE_ID = process.env.HERDR_PANE_ID ?? "";
 const RETRY_MS = Number(process.env.CORRAL_MCP_SHIM_RETRY_MS ?? "2000");
+const REPLAY_TIMEOUT_MS = Number(process.env.CORRAL_MCP_SHIM_REPLAY_TIMEOUT_MS ?? "10000");
 const DOWN_MESSAGE = "corral is not connected to this host right now (restarting?) — retry shortly.";
 
 function log(message) {
@@ -117,6 +118,9 @@ function connect() {
       state = "connecting";
       replayId = `corral-shim-replay-${String(++replays)}`;
       sock.write(`${JSON.stringify({ ...parse(initLine), id: replayId })}\n`);
+      const sent = replayId;
+      // A corral that accepts but never answers would otherwise hold Claude's requests forever.
+      setTimeout(() => { if (replayId === sent && conn === sock) sock.destroy(); }, REPLAY_TIMEOUT_MS).unref();
     } else {
       goUp();
     }

@@ -37,7 +37,8 @@ interface Shim {
 
 function startShim(socketPath: string): Shim {
   const proc = spawn(process.execPath, [SHIM], {
-    env: { ...process.env, CORRAL_MCP_SOCKET: socketPath, HERDR_PANE_ID: "w1:p1", CORRAL_MCP_SHIM_RETRY_MS: "50" },
+    env: { ...process.env, CORRAL_MCP_SOCKET: socketPath, HERDR_PANE_ID: "w1:p1", CORRAL_MCP_SHIM_RETRY_MS: "50",
+      CORRAL_MCP_SHIM_REPLAY_TIMEOUT_MS: "300" },
   });
   const seen: Msg[] = [];
   const waiters: { want: (m: Msg) => boolean; resolve: (m: Msg) => void }[] = [];
@@ -257,6 +258,23 @@ describe("corral MCP shim replay", () => {
     await shim.next((m) => m.method === "notifications/tools/list_changed");
     expect(fake.conns).toHaveLength(3);
     expect(shim.leftovers().some(isReplayId)).toBe(false);
+  });
+
+  it("gives up on a replay corral never answers, failing what Claude sent and retrying", async () => {
+    const fake = await fakeCorral((conn, msg, index) => {
+      if (index !== 1) answerAll(conn, msg);
+    });
+    const shim = startShim(fake.socketPath);
+    cleanup.push(() => shim.proc.kill());
+    await handshake(shim);
+
+    fake.conns[0]!.sock.destroy();
+    await waitFor(() => fake.conns[1]?.lines.some((m) => m.method === "initialize") === true);
+    shim.send({ jsonrpc: "2.0", id: 8, method: "tools/list" });
+
+    expect(await shim.next(byId(8))).toMatchObject({ error: { code: -32000 } });
+    await shim.next((m) => m.method === "notifications/tools/list_changed");
+    expect(fake.conns).toHaveLength(3);
   });
 
   it("keeps a multibyte character intact when it is split across chunks, both ways", async () => {
