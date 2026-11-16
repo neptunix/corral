@@ -964,9 +964,12 @@ a shim pointed at a path corral does not serve fails with a connect error naming
 locally — the board is shared. What is scoped is the corral *host*: `corral_spawn` starts sessions
 only on the session's own environment, `corral_session_close` closes only sessions there (a card can
 hold sessions on several environments, including panes on your own machine), and `corral_fleet` is
-not offered at all. When corral is down or the tunnel is not up, the shim exits with "corral is not
-connected" and the session simply has no corral tools — it never serves a stale card. The
-context-pressure and card-empty hook signals stay local-only.
+not offered at all. If corral is down or the tunnel is not up when a session starts, the shim exits
+with "corral is not connected" and that session has no corral tools — it never serves a stale card.
+If the connection drops later (corral restarts, the tunnel blips), the shim stays up: tool calls
+answer "corral is not connected" until it reconnects on its own, so the session needs no restart.
+After updating corral, re-copy the shim — the 🛟 health panel flags a remote copy that no longer
+matches. The context-pressure and card-empty hook signals stay local-only.
 
 The 🛟 health panel checks this surface: `mcp-tunnel` per environment (up or down, read from the
 tunnel loop), and `mcp-registered` / `mcp-shim-installed` per config dir. An environment without
