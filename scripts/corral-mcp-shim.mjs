@@ -36,7 +36,7 @@ let initializedLine = null;
 let replayId = null;
 let replays = 0;
 const queued = [];
-const inFlight = new Map();
+const inFlight = new Set();
 
 function parse(line) {
   try {
@@ -49,12 +49,12 @@ function parse(line) {
 
 const isRequest = (msg) => msg !== null && "id" in msg && typeof msg.method === "string";
 
-function reply(id, error) {
-  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, error })}\n`);
+function replyDown(id) {
+  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32000, message: DOWN_MESSAGE } })}\n`);
 }
 
 function forward(line, msg) {
-  if (isRequest(msg)) inFlight.set(JSON.stringify(msg.id), msg.id);
+  if (isRequest(msg)) inFlight.add(msg.id);
   conn.write(`${line}\n`);
 }
 
@@ -64,7 +64,7 @@ function fromClaude(line) {
   if (msg?.method === "notifications/initialized") initializedLine = line;
   if (state === "up") forward(line, msg);
   else if (state === "connecting") queued.push(line);
-  else if (isRequest(msg)) reply(msg.id, { code: -32000, message: DOWN_MESSAGE });
+  else if (isRequest(msg)) replyDown(msg.id);
 }
 
 function goUp() {
@@ -88,14 +88,14 @@ function fromCorral(line) {
     goUp();
     return;
   }
-  if (msg !== null && "id" in msg && !("method" in msg)) inFlight.delete(JSON.stringify(msg.id));
+  if (msg !== null && "id" in msg && !("method" in msg)) inFlight.delete(msg.id);
   process.stdout.write(`${line}\n`);
 }
 
 function lineReader(onLine) {
   let buf = "";
   return (chunk) => {
-    buf += chunk.toString("utf8");
+    buf += chunk;
     let nl = buf.indexOf("\n");
     while (nl !== -1) {
       const line = buf.slice(0, nl);
@@ -109,6 +109,8 @@ function lineReader(onLine) {
 function connect() {
   const sock = net.createConnection(SOCKET);
   conn = sock;
+  // Decoded as a stream, or a multibyte character split across two chunks turns into U+FFFD.
+  sock.setEncoding("utf8");
   sock.on("connect", () => {
     sock.write(`${JSON.stringify({ v: 1, paneId: PANE_ID, cwd: process.cwd() })}\n`);
     if (everUp && initLine !== null) {
@@ -136,13 +138,14 @@ function connect() {
     if (state !== "down") log("lost the connection to corral — reconnecting.");
     state = "down";
     replayId = null;
-    for (const id of inFlight.values()) reply(id, { code: -32000, message: DOWN_MESSAGE });
+    for (const id of inFlight) replyDown(id);
     inFlight.clear();
-    for (const msg of queued.splice(0).map(parse)) if (isRequest(msg)) reply(msg.id, { code: -32000, message: DOWN_MESSAGE });
+    for (const msg of queued.splice(0).map(parse)) if (isRequest(msg)) replyDown(msg.id);
     setTimeout(connect, RETRY_MS);
   });
 }
 
+process.stdin.setEncoding("utf8");
 process.stdin.on("data", lineReader(fromClaude));
 process.stdin.on("end", () => {
   stdinEnded = true;

@@ -1,4 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -27,6 +30,8 @@ function isMsg(v: unknown): v is Msg {
 interface Shim {
   send(msg: Msg): void;
   next(want: (m: Msg) => boolean): Promise<Msg>;
+  leftovers(): readonly Msg[];
+  exited(): Promise<number | null>;
   readonly proc: ChildProcessWithoutNullStreams;
 }
 
@@ -37,8 +42,9 @@ function startShim(socketPath: string): Shim {
   const seen: Msg[] = [];
   const waiters: { want: (m: Msg) => boolean; resolve: (m: Msg) => void }[] = [];
   let buf = "";
-  proc.stdout.on("data", (chunk: Buffer) => {
-    buf += chunk.toString("utf8");
+  proc.stdout.setEncoding("utf8");
+  proc.stdout.on("data", (chunk: string) => {
+    buf += chunk;
     let nl = buf.indexOf("\n");
     while (nl !== -1) {
       const raw: unknown = JSON.parse(buf.slice(0, nl));
@@ -60,6 +66,10 @@ function startShim(socketPath: string): Shim {
       if (i !== -1) return Promise.resolve(seen.splice(i, 1)[0] ?? {});
       return new Promise((resolve) => waiters.push({ want, resolve }));
     },
+    leftovers: () => seen,
+    exited: () => proc.exitCode === null
+      ? new Promise((r) => proc.once("exit", r))
+      : Promise.resolve(proc.exitCode),
   };
 }
 
@@ -124,5 +134,154 @@ describe("corral MCP shim", () => {
     const code = await new Promise<number | null>((r) => shim.proc.once("exit", r));
     expect(code).toBe(1);
     expect(stderr).toContain("corral is not connected");
+  });
+
+  it("exits once Claude closes stdin, whether corral is connected or not", async () => {
+    const listener = await listen();
+    const up = startShim(listener.socketPath);
+    cleanup.push(() => up.proc.kill());
+    await handshake(up);
+    up.proc.stdin.end();
+    expect(await up.exited()).toBe(0);
+
+    const down = startShim(listener.socketPath);
+    cleanup.push(() => down.proc.kill());
+    await handshake(down);
+    await listener.close();
+    down.send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    await down.next(byId(2));
+    down.proc.stdin.end();
+    expect(await down.exited()).toBe(0);
+  });
+});
+
+interface FakeConn {
+  readonly lines: Msg[];
+  readonly sock: net.Socket;
+}
+
+type Respond = (conn: FakeConn, msg: Msg, index: number) => void;
+
+function answer(sock: net.Socket, id: unknown, result: unknown): void {
+  sock.write(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`);
+}
+
+const INIT_RESULT = { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "fake", version: "0" } };
+
+function answerAll(conn: FakeConn, msg: Msg): void {
+  if (msg.method === "initialize") answer(conn.sock, msg.id, INIT_RESULT);
+  else if (msg.method === "tools/list") answer(conn.sock, msg.id, { tools: [] });
+}
+
+async function waitFor(cond: () => boolean): Promise<void> {
+  while (!cond()) await new Promise((r) => setTimeout(r, 10));
+}
+
+// A recording stand-in for corral's listener, so a test controls what each connection answers.
+async function fakeCorral(respond: Respond): Promise<{ socketPath: string; conns: FakeConn[] }> {
+  const socketPath = path.join(mkdtempSync(path.join(os.tmpdir(), "shim-")), "c.sock");
+  const conns: FakeConn[] = [];
+  const server = net.createServer((sock) => {
+    const conn: FakeConn = { lines: [], sock };
+    const index = conns.push(conn) - 1;
+    let buf = "";
+    sock.setEncoding("utf8");
+    sock.on("data", (chunk: string) => {
+      buf += chunk;
+      let nl = buf.indexOf("\n");
+      while (nl !== -1) {
+        const raw: unknown = JSON.parse(buf.slice(0, nl));
+        buf = buf.slice(nl + 1);
+        if (isMsg(raw)) {
+          conn.lines.push(raw);
+          respond(conn, raw, index);
+        }
+        nl = buf.indexOf("\n");
+      }
+    });
+  });
+  await new Promise<void>((r) => server.listen(socketPath, r));
+  cleanup.push(() => {
+    for (const c of conns) c.sock.destroy();
+    return new Promise((r) => server.close(r));
+  });
+  return { socketPath, conns };
+}
+
+const isReplayId = (m: Msg): boolean => typeof m.id === "string" && m.id.startsWith("corral-shim-replay");
+
+describe("corral MCP shim replay", () => {
+  it("replays the handshake ahead of what Claude sent meanwhile, and keeps the replay's reply from Claude", async () => {
+    let held: unknown = null;
+    const fake = await fakeCorral((conn, msg, index) => {
+      if (index === 1 && msg.method === "initialize") held = msg.id;
+      else answerAll(conn, msg);
+    });
+    const shim = startShim(fake.socketPath);
+    cleanup.push(() => shim.proc.kill());
+    await handshake(shim);
+
+    fake.conns[0]!.sock.destroy();
+    await waitFor(() => held !== null);
+    shim.send({ jsonrpc: "2.0", id: 5, method: "tools/list" });
+    await new Promise((r) => setTimeout(r, 100));
+    answer(fake.conns[1]!.sock, held, INIT_RESULT);
+
+    expect(await shim.next(byId(5))).toHaveProperty("result.tools");
+    const lines = fake.conns[1]!.lines;
+    expect(lines[0]).toEqual({ v: 1, paneId: "w1:p1", cwd: expect.any(String) });
+    expect(lines.slice(1).map((m) => m.method)).toEqual(["initialize", "notifications/initialized", "tools/list"]);
+    expect(lines[1]).toMatchObject({ id: "corral-shim-replay-1", params: INIT.params });
+    expect(shim.leftovers().some(isReplayId)).toBe(false);
+    expect(shim.leftovers().some((m) => m.method === "notifications/tools/list_changed")).toBe(true);
+  });
+
+  it("retries when corral refuses the replay, failing what Claude sent in the meantime", async () => {
+    let refuse: (() => void) | null = null;
+    const fake = await fakeCorral((conn, msg, index) => {
+      if (index === 1 && msg.method === "initialize") {
+        refuse = () => conn.sock.write(`${JSON.stringify({ jsonrpc: "2.0", id: msg.id, error: { code: -32600, message: "nope" } })}\n`);
+      } else answerAll(conn, msg);
+    });
+    const shim = startShim(fake.socketPath);
+    cleanup.push(() => shim.proc.kill());
+    await handshake(shim);
+
+    fake.conns[0]!.sock.destroy();
+    await waitFor(() => refuse !== null);
+    shim.send({ jsonrpc: "2.0", id: 7, method: "tools/list" });
+    await new Promise((r) => setTimeout(r, 100));
+    refuse!();
+
+    expect(await shim.next(byId(7))).toMatchObject({ error: { code: -32000 } });
+    await shim.next((m) => m.method === "notifications/tools/list_changed");
+    expect(fake.conns).toHaveLength(3);
+    expect(shim.leftovers().some(isReplayId)).toBe(false);
+  });
+
+  it("keeps a multibyte character intact when it is split across chunks, both ways", async () => {
+    const TEXT = "Привет, мир";
+    const fake = await fakeCorral((conn, msg) => {
+      if (msg.method !== "tools/call") {
+        answerAll(conn, msg);
+        return;
+      }
+      const bytes = Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { text: TEXT } })}\n`);
+      const cut = bytes.indexOf(Buffer.from("р")) + 1;
+      conn.sock.write(bytes.subarray(0, cut));
+      setTimeout(() => conn.sock.write(bytes.subarray(cut)), 30);
+    });
+    const shim = startShim(fake.socketPath);
+    cleanup.push(() => shim.proc.kill());
+    await handshake(shim);
+
+    const bytes = Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { text: TEXT } })}\n`);
+    const cut = bytes.indexOf(Buffer.from("и")) + 1;
+    shim.proc.stdin.write(bytes.subarray(0, cut));
+    await new Promise((r) => setTimeout(r, 30));
+    shim.proc.stdin.write(bytes.subarray(cut));
+
+    expect(await shim.next(byId(9))).toMatchObject({ result: { text: TEXT } });
+    expect(fake.conns[0]!.lines.at(-1)).toMatchObject({ params: { text: TEXT } });
   });
 });
