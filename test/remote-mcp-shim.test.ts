@@ -114,6 +114,7 @@ describe("corral MCP shim", () => {
     shim.send({ jsonrpc: "2.0", id: 3, method: "tools/list" });
     const listed = await shim.next(byId(3));
     expect(listed).toHaveProperty("result.tools");
+    expect(shim.leftovers().filter((m) => m.id === 1)).toEqual([]);
   });
 
   it("fails a request that was in flight when the connection dropped", async () => {
@@ -235,6 +236,27 @@ describe("corral MCP shim replay", () => {
     expect(lines[1]).toMatchObject({ id: "corral-shim-replay-1", params: INIT.params });
     expect(shim.leftovers().some(isReplayId)).toBe(false);
     expect(shim.leftovers().some((m) => m.method === "notifications/tools/list_changed")).toBe(true);
+
+    // Past the replay deadline: an answered replay must not be torn down by its timer.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(fake.conns).toHaveLength(2);
+    shim.send({ jsonrpc: "2.0", id: 6, method: "tools/list" });
+    expect(await shim.next(byId(6))).toHaveProperty("result.tools");
+  });
+
+  it("does not fail a cancelled request when the connection later drops", async () => {
+    const fake = await fakeCorral(answerAll);
+    const shim = startShim(fake.socketPath);
+    cleanup.push(() => shim.proc.kill());
+    await handshake(shim);
+
+    shim.send({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "slow", arguments: {} } });
+    shim.send({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 4 } });
+    await waitFor(() => fake.conns[0]!.lines.some((m) => m.method === "notifications/cancelled"));
+    fake.conns[0]!.sock.destroy();
+
+    await shim.next((m) => m.method === "notifications/tools/list_changed");
+    expect(shim.leftovers().filter((m) => m.id === 4)).toEqual([]);
   });
 
   it("retries when corral refuses the replay, failing what Claude sent in the meantime", async () => {

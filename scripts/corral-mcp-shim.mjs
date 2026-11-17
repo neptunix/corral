@@ -56,6 +56,8 @@ function replyDown(id) {
 
 function forward(line, msg) {
   if (isRequest(msg)) inFlight.add(msg.id);
+  // A cancelled request never gets a response, so nothing else would clear it.
+  if (msg?.method === "notifications/cancelled") inFlight.delete(msg.params?.requestId);
   conn.write(`${line}\n`);
 }
 
