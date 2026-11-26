@@ -48,7 +48,7 @@ function makeBoardState(overrides: Partial<BoardState> = {}): BoardState {
   };
 }
 
-const preset = { id: "corral-doctor-fix", text: "/corral-doctor fix\n\nfix jq" };
+const preset = { id: "corral-doctor-fix", title: "Fix issues", text: "/corral-doctor fix\n\nfix jq" };
 const description = "corral found 1 issue to fix.";
 
 /**
@@ -88,7 +88,7 @@ describe("Board — fix-issues task creation", () => {
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: /Run Claude/ }).getAttribute("aria-selected")).toBe("true");
     });
-    const option = screen.getByRole("option", { name: "/corral-doctor fix" });
+    const option = screen.getByRole("option", { name: "Fix issues" });
     expect((option as HTMLOptionElement).selected).toBe(true);
   });
 

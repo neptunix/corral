@@ -174,8 +174,7 @@ export function groupChecks(checks: readonly Check[], labelFor: (envId: string) 
 /** The ad-hoc task title and the ephemeral spawn preset the "Fix issues" button seeds — never persisted
  *  to `board.spawnPresets`, only handed to `useSpawnForm` for one modal instance. */
 export const FIX_ISSUES_PRESET_ID = "corral-doctor-fix";
-// Headroom under the server's 2000-char cap on `startCommand` (POST spawn), so composeFixBrief's own
-// truncation never lands exactly on that boundary and clips mid-line.
+// Under START_COMMAND_MAX (the spawn route's `startCommand` cap), with headroom so truncation never clips mid-line.
 const FIX_ISSUES_CHAR_CAP = 1900;
 const FIX_ISSUES_MAX_ROWS = 12;
 
@@ -262,6 +261,6 @@ export function buildFixPreset(
   return {
     title: fixIssuesTitle(problems.length),
     description: brief,
-    preset: { id: FIX_ISSUES_PRESET_ID, text: brief },
+    preset: { id: FIX_ISSUES_PRESET_ID, title: "Fix issues", text: brief },
   };
 }

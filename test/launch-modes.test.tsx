@@ -97,7 +97,7 @@ describe("launch — the two halves of the Run button", () => {
   });
 
   it("both halves send the preset selected on the Run tab", async () => {
-    const board = makeBoard({ spawnPresets: [{ id: "p1", text: "/plan" }], defaultSpawnPresetId: "p1" });
+    const board = makeBoard({ spawnPresets: [{ id: "p1", title: "", text: "/plan" }], defaultSpawnPresetId: "p1" });
     const onSpawn = vi.fn((_body: SpawnRequestBody) => Promise.resolve(link));
     renderModal({ board, onSpawn });
     await openRunTab();

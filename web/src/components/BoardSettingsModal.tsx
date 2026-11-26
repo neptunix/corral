@@ -2,9 +2,12 @@ import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } f
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { BoardFrame, Column, SpawnPreset } from "@shared/board-schema";
-import { ColumnTypeSchema, defaultColumnId, generateColumnId, generateSpawnPresetId } from "@shared/board-schema";
+import { ColumnTypeSchema, defaultColumnId, generateColumnId, generateSpawnPresetId, presetLabel } from "@shared/board-schema";
 import type { CSSProperties, JSX } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { StartCommandEditor } from "./StartCommandEditor";
+import { startCommandProblem } from "../lib/start-command";
 
 interface Props {
   readonly board: BoardFrame;
@@ -90,6 +93,10 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
   const [newColLabel, setNewColLabel] = useState("");
   const [presets, setPresets] = useState<SpawnPreset[]>([...board.spawnPresets]);
   const [defaultPresetId, setDefaultPresetId] = useState<string | null>(board.defaultSpawnPresetId);
+  const [editing, setEditing] = useState<{ readonly preset: SpawnPreset; readonly isNew: boolean } | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -103,11 +110,25 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
     // A save or delete in flight must not let a dismissal race its refusal — landing on an unmounted
     // modal would drop the server's message and the user's edits with no sign the save failed.
     function onKey(e: KeyboardEvent): void {
-      if (e.key === "Escape" && !saving && !deleting) onClose();
+      if (e.key === "Escape" && !saving && !deleting && editing === null) onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("keydown", onKey); };
-  }, [onClose, saving, deleting]);
+  }, [onClose, saving, deleting, editing]);
+
+  // A property, not a JSX attribute: React 18 does not know `inert`. Keeps focus (and Escape) in the editor.
+  useEffect(() => {
+    const open = editing !== null;
+    for (const el of [bodyRef.current, footerRef.current]) if (el !== null) el.inert = open;
+    if (open) return;
+    openerRef.current?.focus();
+    openerRef.current = null;
+  }, [editing]);
+
+  function openEditor(preset: SpawnPreset, isNew: boolean): void {
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setEditing({ preset, isNew });
+  }
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   // Recomputed from live modal state, so the tag follows both a drag AND a type change. Never pinned
@@ -153,11 +174,9 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
     );
   }
 
-  function addPreset(): void {
-    setPresets((prev) => [...prev, { id: generateSpawnPresetId(), text: "" }]);
-  }
-  function setPresetText(id: string, text: string): void {
-    setPresets((prev) => prev.map((p) => p.id === id ? { ...p, text } : p));
+  function commitPreset(next: SpawnPreset): void {
+    setPresets((prev) => prev.some((p) => p.id === next.id) ? prev.map((p) => p.id === next.id ? next : p) : [...prev, next]);
+    setEditing(null);
   }
   function removePreset(id: string): void {
     setPresets((prev) => prev.filter((p) => p.id !== id));
@@ -169,23 +188,12 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
     // too-many presets) — they can't cover a 503/404/dropped connection, so a rejected `onSave` below
     // is what makes those visible, through this same saveError channel, instead of silent.
     if (label.trim() === "") { setSaveError("A board needs a name."); return; }
-    // Blank rows are dropped rather than rejected: an empty row is "I changed my mind", not an error.
-    const kept = presets.filter((p) => p.text.trim() !== "").map((p) => ({ ...p, text: p.text.trim() }));
-    // Says what the accepted format IS, and does not claim the offending text is a flag: the rule is a
-    // narrow whitelist (`/` + ASCII alphanumerics), so it also refuses non-Latin, "#" and "@" openings
-    // that are nothing like a flag. Mirrors the server's wording (server/api.ts).
-    const bad = kept.find((p) => !/^[/A-Za-z0-9]/.test(p.text));
-    if (bad !== undefined) {
-      setSaveError(`A start command must begin with "/" or an ASCII letter or digit — "${bad.text.slice(0, 24)}" does not. The first character is restricted so a leading "-" cannot reach the CLI as a flag.`);
-      return;
+    for (const p of presets) {
+      const problem = startCommandProblem(p.text);
+      if (problem !== null) { setSaveError(`"${presetLabel(p).slice(0, 40)}": ${problem}`); return; }
     }
-    const tooLong = kept.find((p) => p.text.length > 2000);
-    if (tooLong !== undefined) {
-      setSaveError(`A start command is limited to 2000 characters — "${tooLong.text.slice(0, 24)}…" is ${String(tooLong.text.length)}.`);
-      return;
-    }
-    if (kept.length > 20) {
-      setSaveError(`At most 20 start commands per board — remove ${String(kept.length - 20)}.`);
+    if (presets.length > 20) {
+      setSaveError(`At most 20 start commands per board — remove ${String(presets.length - 20)}.`);
       return;
     }
     // Duplicate ids cannot happen through this UI (generateSpawnPresetId mints each row), so there is
@@ -197,8 +205,8 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
         label: label.trim(),
         columns,
         description: description.trim(),
-        spawnPresets: kept,
-        defaultSpawnPresetId: kept.some((p) => p.id === defaultPresetId) ? defaultPresetId : null,
+        spawnPresets: presets,
+        defaultSpawnPresetId: presets.some((p) => p.id === defaultPresetId) ? defaultPresetId : null,
       });
       onClose();
     } catch (err) {
@@ -223,10 +231,15 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" role="dialog" aria-modal="true"
-      onClick={() => { if (!saving && !deleting) onClose(); }}>
+      onClick={() => { if (!saving && !deleting && editing === null) onClose(); }}>
       <div className="bg-card border border-border rounded-lg w-[min(560px,92vw)] max-h-[80vh] flex flex-col" onClick={(e) => { e.stopPropagation(); }}>
+        {/* First child: the footer must stay the card's last child (footer-layout test). */}
+        {editing !== null && (
+          <StartCommandEditor preset={editing.preset} isNew={editing.isNew}
+            onDone={commitPreset} onCancel={() => { setEditing(null); }} />
+        )}
         <h2 className="text-foreground font-semibold px-6 pt-6 pb-4">Board settings</h2>
-        <div className="px-6 overflow-y-auto flex-1">
+        <div ref={bodyRef} className="px-6 overflow-y-auto flex-1">
         <label className="block text-xs text-muted-foreground mb-1">Board name</label>
         <input className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-4"
           value={label} onChange={(e) => { setLabel(e.target.value); }} />
@@ -265,35 +278,51 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
           <button onClick={addColumn} className="px-3 py-1 bg-muted text-foreground text-sm rounded hover:bg-muted/80">Add</button>
         </div>
         <label className="block text-xs text-muted-foreground mb-2">Start commands</label>
-        <div className="space-y-2 mb-3">
-          {presets.map((p) => (
-            <div key={p.id}>
-              <div className="flex gap-2 items-center">
+        <div className="space-y-1 mb-3">
+          {presets.map((p) => {
+            const label = presetLabel(p);
+            const titled = p.title.trim() !== "";
+            return (
+              <div key={p.id} className="flex gap-2 items-center">
                 <input type="radio" name="defaultSpawnPreset" className="accent-primary" title="Default for new sessions"
+                  aria-label={`Default for new sessions: ${label}`}
                   checked={defaultPresetId === p.id} onChange={() => { setDefaultPresetId(p.id); }} />
-                <input className="flex-1 bg-background border border-border rounded px-3 py-2 h-[38px] text-foreground text-sm placeholder:text-muted-foreground/70"
-                  placeholder="/plan" value={p.text} onChange={(e) => { setPresetText(p.id, e.target.value); }} />
-                <button onClick={() => { removePreset(p.id); }}
+                <button type="button" onClick={() => { openEditor(p, false); }}
+                  className="flex-1 min-w-0 text-left rounded px-2 py-1.5 hover:bg-muted">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className={`truncate text-foreground ${titled ? "text-sm font-medium" : "text-xs font-mono"}`}>{label}</span>
+                    {defaultPresetId === p.id && (
+                      <span className="shrink-0 text-[10px] px-1.5 rounded bg-primary/20 text-primary">default</span>
+                    )}
+                    {!p.text.trim().startsWith("/") && (
+                      <span className="shrink-0 text-[10px] px-1.5 rounded border border-border text-muted-foreground">plain message</span>
+                    )}
+                  </span>
+                  {titled && (
+                    <span className="block truncate font-mono text-[11px] text-muted-foreground">{p.text.replace(/\s+/g, " ").trim()}</span>
+                  )}
+                </button>
+                <button type="button" onClick={() => { openEditor(p, false); }}
+                  aria-label={`Edit start command ${label}`} title="Edit"
+                  className="px-2 text-muted-foreground hover:text-foreground text-sm">✎</button>
+                <button type="button" onClick={() => { removePreset(p.id); }}
+                  aria-label={`Remove start command ${label}`}
                   className="px-2 text-destructive hover:text-destructive/80 text-sm">×</button>
               </div>
-              {/* Per-ROW, not a passive hint under the list: a plain-text first message is a legitimate
-                  preset, so this informs rather than blocks — but only if it says WHICH row. */}
-              {p.text.trim() !== "" && !p.text.trim().startsWith("/") && (
-                <p className="text-[11px] text-muted-foreground pl-6 mt-0.5">sent as a plain message, not a slash command</p>
-              )}
-            </div>
-          ))}
+            );
+          })}
           <label className="flex gap-2 items-center text-xs text-muted-foreground">
             <input type="radio" name="defaultSpawnPreset" className="accent-primary"
               checked={defaultPresetId === null} onChange={() => { setDefaultPresetId(null); }} />
             no default command
           </label>
         </div>
-        <button onClick={addPreset} className="px-3 py-1 mb-4 bg-muted text-foreground text-sm rounded hover:bg-muted/80">Add start command</button>
+        <button onClick={() => { openEditor({ id: generateSpawnPresetId(), title: "", text: "" }, true); }}
+          className="px-3 py-1 mb-4 bg-muted text-foreground text-sm rounded hover:bg-muted/80">Add start command</button>
         </div>
         {/* Its own row above the button row: the error must always render at full width, never
             squeezed by a `shrink-0` sibling down to a zero-width box that overlaps the buttons. */}
-        <div className="flex flex-col gap-2 px-6 py-4 border-t border-border bg-card">
+        <div ref={footerRef} className="flex flex-col gap-2 px-6 py-4 border-t border-border bg-card">
           {saveError !== null && <p className="text-xs text-destructive">{saveError}</p>}
           <div className="flex items-center gap-2 flex-wrap">
             {confirmDelete ? (

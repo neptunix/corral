@@ -1,3 +1,4 @@
+import { START_COMMAND_MAX } from "@shared/board-schema";
 import type { Snapshot } from "@shared/schema";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
@@ -129,6 +130,17 @@ describe("POST spawn with a startCommand", () => {
     });
     expect(seen[0]?.briefFallback).toBeDefined();
     expect(seen[0]?.briefFallback).not.toContain("handoff");
+  });
+
+  it("accepts a start command at the board's own cap and refuses one past it", async () => {
+    const a = app();
+    const tid = await makeBoardAndTask(a);
+    const post = (startCommand: string) => a.request(`/api/boards/test/tasks/${tid}/spawn`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ env: "work-local", repo: "repo", startCommand }),
+    });
+    expect((await post(`/${"x".repeat(START_COMMAND_MAX - 1)}`)).status).toBe(200);
+    expect((await post(`/${"x".repeat(START_COMMAND_MAX)}`)).status).toBe(400);
   });
 
   it("rejects a whitespace-only start command and one beginning with a dash", async () => {

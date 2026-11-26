@@ -1,4 +1,4 @@
-import { DEFAULT_COLUMNS } from "@shared/board-schema";
+import { DEFAULT_COLUMNS, START_COMMAND_MAX, START_COMMAND_TITLE_MAX } from "@shared/board-schema";
 import type { SessionRow, Snapshot } from "@shared/schema";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
@@ -2545,13 +2545,23 @@ describe("PATCH /api/boards/:bid — start-command presets", () => {
     const app = makeApi(tmpDir);
     await makeBoard(app);
     expect((await patch(app, { spawnPresets: [{ id: "p1", text: "   " }] })).status).toBe(400);
-    expect((await patch(app, { spawnPresets: [{ id: "p1", text: `/${"x".repeat(2000)}` }] })).status).toBe(400);
+    expect((await patch(app, { spawnPresets: [{ id: "p1", text: `/${"x".repeat(START_COMMAND_MAX)}` }] })).status).toBe(400);
+    expect((await patch(app, { spawnPresets: [{ id: "p1", text: `/${"x".repeat(START_COMMAND_MAX - 1)}` }] })).status).toBe(200);
+    expect((await patch(app, { spawnPresets: [{ id: "p1", text: "/plan", title: "t".repeat(START_COMMAND_TITLE_MAX + 1) }] })).status).toBe(400);
     expect((await patch(app, {
       spawnPresets: Array.from({ length: 21 }, (_, i) => ({ id: `p${String(i)}`, text: "/plan" })),
     })).status).toBe(400);
     expect((await patch(app, {
       spawnPresets: [{ id: "dup", text: "/plan" }, { id: "dup", text: "/review" }],
     })).status).toBe(400);
+  });
+
+  it("stores a trimmed title, and an empty one when a client omits it", async () => {
+    const app = makeApi(tmpDir);
+    await makeBoard(app);
+    await patch(app, { spawnPresets: [{ id: "p1", text: "/plan", title: "  Plan feature  " }, { id: "p2", text: "/review" }] });
+    const board = await (await app.request("/api/boards/presets")).json() as { spawnPresets: { title: string }[] };
+    expect(board.spawnPresets.map((p) => p.title)).toEqual(["Plan feature", ""]);
   });
 
   it("resolves a defaultSpawnPresetId matching no preset to no default", async () => {
