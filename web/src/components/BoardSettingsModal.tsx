@@ -4,7 +4,7 @@ import { CSS } from "@dnd-kit/utilities";
 import type { BoardFrame, Column, SpawnPreset } from "@shared/board-schema";
 import { ColumnTypeSchema, defaultColumnId, generateColumnId, generateSpawnPresetId, presetLabel } from "@shared/board-schema";
 import type { CSSProperties, JSX } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { StartCommandEditor } from "./StartCommandEditor";
 import { startCommandProblem } from "../lib/start-command";
@@ -94,6 +94,9 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
   const [presets, setPresets] = useState<SpawnPreset[]>([...board.spawnPresets]);
   const [defaultPresetId, setDefaultPresetId] = useState<string | null>(board.defaultSpawnPresetId);
   const [editing, setEditing] = useState<{ readonly preset: SpawnPreset; readonly isNew: boolean } | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -112,6 +115,20 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("keydown", onKey); };
   }, [onClose, saving, deleting, editing]);
+
+  // A property, not a JSX attribute: React 18 does not know `inert`. Keeps focus (and Escape) in the editor.
+  useEffect(() => {
+    const open = editing !== null;
+    for (const el of [bodyRef.current, footerRef.current]) if (el !== null) el.inert = open;
+    if (open) return;
+    openerRef.current?.focus();
+    openerRef.current = null;
+  }, [editing]);
+
+  function openEditor(preset: SpawnPreset, isNew: boolean): void {
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setEditing({ preset, isNew });
+  }
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   // Recomputed from live modal state, so the tag follows both a drag AND a type change. Never pinned
@@ -222,7 +239,7 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
             onDone={commitPreset} onCancel={() => { setEditing(null); }} />
         )}
         <h2 className="text-foreground font-semibold px-6 pt-6 pb-4">Board settings</h2>
-        <div className="px-6 overflow-y-auto flex-1">
+        <div ref={bodyRef} className="px-6 overflow-y-auto flex-1">
         <label className="block text-xs text-muted-foreground mb-1">Board name</label>
         <input className="w-full bg-background border border-border rounded px-3 py-2 text-foreground text-sm mb-4"
           value={label} onChange={(e) => { setLabel(e.target.value); }} />
@@ -270,7 +287,7 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
                 <input type="radio" name="defaultSpawnPreset" className="accent-primary" title="Default for new sessions"
                   aria-label={`Default for new sessions: ${label}`}
                   checked={defaultPresetId === p.id} onChange={() => { setDefaultPresetId(p.id); }} />
-                <button type="button" onClick={() => { setEditing({ preset: p, isNew: false }); }}
+                <button type="button" onClick={() => { openEditor(p, false); }}
                   className="flex-1 min-w-0 text-left rounded px-2 py-1.5 hover:bg-muted">
                   <span className="flex items-center gap-2 min-w-0">
                     <span className={`truncate text-foreground ${titled ? "text-sm font-medium" : "text-xs font-mono"}`}>{label}</span>
@@ -285,7 +302,7 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
                     <span className="block truncate font-mono text-[11px] text-muted-foreground">{p.text.replace(/\s+/g, " ").trim()}</span>
                   )}
                 </button>
-                <button type="button" onClick={() => { setEditing({ preset: p, isNew: false }); }}
+                <button type="button" onClick={() => { openEditor(p, false); }}
                   aria-label={`Edit start command ${label}`} title="Edit"
                   className="px-2 text-muted-foreground hover:text-foreground text-sm">✎</button>
                 <button type="button" onClick={() => { removePreset(p.id); }}
@@ -300,12 +317,12 @@ export function BoardSettingsModal({ board, onSave, onDelete, onClose }: Props):
             no default command
           </label>
         </div>
-        <button onClick={() => { setEditing({ preset: { id: generateSpawnPresetId(), title: "", text: "" }, isNew: true }); }}
+        <button onClick={() => { openEditor({ id: generateSpawnPresetId(), title: "", text: "" }, true); }}
           className="px-3 py-1 mb-4 bg-muted text-foreground text-sm rounded hover:bg-muted/80">Add start command</button>
         </div>
         {/* Its own row above the button row: the error must always render at full width, never
             squeezed by a `shrink-0` sibling down to a zero-width box that overlaps the buttons. */}
-        <div className="flex flex-col gap-2 px-6 py-4 border-t border-border bg-card">
+        <div ref={footerRef} className="flex flex-col gap-2 px-6 py-4 border-t border-border bg-card">
           {saveError !== null && <p className="text-xs text-destructive">{saveError}</p>}
           <div className="flex items-center gap-2 flex-wrap">
             {confirmDelete ? (

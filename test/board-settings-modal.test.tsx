@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import type { BoardFrame, Task } from "@shared/board-schema";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { START_COMMAND_MAX, type BoardFrame, type Task } from "@shared/board-schema";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BoardSettingsModal } from "../web/src/components/BoardSettingsModal";
@@ -111,15 +111,63 @@ describe("BoardSettingsModal — start-command editor", () => {
     expect(saved?.[1]).toMatchObject({ title: "Review PR", text: "/review\nRead the card first." });
   });
 
+  function cancelEditor(): void {
+    fireEvent.click(within(screen.getAllByRole("dialog")[1]!).getByRole("button", { name: "Cancel" }));
+  }
+
   it("adds nothing when a new command is cancelled", async () => {
-    const { onSave } = open();
+    const { onSave, onClose } = open();
     fireEvent.click(screen.getByRole("button", { name: "Add start command" }));
     fireEvent.change(screen.getByLabelText(/^Text/), { target: { value: "/abandoned" } });
-    fireEvent.click(screen.getAllByRole("button", { name: "Cancel" })[0]!);
+    cancelEditor();
+    expect(screen.queryByLabelText(/^Text/)).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => { expect(onSave).toHaveBeenCalledTimes(1); });
     expect(onSave.mock.calls[0]?.[0].spawnPresets).toEqual([{ id: "p1", title: "", text: "/plan" }]);
+  });
+
+  it("discards an edit to an existing command on Cancel", async () => {
+    const { onSave } = open();
+    fireEvent.click(screen.getByRole("button", { name: "Edit start command /plan" }));
+    fireEvent.change(screen.getByLabelText(/^Text/), { target: { value: "/changed" } });
+    cancelEditor();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => { expect(onSave).toHaveBeenCalledTimes(1); });
+    expect(onSave.mock.calls[0]?.[0].spawnPresets).toEqual([{ id: "p1", title: "", text: "/plan" }]);
+  });
+
+  it("focuses the text on open and returns focus to the opener on close", () => {
+    open();
+    const opener = screen.getByRole("button", { name: "Edit start command /plan" });
+    opener.focus();
+    fireEvent.click(opener);
+    expect(document.activeElement).toBe(screen.getByLabelText(/^Text/));
+
+    fireEvent.keyDown(screen.getByLabelText(/^Text/), { key: "Escape" });
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("refuses Save for a stored command the server would reject, naming it", () => {
+    const onSave = vi.fn((_patch: SavePatch) => Promise.resolve());
+    const board = makeBoard({ spawnPresets: [{ id: "p1", title: "Long", text: `/${"x".repeat(START_COMMAND_MAX)}` }] });
+    render(<BoardSettingsModal board={board} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByText(/"Long": A start command is limited to/)).toBeDefined();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("refuses Save past 20 commands", () => {
+    const onSave = vi.fn((_patch: SavePatch) => Promise.resolve());
+    const spawnPresets = Array.from({ length: 21 }, (_, i) => ({ id: `p${String(i)}`, title: "", text: "/plan" }));
+    render(<BoardSettingsModal board={makeBoard({ spawnPresets })} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByText(/At most 20 start commands per board — remove 1/)).toBeDefined();
+    expect(onSave).not.toHaveBeenCalled();
   });
 
   it("keeps Done disabled for blank text and names the accepted format for a non-Latin opening", () => {

@@ -15,10 +15,7 @@ const REMOTE_CONTROL_HINT = "Connects this session outward to claude.ai, so it's
  * The spawn form's fields only. The submit button lives in TaskEditModal's footer — see useSpawnForm.
  */
 export function SpawnFields({ form, hasSessions }: Props): JSX.Element {
-  // The hint says where presets are edited; it does NOT preview the selected one. A preset's text runs
-  // to thousands of chars with newlines of its own, and a clamped copy of it under the select was three lines
-  // of whichever text happened to come first — for a multi-line preset, the command, a blank line, and
-  // a cut-off fragment. The full text is on the option's own hover title, which is where it belongs.
+  // No preview of the selected preset: its text is long and multi-line; the option's title holds it.
   const startCommandHint: JSX.Element = form.presets.length === 0
     ? <p className="text-xs text-muted-foreground mt-1">No start commands on this board — add them in Board settings → Start commands.</p>
     : <p className="text-xs text-muted-foreground mt-1">Edited in Board settings → Start commands.</p>;

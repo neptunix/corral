@@ -18,11 +18,7 @@ export function StartCommandEditor({ preset, isNew, onDone, onCancel }: Props): 
   const textRef = useRef<HTMLTextAreaElement>(null);
   const headingId = useId();
 
-  useEffect(() => {
-    const opener = document.activeElement;
-    textRef.current?.focus();
-    return () => { if (opener instanceof HTMLElement) opener.focus(); };
-  }, []);
+  useEffect(() => { textRef.current?.focus(); }, []);
 
   const trimmed = text.trim();
   const problem = startCommandProblem(text);
@@ -35,7 +31,7 @@ export function StartCommandEditor({ preset, isNew, onDone, onCancel }: Props): 
   return (
     // No backdrop dismissal: a stray click must not discard a long command.
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]"
-      role="dialog" aria-modal="true" aria-labelledby={headingId}
+      role="dialog" aria-modal="true" aria-labelledby={headingId} tabIndex={-1}
       onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }}>
       <div className="bg-card border border-border rounded-lg w-[min(560px,92vw)] max-h-[90vh] flex flex-col">
         <h2 id={headingId} className="text-foreground font-semibold px-6 pt-6 pb-4">
