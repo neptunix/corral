@@ -12,6 +12,9 @@ import {
   nowSecs,
   slugifyBoardId,
   sortTasks,
+  START_COMMAND_FIRST_CHAR,
+  START_COMMAND_MAX,
+  START_COMMAND_TITLE_MAX,
   toBoardFrame,
 } from "@shared/board-schema.ts";
 import { descriptionRev } from "@shared/description-rev.ts";
@@ -204,12 +207,12 @@ const CreateBoardBodySchema = z.object({
 // oversight — do not widen it to a `-` blacklist without re-taking it. The message says what IS
 // accepted, because a refusal that only names the flag hazard reads as a bug for every input that is
 // not a flag.
-const START_COMMAND_FIRST_CHAR = /^[/A-Za-z0-9]/;
 const START_COMMAND_FIRST_CHAR_MESSAGE =
   'must begin with "/" or an ASCII letter or digit — the first character is restricted so a leading "-" cannot reach the CLI as a flag';
 const SpawnPresetPatchSchema = z.object({
   id: z.string().min(1),
-  text: z.string().trim().min(1).max(2000).regex(START_COMMAND_FIRST_CHAR, START_COMMAND_FIRST_CHAR_MESSAGE),
+  text: z.string().trim().min(1).max(START_COMMAND_MAX).regex(START_COMMAND_FIRST_CHAR, START_COMMAND_FIRST_CHAR_MESSAGE),
+  title: z.string().trim().max(START_COMMAND_TITLE_MAX).default(""),
 });
 
 const PatchBoardBodySchema = z.object({
@@ -1366,7 +1369,7 @@ export function createApi(opts: {
       // constant as the preset boundary, deliberately narrower than the hazard (see it for why); this
       // route reports every bad field as a bare `invalid "<field>"`, and a preset that reaches here has
       // already been through the readable refusal at PATCH.
-      startCommand: z.string().trim().min(1).max(2000).regex(START_COMMAND_FIRST_CHAR).optional(),
+      startCommand: z.string().trim().min(1).max(START_COMMAND_MAX).regex(START_COMMAND_FIRST_CHAR).optional(),
       // The WHOLE session name, used verbatim as the herdr tab label, the card's link name and
       // `claude --name`. No card slug is prefixed — see composeSessionName.
       // Bound on the RAW input; `slugify` caps the result at NAME_MAX regardless. 64 used to refuse

@@ -88,12 +88,12 @@ describe("spawn form — start-command preset select", () => {
   // first, and must mean "send nothing": promote a preset above it (or drop it) and a vanished default
   // silently becomes a real command the operator never picked, on a control that looks correctly filled.
   it("falls back to a first option that means 'no command' when the board's presets change under it", () => {
-    const { rerender } = renderModal(makeBoard({ spawnPresets: [{ id: "p1", text: "/plan" }], defaultSpawnPresetId: "p1" }));
+    const { rerender } = renderModal(makeBoard({ spawnPresets: [{ id: "p1", title: "", text: "/plan" }], defaultSpawnPresetId: "p1" }));
     openRunTab();
     expect(getSelectAfter("Start command").value).toBe("p1");
 
     // Simulate the board's presets changing under an open modal (an SSE update) — "p1" is gone.
-    const board2 = makeBoard({ spawnPresets: [{ id: "p2", text: "/other" }], defaultSpawnPresetId: "p1" });
+    const board2 = makeBoard({ spawnPresets: [{ id: "p2", title: "", text: "/other" }], defaultSpawnPresetId: "p1" });
     rerender(
       <TaskEditModal task={makeTask()} board={board2} envs={envs} onSave={vi.fn()} onDelete={vi.fn()}
         onSpawn={vi.fn()} onOpenSession={vi.fn()} boards={[board2]} onMove={vi.fn()} onClose={vi.fn()} />,
@@ -108,9 +108,9 @@ describe("spawn form — start-command preset select", () => {
 
   it("keeps the hint text and the spawned startCommand in agreement with what the select displays", async () => {
     const onSpawn = vi.fn((_body: SpawnRequestBody) => Promise.resolve(link));
-    const { rerender } = renderModal(makeBoard({ spawnPresets: [{ id: "p1", text: "/plan" }], defaultSpawnPresetId: "p1" }), onSpawn);
+    const { rerender } = renderModal(makeBoard({ spawnPresets: [{ id: "p1", title: "", text: "/plan" }], defaultSpawnPresetId: "p1" }), onSpawn);
     openRunTab();
-    const board2 = makeBoard({ spawnPresets: [{ id: "p2", text: "/other" }], defaultSpawnPresetId: "p1" });
+    const board2 = makeBoard({ spawnPresets: [{ id: "p2", title: "", text: "/other" }], defaultSpawnPresetId: "p1" });
     rerender(
       <TaskEditModal task={makeTask()} board={board2} envs={envs} onSave={vi.fn()} onDelete={vi.fn()}
         onSpawn={onSpawn} onOpenSession={vi.fn()} boards={[board2]} onMove={vi.fn()} onClose={vi.fn()} />,
@@ -261,7 +261,7 @@ describe("spawn form — why a target cannot be picked", () => {
 
   it("sends the start command to a remote env", async () => {
     const onSpawn = vi.fn((_body: SpawnRequestBody) => Promise.resolve(link));
-    renderModal(makeBoard({ spawnPresets: [{ id: "p1", text: "/plan" }], defaultSpawnPresetId: "p1" }), onSpawn);
+    renderModal(makeBoard({ spawnPresets: [{ id: "p1", title: "", text: "/plan" }], defaultSpawnPresetId: "p1" }), onSpawn);
     openRunTab();
     fireEvent.change(getSelectAfter("Environment"), { target: { value: "far" } });
 

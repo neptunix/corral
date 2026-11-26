@@ -1,3 +1,4 @@
+import { presetLabel } from "@shared/board-schema";
 import type { JSX } from "react";
 
 import type { SpawnForm } from "../lib/use-spawn-form";
@@ -15,7 +16,7 @@ const REMOTE_CONTROL_HINT = "Connects this session outward to claude.ai, so it's
  */
 export function SpawnFields({ form, hasSessions }: Props): JSX.Element {
   // The hint says where presets are edited; it does NOT preview the selected one. A preset's text runs
-  // to 2000 chars with newlines of its own, and a clamped copy of it under the select was three lines
+  // to thousands of chars with newlines of its own, and a clamped copy of it under the select was three lines
   // of whichever text happened to come first — for a multi-line preset, the command, a blank line, and
   // a cut-off fragment. The full text is on the option's own hover title, which is where it belongs.
   const startCommandHint: JSX.Element = form.presets.length === 0
@@ -105,10 +106,8 @@ export function SpawnFields({ form, hasSessions }: Props): JSX.Element {
           >
             <option value="">no command</option>
             {form.presets.map((p) => (
-              // First line only, ellipsized by the select's own width; the FULL text is the title —
-              // a preset may hold 2000 characters and the default is pre-selected, so the ordinary
-              // flow is one click on text the operator has not read to the end.
-              <option key={p.id} value={p.id} title={p.text}>{p.text.split("\n")[0] ?? ""}</option>
+              // The full text is the hover title: the default is pre-selected, so the text behind the label is easy to miss.
+              <option key={p.id} value={p.id} title={p.text}>{presetLabel(p)}</option>
             ))}
           </select>
           {startCommandHint}

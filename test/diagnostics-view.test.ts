@@ -1,3 +1,4 @@
+import { START_COMMAND_MAX } from "@shared/board-schema";
 import type { Check, DiagnosticsSnapshot } from "@shared/diagnostics-schema";
 import { computeRollup, emptyDiagnostics } from "@shared/diagnostics-schema";
 import { describe, expect, it } from "vitest";
@@ -279,13 +280,13 @@ describe("buildFixPreset", () => {
     expect(at("[Work (local)] [fatal] fatal row")).toBeGreaterThan(-1);
   });
 
-  it("never exceeds the server's 2000-char startCommand cap, however many rows are outstanding", () => {
+  it("never exceeds the server's startCommand cap, however many rows are outstanding", () => {
     const rows = Array.from({ length: 40 }, (_, i) => check({
       key: `k${String(i)}`, state: "problem", title: `problem number ${String(i)}`,
       detail: "some detail text that takes up real space in the composed brief",
     }));
     const text = buildFixPreset(rows, label)?.preset.text ?? "";
-    expect(text.length).toBeLessThan(2000);
+    expect(text.length).toBeLessThan(START_COMMAND_MAX);
     expect(text).toContain("more — open the Health panel for the rest");
   });
 });

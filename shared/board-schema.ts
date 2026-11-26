@@ -173,7 +173,13 @@ export const TaskFrameSchema = TaskSchema.omit({ log: true });
 export const SpawnPresetSchema = z.object({
   id: z.string().min(1),
   text: z.string(),
+  title: z.string().default(""),
 });
+
+export const START_COMMAND_MAX = 3000;
+export const START_COMMAND_TITLE_MAX = 80;
+// Why a whitelist and not a "-" blacklist: see the PATCH boundary in server/api.ts.
+export const START_COMMAND_FIRST_CHAR = /^[/A-Za-z0-9]/;
 
 export const BoardSchema = z.object({
   id: z.string(),
@@ -287,6 +293,11 @@ export type LogEntry = z.infer<typeof LogEntrySchema>;
 export type Board = z.infer<typeof BoardSchema>;
 export type BoardFrame = z.infer<typeof BoardFrameSchema>;
 export type SpawnPreset = z.infer<typeof SpawnPresetSchema>;
+
+export function presetLabel(p: SpawnPreset): string {
+  const title = p.title.trim();
+  return title !== "" ? title : (p.text.trim().split("\n")[0] ?? "");
+}
 export type LiveSessionData = z.infer<typeof LiveSessionDataSchema>;
 export type EnrichedSessionLink = z.infer<typeof EnrichedSessionLinkSchema>;
 export type EnrichedTask = z.infer<typeof EnrichedTaskSchema>;

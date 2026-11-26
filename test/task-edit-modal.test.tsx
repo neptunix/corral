@@ -251,23 +251,23 @@ describe("TaskEditModal — Task / Run Claude tabs", () => {
 
 describe("TaskEditModal — fix-issues extraPreset", () => {
   it("pre-selects the ephemeral preset ahead of the board's own, and never persists it", () => {
-    const board = makeBoard({ spawnPresets: [{ id: "p1", text: "/existing" }], defaultSpawnPresetId: "p1" });
-    const extraPreset = { id: "corral-doctor-fix", text: "/corral-doctor fix\n\nfix jq" };
+    const board = makeBoard({ spawnPresets: [{ id: "p1", title: "", text: "/existing" }], defaultSpawnPresetId: "p1" });
+    const extraPreset = { id: "corral-doctor-fix", title: "Fix issues", text: "/corral-doctor fix\n\nfix jq" };
     render(<TaskEditModal task={makeTask()} board={board} {...baseProps}
       envs={[{ id: "e1", label: "Env1", reachable: true }]}
       onSave={vi.fn()} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()}
       initialTab="run" extraPreset={extraPreset} />);
-    const option = screen.getByRole("option", { name: "/corral-doctor fix" });
+    const option = screen.getByRole("option", { name: "Fix issues" });
     expect((option as HTMLOptionElement).selected).toBe(true);
-    expect(board.spawnPresets).toEqual([{ id: "p1", text: "/existing" }]);
+    expect(board.spawnPresets).toEqual([{ id: "p1", title: "", text: "/existing" }]);
   });
 
   it("falls back to the board's own default preset when extraPreset is absent", () => {
-    const board = makeBoard({ spawnPresets: [{ id: "p1", text: "/existing" }], defaultSpawnPresetId: "p1" });
+    const board = makeBoard({ spawnPresets: [{ id: "p1", title: "", text: "/existing" }], defaultSpawnPresetId: "p1" });
     render(<TaskEditModal task={makeTask()} board={board} {...baseProps}
       envs={[{ id: "e1", label: "Env1", reachable: true }]}
       onSave={vi.fn()} onDelete={vi.fn()} boards={[board]} onClose={vi.fn()} initialTab="run" />);
-    expect(screen.queryByRole("option", { name: "/corral-doctor fix" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Fix issues" })).toBeNull();
     const option = screen.getByRole("option", { name: "/existing" });
     expect((option as HTMLOptionElement).selected).toBe(true);
   });

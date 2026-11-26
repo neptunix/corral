@@ -14,7 +14,7 @@ function makeBoard(overrides: Partial<BoardFrame> = {}): BoardFrame {
     columns: [{ id: "c1", label: "To do" }, { id: "c2", label: "Done", type: "closed" }],
     tasks: [],
     description: "",
-    spawnPresets: [{ id: "p1", text: "/plan" }],
+    spawnPresets: [{ id: "p1", title: "", text: "/plan" }],
     defaultSpawnPresetId: null,
     ...overrides,
   };
@@ -43,7 +43,9 @@ describe("BoardSettingsModal — save error channel", () => {
 
     fireEvent.change(screen.getByDisplayValue("Original name"), { target: { value: "Edited name" } });
     fireEvent.change(screen.getByDisplayValue("To do"), { target: { value: "Doing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Edit start command /plan" }));
     fireEvent.change(screen.getByDisplayValue("/plan"), { target: { value: "/replan" } });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => { expect(screen.getByText("Boards service unavailable")).toBeDefined(); });
@@ -53,7 +55,7 @@ describe("BoardSettingsModal — save error channel", () => {
     // Edits survived the refusal — none of the three fields reverted to their pre-edit value.
     expect(screen.getByDisplayValue("Edited name")).toBeDefined();
     expect(screen.getByDisplayValue("Doing")).toBeDefined();
-    expect(screen.getByDisplayValue("/replan")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Edit start command /replan" })).toBeDefined();
   });
 
   it("waits for the onSave promise it was given to resolve before closing — never closes eagerly", async () => {
@@ -89,53 +91,79 @@ describe("BoardSettingsModal — save error channel", () => {
 // `onSave.mock.calls` types as an empty tuple and the assertions below have nothing to read.
 type SavePatch = Parameters<React.ComponentProps<typeof BoardSettingsModal>["onSave"]>[0];
 
-describe("BoardSettingsModal — start-command rows", () => {
-  it("drops rows left blank rather than sending them into the server's min(1) refusal", async () => {
-    const onSave = vi.fn((_patch: SavePatch) => Promise.resolve());
-    render(<BoardSettingsModal board={makeBoard()} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+describe("BoardSettingsModal — start-command editor", () => {
+  function open(onSave = vi.fn((_patch: SavePatch) => Promise.resolve()), onClose = vi.fn()) {
+    render(<BoardSettingsModal board={makeBoard()} onSave={onSave} onDelete={vi.fn()} onClose={onClose} />);
+    return { onSave, onClose };
+  }
 
-    // Two rows the operator abandoned: one untouched, one holding only whitespace. "Add start command"
-    // is the ordinary way to get them — the row appears empty and there is no way to un-add it but ×.
+  it("adds a titled multi-line command through the editor and saves it", async () => {
+    const { onSave } = open();
     fireEvent.click(screen.getByRole("button", { name: "Add start command" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add start command" }));
-    const rows = screen.getAllByPlaceholderText("/plan");
-    expect(rows).toHaveLength(3);
-    fireEvent.change(rows[2]!, { target: { value: "   " } });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "  Review PR " } });
+    fireEvent.change(screen.getByLabelText(/^Text/), { target: { value: "/review\nRead the card first.\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
+    expect(screen.getByRole("button", { name: "Edit start command Review PR" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
     await waitFor(() => { expect(onSave).toHaveBeenCalledTimes(1); });
-    expect(onSave.mock.calls[0]?.[0].spawnPresets).toEqual([{ id: "p1", text: "/plan" }]);
+    const saved = onSave.mock.calls[0]?.[0].spawnPresets;
+    expect(saved?.[1]).toMatchObject({ title: "Review PR", text: "/review\nRead the card first." });
   });
 
-  // The rule is a narrow whitelist, so most of what it refuses is nothing like a flag. The refusal the
-  // operator reads has to name the accepted format instead of asserting a cause that isn't true of the
-  // text in front of them — that mis-explanation is what sent a reviewer looking for a bug here.
-  it("refuses a non-Latin opening by naming the accepted format, not by calling the text a flag", () => {
-    const onSave = vi.fn((_patch: SavePatch) => Promise.resolve());
-    render(<BoardSettingsModal board={makeBoard()} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+  it("adds nothing when a new command is cancelled", async () => {
+    const { onSave } = open();
+    fireEvent.click(screen.getByRole("button", { name: "Add start command" }));
+    fireEvent.change(screen.getByLabelText(/^Text/), { target: { value: "/abandoned" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "Cancel" })[0]!);
 
-    fireEvent.change(screen.getByDisplayValue("/plan"), { target: { value: "Продолжи работу" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => { expect(onSave).toHaveBeenCalledTimes(1); });
+    expect(onSave.mock.calls[0]?.[0].spawnPresets).toEqual([{ id: "p1", title: "", text: "/plan" }]);
+  });
 
+  it("keeps Done disabled for blank text and names the accepted format for a non-Latin opening", () => {
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Add start command" }));
+    const done = screen.getByRole("button", { name: "Done" });
+    fireEvent.change(screen.getByLabelText(/^Text/), { target: { value: "   " } });
+    expect(done.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.change(screen.getByLabelText(/^Text/), { target: { value: "Продолжи работу" } });
+    expect(done.hasAttribute("disabled")).toBe(true);
     expect(screen.getByText(/must begin with "\/" or an ASCII letter or digit/)).toBeDefined();
-    expect(screen.queryByText(/would reach the CLI as a flag, not as the prompt/)).toBeNull();
-    expect(onSave).not.toHaveBeenCalled();
   });
 
-  it("clears a default that pointed at a row dropped for being blank", async () => {
-    const onSave = vi.fn((_patch: SavePatch) => Promise.resolve());
-    render(<BoardSettingsModal board={makeBoard()} onSave={onSave} onDelete={vi.fn()} onClose={vi.fn()} />);
+  it("Escape in the editor closes only the editor and keeps the settings edits", () => {
+    const { onClose } = open();
+    fireEvent.change(screen.getByDisplayValue("Original name"), { target: { value: "Edited name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Edit start command /plan" }));
+    fireEvent.keyDown(screen.getByLabelText(/^Text/), { key: "Escape" });
+    fireEvent.keyDown(window, { key: "Escape" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Add start command" }));
-    // Radios in order: the existing "/plan" row, the blank row just added, then "no default command".
-    fireEvent.click(screen.getAllByRole("radio")[1]!);
+    expect(screen.queryByLabelText(/^Text/)).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 
+  it("ignores window Escape and the settings backdrop while the editor is open", () => {
+    const { onClose } = open();
+    fireEvent.click(screen.getByRole("button", { name: "Edit start command /plan" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    const dialogs = screen.getAllByRole("dialog");
+    fireEvent.click(dialogs[0]!);
+    fireEvent.click(dialogs[1]!);
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/^Text/)).toBeDefined();
+  });
+
+  it("clears the default when its command is removed", async () => {
+    const { onSave } = open();
+    fireEvent.click(screen.getByRole("radio", { name: "Default for new sessions: /plan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove start command /plan" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => { expect(onSave).toHaveBeenCalledTimes(1); });
-    // A default id that survived into the patch would dangle: the server resolves it to null anyway,
-    // so disagreeing here would just make the saved board differ from what the form showed.
     expect(onSave.mock.calls[0]?.[0].defaultSpawnPresetId).toBeNull();
   });
 });
